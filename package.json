@@ -1,0 +1,19 @@
+{
+  "name": "component-ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.2",
+    "vite": "^6.2.0"
+  },
+  "dependencies": {
+    "@bytecodealliance/jco": "^1.10.2",
+    "@bytecodealliance/preview2-shim": "^0.17.2"
+  }
+}
