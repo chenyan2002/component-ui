@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 
 export default defineConfig({
+    base: '/component-ui/',
     plugins: [
         {
             name: 'server-wasm',

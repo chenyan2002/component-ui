@@ -23,6 +23,7 @@ async function loadComponent(component: Uint8Array) {
   console.log(output);
   return output;
 }
+const customImportCode = {};
 async function instantiate(transpiled) {
   const imports = {
     "@bytecodealliance/preview2-shim/cli": await import('@bytecodealliance/preview2-shim/cli'),
@@ -49,34 +50,69 @@ async function instantiate(transpiled) {
   console.log(mod);
   const res = mod.calculate.evalExpression('add', 1, 2);
   console.log(res);
+  const logs = document.getElementById('logs') as HTMLElement;
   logs.innerHTML = `<div>Calling calculate.evalExpression('add', 1, 2)</div><div>Result: ${res}</div>`;
 }
 
-async function fetchWasm(): Promise<Uint8Array> {
-  const url = new URL('calculator.wasm', window.location.origin);
+async function loadWasm(file: string): Promise<Uint8Array> {
+  const url = new URL(import.meta.env.BASE_URL + file, window.location.origin);
   return new Uint8Array(await(await fetch(url)).arrayBuffer());
 }
+async function fetchWasm(file: File): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
 
-const app = document.querySelector<HTMLDivElement>('#app')!;
-const customImportCode = {};
-const exports = document.createElement('div');
-exports.className = 'frame';
-exports.innerHTML = '<p>This component exports the following interfaces</p>';
-app.appendChild(exports);
-const imports = document.createElement('div');
-imports.className = 'frame';
-imports.innerHTML = '<p>This component imports the following interfaces</p>';
-app.appendChild(imports);
-const button = document.createElement('button');
-button.innerText = 'Instantiate';
-app.appendChild(button);
-const logs = document.createElement('div');
-app.appendChild(logs);
+    reader.onload = (event) => {
+      if (event.target && event.target.result) {
+        resolve(new Uint8Array(event.target.result as ArrayBuffer));
+      } else {
+        reject(new Error("Failed to read file."));
+      }
+    };
 
-(async () => {
-  const wasm = await fetchWasm();
-  const transpiled = await loadComponent(wasm);
-  for (const pkg of transpiled.exports) { 
+    reader.onerror = (error) => {
+      reject(error);
+    };
+
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function init() {
+  const selector = document.querySelector<HTMLSelectElement>('#preselectedWasmFile')!;
+  selector.addEventListener('change', async (event) => {
+    const target = event.target as HTMLSelectElement;
+    const wasm = await loadWasm(target.value);
+    const transpiled = await loadComponent(wasm);
+    initUIAfterLoad(transpiled);
+  });
+  const fileInput = document.getElementById('wasmFileInput') as HTMLInputElement;
+  fileInput.addEventListener('change', async (event) => {
+    const target = event.target as HTMLInputElement;
+    if (target.files && target.files.length > 0) {
+      const file = target.files[0];
+      try {
+        const wasm = await fetchWasm(file);
+        const transpiled = await loadComponent(wasm);
+        initUIAfterLoad(transpiled);
+      } catch (error) {
+        console.error('Error loading WASM:', error);
+      }
+    }
+  });
+}
+function initUIAfterLoad(transpiled) {
+  const app = document.querySelector<HTMLDivElement>('#app')!;
+  app.innerHTML = `
+  <div id="exports" class="frame"><p>This component exports the following interfaces</p></div>
+  <div id="imports" class="frame"><p>This component imports the following interfaces</p></div>
+  <div><button id="instantiate">Instantiate</button></div>
+  <div id="logs"></div>
+  `;
+  const exports = document.getElementById('exports') as HTMLElement;
+  const imports = document.getElementById('imports') as HTMLElement;
+  const button = document.getElementById('instantiate') as HTMLButtonElement;
+  for (const pkg of transpiled.exports) {
     const div = document.createElement('div');
     exports.appendChild(div);
     div.innerHTML = `<li>${pkg}</li>`;
@@ -101,4 +137,6 @@ app.appendChild(logs);
   button.onclick = async () => {
     await instantiate(transpiled);
   };
-})();
+}
+
+init();
