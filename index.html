@@ -7,7 +7,14 @@
     <title>Vite + TS</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div><select id="preselectedWasmFile">
+      <option value="" disabled selected>Select a Wasm file</option>
+      <option value="calculator.wasm">Calculator</option>
+      <option value="lists.wasm">Lists</option>
+      </select></div>
+      <div>Or, upload a Wasm file: <input type="file" id="wasmFileInput" accept=".wasm" /></div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
