@@ -53,7 +53,7 @@ async function instantiate(transpiled) {
 }
 
 async function fetchWasm(): Promise<Uint8Array> {
-  const url = new URL('calculator.wasm', window.location.origin);
+  const url = new URL(import.meta.env.BASE_URL + 'calculator.wasm', window.location.origin);
   return new Uint8Array(await(await fetch(url)).arrayBuffer());
 }
 
