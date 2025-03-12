@@ -1,31 +1,30 @@
 import './style.css'
-import { transpile } from '@bytecodealliance/jco';
+import { generate, Transpiled } from '@bytecodealliance/jco/component';
 
 async function loadComponent(component: Uint8Array) {
   const name = 'test';
-  const map = [
-    ['wasi:cli/*', '@bytecodealliance/preview2-shim/cli#*'],
-    ['wasi:clocks/*', '@bytecodealliance/preview2-shim/clocks#*'],
-    ['wasi:filesystem/*', '@bytecodealliance/preview2-shim/filesystem#*'],
-    ['wasi:http/*', '@bytecodealliance/preview2-shim/http#*'],
-    ['wasi:io/*', '@bytecodealliance/preview2-shim/io#*'],
-    ['wasi:random/*', '@bytecodealliance/preview2-shim/random#*'],
-    ['wasi:sockets/*', '@bytecodealliance/preview2-shim/sockets#*']
-  ];
-  const output = await transpile(component, {
+  const output = await generate(component, {
     name,
     noNodejsCompat: true,
     noTypescript: true,
     base64Cutoff: 1000000,
     instantiation: { tag: 'async' },
-    map,
+    map: [
+      ['wasi:cli/*', '@bytecodealliance/preview2-shim/cli#*'],
+      ['wasi:clocks/*', '@bytecodealliance/preview2-shim/clocks#*'],
+      ['wasi:filesystem/*', '@bytecodealliance/preview2-shim/filesystem#*'],
+      ['wasi:http/*', '@bytecodealliance/preview2-shim/http#*'],
+      ['wasi:io/*', '@bytecodealliance/preview2-shim/io#*'],
+      ['wasi:random/*', '@bytecodealliance/preview2-shim/random#*'],
+      ['wasi:sockets/*', '@bytecodealliance/preview2-shim/sockets#*']
+    ],
   });
   console.log(output);
   return output;
 }
-const customImportCode = {};
-async function instantiate(transpiled) {
-  const imports = {
+const customImportCode: Record<string, HTMLTextAreaElement> = {};
+async function instantiate(transpiled: Transpiled) {
+  const imports: Record<string, any> = {
     "@bytecodealliance/preview2-shim/cli": await import('@bytecodealliance/preview2-shim/cli'),
     "@bytecodealliance/preview2-shim/filesystem": await import('@bytecodealliance/preview2-shim/filesystem'),
     "@bytecodealliance/preview2-shim/io": await import('@bytecodealliance/preview2-shim/io'),    
@@ -38,11 +37,11 @@ async function instantiate(transpiled) {
       imports[pkg] = mod;
     }
   }
-  const source = transpiled.files.find(([file, _]) => file === 'test.js')[1];
+  const source = transpiled.files.find(([file, _]) => file === 'test.js')![1];
   const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
   const { instantiate } = await import(/* @vite-ignore */url);
   let mod = await instantiate((core, imports) => {
-    const file = transpiled.files.find((f) => f[0] === core)[1];
+    const file = transpiled.files.find((f) => f[0] === core)![1];
     const mod = WebAssembly.compile(file);
     //console.log(`compiled ${core} (imports ${imports})`);
     return mod;
@@ -54,54 +53,48 @@ async function instantiate(transpiled) {
   logs.innerHTML = `<div>Calling calculate.evalExpression('add', 1, 2)</div><div>Result: ${res}</div>`;
 }
 
-async function loadWasm(file: string): Promise<Uint8Array> {
-  const url = new URL(import.meta.env.BASE_URL + file, window.location.origin);
-  return new Uint8Array(await(await fetch(url)).arrayBuffer());
+async function fetchWasm(file: string | File): Promise<Uint8Array> {
+  if (file instanceof File) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target && event.target.result) {
+          resolve(new Uint8Array(event.target.result as ArrayBuffer));
+        } else {
+          reject(new Error("Failed to read file."));
+        }
+      };
+      reader.onerror = (error) => {
+        reject(error);
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  } else {
+    const url = new URL(import.meta.env.BASE_URL + file, window.location.origin);
+    return new Uint8Array(await(await fetch(url)).arrayBuffer());
+  }
 }
-async function fetchWasm(file: File): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.onload = (event) => {
-      if (event.target && event.target.result) {
-        resolve(new Uint8Array(event.target.result as ArrayBuffer));
-      } else {
-        reject(new Error("Failed to read file."));
-      }
-    };
-
-    reader.onerror = (error) => {
-      reject(error);
-    };
-
-    reader.readAsArrayBuffer(file);
-  });
+async function processWasm(file: string | File) {
+  const wasm = await fetchWasm(file);
+  const transpiled = await loadComponent(wasm);
+  initUIAfterLoad(transpiled);
 }
-
 function init() {
   const selector = document.querySelector<HTMLSelectElement>('#preselectedWasmFile')!;
   selector.addEventListener('change', async (event) => {
     const target = event.target as HTMLSelectElement;
-    const wasm = await loadWasm(target.value);
-    const transpiled = await loadComponent(wasm);
-    initUIAfterLoad(transpiled);
+    processWasm(target.value);
   });
   const fileInput = document.getElementById('wasmFileInput') as HTMLInputElement;
   fileInput.addEventListener('change', async (event) => {
     const target = event.target as HTMLInputElement;
     if (target.files && target.files.length > 0) {
       const file = target.files[0];
-      try {
-        const wasm = await fetchWasm(file);
-        const transpiled = await loadComponent(wasm);
-        initUIAfterLoad(transpiled);
-      } catch (error) {
-        console.error('Error loading WASM:', error);
-      }
+      processWasm(file);
     }
   });
 }
-function initUIAfterLoad(transpiled) {
+function initUIAfterLoad(transpiled: Transpiled) {
   const app = document.querySelector<HTMLDivElement>('#app')!;
   app.innerHTML = `
   <div id="exports" class="frame"><p>This component exports the following interfaces</p></div>
