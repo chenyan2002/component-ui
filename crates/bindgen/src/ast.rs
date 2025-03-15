@@ -10,7 +10,7 @@ struct Bindgen<'a> {
 impl<'a> Bindgen<'a> {
     fn pp_ty(&mut self, ty: &Type) {
         match ty {
-            Type::U32 => self.src.push_str("U32"),
+            Type::U32 => self.src.push_str("IDL.U32"),
             Type::Id(id) => {
                 let ty = &self.resolve.types[*id];
                 if let Some(name) = &ty.name {
@@ -29,11 +29,8 @@ impl<'a> Bindgen<'a> {
             let ty = &self.resolve.types[*id];
             match &ty.kind {
                 TypeDefKind::Enum(enum_) => {
-                    self.src.push_str("Enum([");
-                    for case in &enum_.cases {
-                        self.src.push_str(&format!("'{}'", case.name));
-                        self.src.push_str(", ");
-                    }
+                    self.src.push_str("IDL.Enum([");
+                    self.src.push_str(&enum_.cases.iter().map(|e| format!("'{}'", e.name)).collect::<Vec<_>>().join(", "));
                     self.src.push_str("])");
                 }
                 _ => self.src.push_str(&format!("{ty:?}")),
@@ -43,7 +40,7 @@ impl<'a> Bindgen<'a> {
     }
     fn func(&mut self, func: &Function, _is_async: bool) {
         let out_name = func.item_name();
-        self.src.push_str(&format!("'{out_name}': Func(["));
+        self.src.push_str(&format!("'{out_name}': IDL.Func(["));
         for (name, ty) in &func.params {
             self.src.push_str(&format!("['{name}', "));
             self.pp_ty(ty);
@@ -59,7 +56,7 @@ impl<'a> Bindgen<'a> {
     fn interface(&mut self, resolve: &Resolve, name: &str, id: InterfaceId) {
         let id_name = resolve.id_of(id).unwrap_or_else(|| name.to_string());
         self.type_defs(id);
-        self.src.push_str(&format!("export default Interface('{id_name}', {{\n"));
+        self.src.push_str(&format!("export default IDL.Interface('{id_name}', {{\n"));
         let iface = &resolve.interfaces[id];
         for (_, func) in &iface.functions {
             self.func(func, true);
@@ -76,6 +73,7 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
     };
     let world = &resolve.worlds[id];
     let mut bindgen = Bindgen { src: Source::default(), resolve: &resolve };
+    bindgen.src.push_srt("import * as IDL from './wit'\n");
     for (name, export) in &world.exports {
         match export {
             WorldItem::Function(f) => {

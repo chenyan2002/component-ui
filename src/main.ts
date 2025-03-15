@@ -1,5 +1,7 @@
 import './style.css'
 import { generate, Transpiled } from '@bytecodealliance/jco/component';
+import { renderInput } from './ui';
+import IDL from './example';
 
 async function loadComponent(component: Uint8Array) {
   const name = 'test';
@@ -94,22 +96,43 @@ function init() {
     }
   });
 }
+function renderExports() {
+  const exports = document.getElementById('exports') as HTMLElement;
+  for (const [name, func] of Object.entries(IDL._fields)) {
+    const item = document.createElement('li');
+    exports.appendChild(item);
+    item.innerHTML = `<li>${name}: (${func._args.map((a) => a[1].name).join(', ')}) -> (${func._ret.map((a) => a.name).join(', ')})</li>`;
+
+    const inputContainer = document.createElement('div');
+    item.appendChild(inputContainer);
+    const inputs: InputBox[] = [];
+    func._args.forEach(([_, arg]) => {
+      const inputbox = renderInput(arg);
+      inputs.push(inputbox);
+      inputbox.render(inputContainer);
+    });
+  }
+}
 function initUIAfterLoad(transpiled: Transpiled) {
   const app = document.querySelector<HTMLDivElement>('#app')!;
   app.innerHTML = `
-  <div id="exports" class="frame"><p>This component exports the following interfaces</p></div>
   <div id="imports" class="frame"><p>This component imports the following interfaces</p></div>
   <div><button id="instantiate">Instantiate</button></div>
+  <div class="frame">
+   <p>This component exports the following interfaces</p>
+   <ul id="exports"></ul>
+  </div>
   <div id="logs"></div>
   `;
   const exports = document.getElementById('exports') as HTMLElement;
   const imports = document.getElementById('imports') as HTMLElement;
   const button = document.getElementById('instantiate') as HTMLButtonElement;
-  for (const pkg of transpiled.exports) {
+  renderExports();
+  /*for (const pkg of transpiled.exports) {
     const div = document.createElement('div');
     exports.appendChild(div);
     div.innerHTML = `<li>${pkg}</li>`;
-  }
+  }*/
   for (const pkg of transpiled.imports) {
     const block = document.createElement('div');
     imports.appendChild(block);
