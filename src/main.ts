@@ -27,7 +27,7 @@ async function loadComponent(component: Uint8Array) {
   const binding = generateAst(component);
   console.log(binding);
   const url = URL.createObjectURL(new Blob([binding], { type: 'text/javascript' }));
-  IDL = await import(url);
+  IDL = await import(/* @vite-ignore */url);
   IDL = IDL.Factory({IDL: WIT});
   return output;
 }
