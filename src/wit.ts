@@ -14,6 +14,9 @@ export abstract class Visitor<D, R> {
     public visitVariant(t: VariantClass, fields: Record<string, Type>, data: D): R {
         return this.visitType(t, data);
     }
+    public visitEnum(t: EnumClass, tags: Array<string>, data: D): R {
+        return this.visitType(t, data);
+    }
     public visitFunc(t: FuncClass, data: D): R {
         return this.visitType(t, data);
     }
@@ -56,6 +59,17 @@ export class VariantClass extends Type<Record<string, Type>> {
         return `variant { ${Object.entries(this._fields).map(([k, v]) => `${k}: ${v.name}`).join(', ')} }`;
     }
 }
+export class EnumClass extends Type<Array<string>> {
+    constructor(public readonly _tags: Array<string>) {
+        super();
+    }
+    public accept<D, R>(v: Visitor<D, R>, d: D): R {
+        return v.visitEnum(this, this._tags, d);
+    }
+    get name(): string {
+        return `enum { ${this._tags.join(', ')} }`;
+    }
+}
 export class FuncClass extends Type<any> {
     constructor(public readonly _args: Array<[string, Type]>, public readonly _ret: Type[]) {
         super();
@@ -82,8 +96,10 @@ export class InterfaceClass extends Type<any> {
 export const Null = new NullClass();
 export const U32 = new FixedNatClass(32);
 export const U64 = new FixedNatClass(64);
-export function Enum(tags: Array<string>): VariantClass {
-    const fields = Object.fromEntries(tags.map((tag) => [tag, Null]));
+export function Enum(tags: Array<string>): EnumClass {
+    return new EnumClass(tags);
+}
+export function Variant(fields: Record<string, Type>): VariantClass {
     return new VariantClass(fields);
 }
 export function Func(args: Array<[string, Type]>, ret: Type[]): FuncClass {

@@ -18,6 +18,9 @@ export const tupleForm = (components: IDL.Type[], config: Partial<UI.FormConfig>
 export const variantForm = (fields: Array<[string, IDL.Type]>, config: Partial<UI.FormConfig>) => {
   return new UI.VariantForm(fields, { ...FormConfig, ...config });
 };
+export const enumForm = (tags: Array<string>, config: Partial<UI.FormConfig>) => {
+  return new UI.EnumForm(tags, { ...FormConfig, ...config });
+};
 export const optForm = (ty: IDL.Type, config: Partial<UI.FormConfig>) => {
   return new UI.OptionForm(ty, { ...FormConfig, ...config });
 };
@@ -48,6 +51,18 @@ export class Render extends IDL.Visitor<null, InputBox> {
         const form = variantForm(flist, config);
         return inputBox(t, { form });
     }
+    public visitEnum(t: IDL.EnumClass, tags: Array<string>, d: null): InputBox {
+        const select = document.createElement('select');
+        for (const tag of tags) {
+          const option = new Option(tag);
+          select.add(option);
+        }
+        select.selectedIndex = -1;
+        select.classList.add('open');
+        const config: Partial<UI.FormConfig> = { open: select, event: 'change' };
+        const form = enumForm(tags, config);
+        return inputBox(t, { form });
+    }
 }
 class Parse extends IDL.Visitor<string, any> {
     public visitNull(t: IDL.NullClass, v: string): null {
@@ -73,7 +88,7 @@ class Random extends IDL.Visitor<string, any> {
         if (t._bits <= 32) {
           return x;
         } else {
-          return BigInt(v);
+          return BigInt(x);
         }
     }
     private generateNumber(signed: boolean): number {

@@ -110,8 +110,9 @@ function renderExports() {
     const inputContainer = document.createElement('div');
     item.appendChild(inputContainer);
     const inputs: InputBox[] = [];
-    func._args.forEach(([_, arg]) => {
+    func._args.forEach(([name, arg]) => {
       const inputbox = renderInput(arg);
+      inputbox.label = `${name} `;
       inputs.push(inputbox);
       inputbox.render(inputContainer);
     });
@@ -143,9 +144,10 @@ function renderExports() {
   }
 }
 async function callAndRender(iface_name: string, method:string, args: any[]) {
-  console.log(method, args);
+  const logs = document.getElementById('logs') as HTMLElement;
+  logs.innerHTML += `<div>${method}(${args.join(', ')})</div>`;
   const result = await instantiated[iface_name][method](...args);
-  console.log(result);
+  logs.innerHTML += `<div>Result: ${result}</div>`;
 }
 function initUIAfterLoad(transpiled: Transpiled) {
   const app = document.querySelector<HTMLDivElement>('#app')!;

@@ -205,6 +205,25 @@ export interface ParseConfig {
       return v;
     }
   }
+  export class EnumForm extends InputForm {
+    constructor(public fields: Array<string>, public ui: FormConfig) {
+      super(ui);
+    }
+    public generateForm(): void {
+      this.form = [this.ui.render(IDL.Null)];
+    }
+    public parse(config: ParseConfig): string {
+      const select = this.ui.open as HTMLSelectElement;
+      if (config.random && select.selectedIndex === -1) {
+        const index = Math.floor(Math.random() * this.fields.length);
+        select.selectedIndex = index;
+        this.ui.open!.dispatchEvent(new Event('change'));
+        return this.fields[index];
+      }
+      const selected = select.options[select.selectedIndex].value;
+      return selected;
+    }
+  }
   
   export class OptionForm extends InputForm {
     constructor(public ty: IDL.Type, public ui: FormConfig) {
