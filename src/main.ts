@@ -1,6 +1,6 @@
 import './style.css'
 import { generate, Transpiled } from '@bytecodealliance/jco/component';
-import { renderInput } from './ui';
+import { renderInput, InputBox } from './ui';
 import IDL from './example';
 
 async function loadComponent(component: Uint8Array) {
@@ -25,6 +25,7 @@ async function loadComponent(component: Uint8Array) {
   return output;
 }
 const customImportCode: Record<string, HTMLTextAreaElement> = {};
+let instantiated: any;
 async function instantiate(transpiled: Transpiled) {
   const imports: Record<string, any> = {
     "@bytecodealliance/preview2-shim/cli": await import('@bytecodealliance/preview2-shim/cli'),
@@ -49,10 +50,11 @@ async function instantiate(transpiled: Transpiled) {
     return mod;
   }, imports);
   console.log(mod);
-  const res = mod.calculate.evalExpression('add', 1, 2);
-  console.log(res);
-  const logs = document.getElementById('logs') as HTMLElement;
-  logs.innerHTML = `<div>Calling calculate.evalExpression('add', 1, 2)</div><div>Result: ${res}</div>`;
+  instantiated = mod;
+  //const res = mod.calculate.evalExpression('add', 1, 2);
+  //console.log(res);
+  //const logs = document.getElementById('logs') as HTMLElement;
+  //logs.innerHTML = `<div>Calling calculate.evalExpression('add', 1, 2)</div><div>Result: ${res}</div>`;
 }
 
 async function fetchWasm(file: string | File): Promise<Uint8Array> {
@@ -98,11 +100,13 @@ function init() {
 }
 function renderExports() {
   const exports = document.getElementById('exports') as HTMLElement;
+  const iface_name = IDL._name;
+  exports.innerHTML = `Interface <div>${IDL._name}</div>`;
   for (const [name, func] of Object.entries(IDL._fields)) {
     const item = document.createElement('li');
     exports.appendChild(item);
     item.innerHTML = `<li>${name}: (${func._args.map((a) => a[1].name).join(', ')}) -> (${func._ret.map((a) => a.name).join(', ')})</li>`;
-
+    // input arguments UI
     const inputContainer = document.createElement('div');
     item.appendChild(inputContainer);
     const inputs: InputBox[] = [];
@@ -111,23 +115,50 @@ function renderExports() {
       inputs.push(inputbox);
       inputbox.render(inputContainer);
     });
+    // Call button
+    const buttonContainer = document.createElement('div');
+    const buttonCall = document.createElement('button');
+    buttonCall.innerText = 'Call';
+    buttonContainer.appendChild(buttonCall);
+    const buttonRandom = document.createElement('button');
+    buttonRandom.innerText = 'Random';
+    buttonContainer.appendChild(buttonRandom);
+    item.appendChild(buttonContainer);
+    buttonCall.addEventListener('click', async () => {
+      const args = inputs.map((arg) => arg.parse());
+      const isRejected = inputs.some((arg) => arg.isRejected());
+      if (isRejected) {
+        return;
+      }
+      await callAndRender(iface_name, name, args);
+    });
+    buttonRandom.addEventListener('click', async () => {
+      const args = inputs.map((arg) => arg.parse({ random: true }));
+      const isRejected = inputs.some((arg) => arg.isRejected());
+      if (isRejected) {
+        return;
+      }
+      await callAndRender(iface_name, name, args);
+    });
   }
+}
+async function callAndRender(iface_name: string, method:string, args: any[]) {
+  console.log(method, args);
+  const result = await instantiated[iface_name][method](...args);
+  console.log(result);
 }
 function initUIAfterLoad(transpiled: Transpiled) {
   const app = document.querySelector<HTMLDivElement>('#app')!;
   app.innerHTML = `
   <div id="imports" class="frame"><p>This component imports the following interfaces</p></div>
   <div><button id="instantiate">Instantiate</button></div>
-  <div class="frame">
-   <p>This component exports the following interfaces</p>
+  <div>
    <ul id="exports"></ul>
   </div>
   <div id="logs"></div>
   `;
-  const exports = document.getElementById('exports') as HTMLElement;
   const imports = document.getElementById('imports') as HTMLElement;
   const button = document.getElementById('instantiate') as HTMLButtonElement;
-  renderExports();
   /*for (const pkg of transpiled.exports) {
     const div = document.createElement('div');
     exports.appendChild(div);
@@ -152,6 +183,7 @@ function initUIAfterLoad(transpiled: Transpiled) {
   }
   button.onclick = async () => {
     await instantiate(transpiled);
+    renderExports();
   };
 }
 

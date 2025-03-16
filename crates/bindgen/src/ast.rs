@@ -1,5 +1,6 @@
 use anyhow::Result;
 use crate::source::Source;
+use heck::{ToLowerCamelCase, ToUpperCamelCase};
 use wit_component::DecodedWasm;
 use wit_parser::{WorldKey, WorldItem, Resolve, InterfaceId, Function, Type, TypeDefKind};
 
@@ -14,7 +15,7 @@ impl<'a> Bindgen<'a> {
             Type::Id(id) => {
                 let ty = &self.resolve.types[*id];
                 if let Some(name) = &ty.name {
-                    self.src.push_str(&name);
+                    self.src.push_str(&name.to_upper_camel_case());
                 } else {
                     self.src.push_str(&format!("{ty:?}"));
                 }
@@ -25,6 +26,7 @@ impl<'a> Bindgen<'a> {
     fn type_defs(&mut self, iface_id: InterfaceId) {
         let iface = &self.resolve.interfaces[iface_id];
         for (name, id) in &iface.types {
+            let name = name.to_upper_camel_case();
             self.src.push_str(&format!("export const {name} = "));
             let ty = &self.resolve.types[*id];
             match &ty.kind {
@@ -39,7 +41,7 @@ impl<'a> Bindgen<'a> {
         }
     }
     fn func(&mut self, func: &Function, _is_async: bool) {
-        let out_name = func.item_name();
+        let out_name = func.item_name().to_lower_camel_case();
         self.src.push_str(&format!("'{out_name}': IDL.Func(["));
         for (name, ty) in &func.params {
             self.src.push_str(&format!("['{name}', "));
@@ -73,7 +75,7 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
     };
     let world = &resolve.worlds[id];
     let mut bindgen = Bindgen { src: Source::default(), resolve: &resolve };
-    bindgen.src.push_srt("import * as IDL from './wit'\n");
+    bindgen.src.push_str("import * as IDL from './wit'\n");
     for (name, export) in &world.exports {
         match export {
             WorldItem::Function(f) => {

@@ -1,7 +1,7 @@
 import * as IDL from './wit';
 import * as UI from './ui-core';
 
-type InputBox = UI.InputBox;
+export type InputBox = UI.InputBox;
 
 const InputConfig: UI.UIConfig = { parse: parsePrimitive };
 const FormConfig: UI.FormConfig = { render: renderInput };
