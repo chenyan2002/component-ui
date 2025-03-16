@@ -32,6 +32,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "heck",
+ "wit-bindgen-rt",
  "wit-component",
  "wit-parser",
 ]
@@ -514,6 +515,12 @@ dependencies = [
  "indexmap",
  "semver",
 ]
+
+[[package]]
+name = "wit-bindgen-rt"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4db52a11d4dfb0a59f194c064055794ee6564eb1ced88c25da2cf76e50c5621"
 
 [[package]]
 name = "wit-component"

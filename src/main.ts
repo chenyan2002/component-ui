@@ -1,8 +1,10 @@
 import './style.css'
 import { generate, Transpiled } from '@bytecodealliance/jco/component';
 import { renderInput, InputBox } from './ui';
-import IDL from './example';
+import * as WIT from './wit';
+import { generateAst } from './obj/bindgen';
 
+let IDL: any;
 async function loadComponent(component: Uint8Array) {
   const name = 'test';
   const output = await generate(component, {
@@ -22,6 +24,11 @@ async function loadComponent(component: Uint8Array) {
     ],
   });
   console.log(output);
+  const binding = generateAst(component);
+  console.log(binding);
+  const url = URL.createObjectURL(new Blob([binding], { type: 'text/javascript' }));
+  IDL = await import(url);
+  IDL = IDL.Factory({IDL: WIT});
   return output;
 }
 const customImportCode: Record<string, HTMLTextAreaElement> = {};
@@ -51,10 +58,6 @@ async function instantiate(transpiled: Transpiled) {
   }, imports);
   console.log(mod);
   instantiated = mod;
-  //const res = mod.calculate.evalExpression('add', 1, 2);
-  //console.log(res);
-  //const logs = document.getElementById('logs') as HTMLElement;
-  //logs.innerHTML = `<div>Calling calculate.evalExpression('add', 1, 2)</div><div>Result: ${res}</div>`;
 }
 
 async function fetchWasm(file: string | File): Promise<Uint8Array> {

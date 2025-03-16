@@ -27,7 +27,7 @@ impl<'a> Bindgen<'a> {
         let iface = &self.resolve.interfaces[iface_id];
         for (name, id) in &iface.types {
             let name = name.to_upper_camel_case();
-            self.src.push_str(&format!("export const {name} = "));
+            self.src.push_str(&format!("const {name} = "));
             let ty = &self.resolve.types[*id];
             match &ty.kind {
                 TypeDefKind::Enum(enum_) => {
@@ -58,7 +58,7 @@ impl<'a> Bindgen<'a> {
     fn interface(&mut self, resolve: &Resolve, name: &str, id: InterfaceId) {
         let id_name = resolve.id_of(id).unwrap_or_else(|| name.to_string());
         self.type_defs(id);
-        self.src.push_str(&format!("export default IDL.Interface('{id_name}', {{\n"));
+        self.src.push_str(&format!("return IDL.Interface('{id_name}', {{\n"));
         let iface = &resolve.interfaces[id];
         for (_, func) in &iface.functions {
             self.func(func, true);
@@ -75,7 +75,7 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
     };
     let world = &resolve.worlds[id];
     let mut bindgen = Bindgen { src: Source::default(), resolve: &resolve };
-    bindgen.src.push_str("import * as IDL from './wit'\n");
+    bindgen.src.push_str("export const Factory = ({IDL}) => {\n");
     for (name, export) in &world.exports {
         match export {
             WorldItem::Function(f) => {
@@ -96,5 +96,6 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
             WorldItem::Type(_) => unimplemented!(),
         }
     }
+    bindgen.src.push_str("}\n");
     Ok(bindgen.src.to_string())
 }

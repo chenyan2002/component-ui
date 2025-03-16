@@ -1,0 +1,5 @@
+package local:bindgen;
+
+world bindgen {
+  export generate-ast: func(component: list<u8>) -> result<string, string>;
+}

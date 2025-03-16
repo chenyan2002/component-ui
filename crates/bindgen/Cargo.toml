@@ -3,8 +3,26 @@ name = "bindgen"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "bindgen-test"
+path = "src/main.rs"
+
+[profile.release]
+debug = false
+debug-assertions = false
+lto = true
+opt-level = 'z'
+overflow-checks = false
+panic = 'abort'
+rpath = false
+strip = true
+
 [dependencies]
 anyhow = "1.0.97"
 heck = "0.5.0"
+wit-bindgen-rt = "0.41.0"
 wit-component = "0.227.1"
 wit-parser = { version = "0.227.1", default-features = false }
