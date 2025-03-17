@@ -7,6 +7,7 @@ use wit_parser::{WorldKey, WorldItem, Resolve, InterfaceId, Function, Type, Type
 struct Bindgen<'a> {
     src: Source,
     resolve: &'a Resolve,
+    export_interfaces: Vec<String>,
 }
 impl<'a> Bindgen<'a> {
     fn pp_ty(&mut self, ty: &Type) {
@@ -57,13 +58,27 @@ impl<'a> Bindgen<'a> {
     }
     fn interface(&mut self, resolve: &Resolve, name: &str, id: InterfaceId) {
         let id_name = resolve.id_of(id).unwrap_or_else(|| name.to_string());
+        let identifier = interface_type_name(&id_name);
         self.type_defs(id);
-        self.src.push_str(&format!("return IDL.Interface('{id_name}', {{\n"));
+        self.src.push_str(&format!("const {identifier} = IDL.Interface('{id_name}', {{\n"));
         let iface = &resolve.interfaces[id];
         for (_, func) in &iface.functions {
             self.func(func, true);
         }
-        self.src.push_str("})\n");
+        self.src.push_str("});\n");
+        self.export_interfaces.push(identifier);
+    }
+    fn exported_funcs(&mut self, funcs: &[&Function]) {
+        if funcs.is_empty() {
+            return;
+        }
+        let unnamed = "UNNAMED".to_string();
+        self.src.push_str(&format!("const {unnamed} = IDL.Interface('{unnamed}', {{\n"));
+        for func in funcs {
+            self.func(func, true);
+        }
+        self.src.push_str("});\n");
+        self.export_interfaces.push(unnamed);
     }
 }
 
@@ -74,18 +89,11 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
         _ => unimplemented!(),
     };
     let world = &resolve.worlds[id];
-    let mut bindgen = Bindgen { src: Source::default(), resolve: &resolve };
+    let mut bindgen = Bindgen { src: Source::default(), resolve: &resolve, export_interfaces: Vec::new() };
     bindgen.src.push_str("export const Factory = ({IDL}) => {\n");
+    let mut funcs = Vec::new();
     for (name, export) in &world.exports {
         match export {
-            WorldItem::Function(f) => {
-                /*let name = match name {
-                    WorldKey::Name(name) => name,
-                    _ => unreachable!(),
-                };*/
-                // TODO
-                bindgen.func(f, true);
-            }
             WorldItem::Interface { id, .. } => {
                 let name = match name {
                     WorldKey::Name(export) => export,
@@ -93,9 +101,23 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
                 };
                 bindgen.interface(&resolve, name, *id);
             }
+            WorldItem::Function(f) => funcs.push(f),
             WorldItem::Type(_) => unimplemented!(),
         }
     }
-    bindgen.src.push_str("}\n");
+    bindgen.exported_funcs(&funcs);
+    bindgen.src.push_str("return [");
+    bindgen.src.push_str(&bindgen.export_interfaces.join(", "));
+    bindgen.src.push_str("];\n}\n");
     Ok(bindgen.src.to_string())
+}
+
+fn interface_type_name(iface_name: &str) -> String {
+    let iface_name_sans_version = match iface_name.find('@') {
+        Some(version_idx) => &iface_name[0..version_idx],
+        None => iface_name,
+    };
+    iface_name_sans_version
+        .replace(['/', ':'], "-")
+        .to_upper_camel_case()
 }

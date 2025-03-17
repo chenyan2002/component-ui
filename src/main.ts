@@ -4,7 +4,7 @@ import { renderInput, InputBox } from './ui';
 import * as WIT from './wit';
 import { generateAst } from './obj/bindgen';
 
-let IDL: any;
+let IDL: Array<WIT.InterfaceClass> = [];
 async function loadComponent(component: Uint8Array) {
   const name = 'test';
   const output = await generate(component, {
@@ -27,8 +27,8 @@ async function loadComponent(component: Uint8Array) {
   const binding = generateAst(component);
   console.log(binding);
   const url = URL.createObjectURL(new Blob([binding], { type: 'text/javascript' }));
-  IDL = await import(/* @vite-ignore */url);
-  IDL = IDL.Factory({IDL: WIT});
+  const mod = await import(/* @vite-ignore */url);
+  IDL = mod.Factory({IDL: WIT});
   return output;
 }
 const customImportCode: Record<string, HTMLTextAreaElement> = {};
@@ -103,59 +103,68 @@ function init() {
 }
 function renderExports() {
   const exports = document.getElementById('exports') as HTMLElement;
-  const iface_name = IDL._name;
-  exports.innerHTML = `Interface <div>${IDL._name}</div>`;
-  for (const [name, func] of Object.entries(IDL._fields)) {
-    const item = document.createElement('li');
-    exports.appendChild(item);
-    item.innerHTML = `<li>${name}: (${func._args.map((a) => a[1].name).join(', ')}) -> (${func._ret.map((a) => a.name).join(', ')})</li>`;
-    // input arguments UI
-    const inputContainer = document.createElement('div');
-    item.appendChild(inputContainer);
-    const inputs: InputBox[] = [];
-    func._args.forEach(([name, arg]) => {
+  exports.innerHTML = '';
+  for (const iface of IDL) {
+    const iface_name = iface._name;
+    const header = document.createElement('div');
+    header.innerHTML = `Interface ${iface_name}`;
+    exports.appendChild(header);
+    for (const [name, func] of Object.entries(iface._fields)) {
+      const item = document.createElement('li');
+      exports.appendChild(item);
+      item.innerHTML = `<li>${name}: (${func._args.map((a) => a[1].name).join(', ')}) -> (${func._ret.map((a) => a.name).join(', ')})</li>`;
+      // input arguments UI
+      const inputContainer = document.createElement('div');
+      item.appendChild(inputContainer);
+      const inputs: InputBox[] = [];
+      func._args.forEach(([name, arg]) => {
       const inputbox = renderInput(arg);
       inputbox.label = `${name} `;
       inputs.push(inputbox);
       inputbox.render(inputContainer);
-    });
-    // Call button
-    const buttonContainer = document.createElement('div');
-    const buttonCall = document.createElement('button');
-    buttonCall.innerText = 'Call';
-    buttonContainer.appendChild(buttonCall);
-    const buttonRandom = document.createElement('button');
-    buttonRandom.innerText = 'Random';
-    buttonContainer.appendChild(buttonRandom);
-    item.appendChild(buttonContainer);
-    buttonCall.addEventListener('click', async () => {
-      const args = inputs.map((arg) => arg.parse());
-      const isRejected = inputs.some((arg) => arg.isRejected());
-      if (isRejected) {
-        return;
-      }
-      await callAndRender(iface_name, name, args);
-    });
-    buttonRandom.addEventListener('click', async () => {
-      const args = inputs.map((arg) => arg.parse({ random: true }));
-      const isRejected = inputs.some((arg) => arg.isRejected());
-      if (isRejected) {
-        return;
-      }
-      await callAndRender(iface_name, name, args);
-    });
+      });
+      // Call button
+      const buttonContainer = document.createElement('div');
+      const buttonCall = document.createElement('button');
+      buttonCall.innerText = 'Call';
+      buttonContainer.appendChild(buttonCall);
+      const buttonRandom = document.createElement('button');
+      buttonRandom.innerText = 'Random';
+      buttonContainer.appendChild(buttonRandom);
+      item.appendChild(buttonContainer);
+      buttonCall.addEventListener('click', async () => {
+        const args = inputs.map((arg) => arg.parse());
+        const isRejected = inputs.some((arg) => arg.isRejected());
+        if (isRejected) {
+          return;
+        }
+        await callAndRender(iface_name, name, args);
+      });
+      buttonRandom.addEventListener('click', async () => {
+        const args = inputs.map((arg) => arg.parse({ random: true }));
+        const isRejected = inputs.some((arg) => arg.isRejected());
+        if (isRejected) {
+          return;
+        }
+        await callAndRender(iface_name, name, args);
+      });
+    }
   }
 }
 async function callAndRender(iface_name: string, method:string, args: any[]) {
   const logs = document.getElementById('logs') as HTMLElement;
   logs.innerHTML += `<div>${method}(${args.join(', ')})</div>`;
-  const result = await instantiated[iface_name][method](...args);
+  let mod = instantiated;
+  if (iface_name !== 'UNNAMED') {
+    mod = instantiated[iface_name];
+  }
+  const result = await mod[method](...args);
   logs.innerHTML += `<div>Result: ${result}</div>`;
 }
 function initUIAfterLoad(transpiled: Transpiled) {
   const app = document.querySelector<HTMLDivElement>('#app')!;
   app.innerHTML = `
-  <div id="imports" class="frame"><p>This component imports the following interfaces</p></div>
+  <div id="imports"></div>
   <div><button id="instantiate">Instantiate</button></div>
   <div>
    <ul id="exports"></ul>
@@ -164,17 +173,10 @@ function initUIAfterLoad(transpiled: Transpiled) {
   `;
   const imports = document.getElementById('imports') as HTMLElement;
   const button = document.getElementById('instantiate') as HTMLButtonElement;
-  /*for (const pkg of transpiled.exports) {
-    const div = document.createElement('div');
-    exports.appendChild(div);
-    div.innerHTML = `<li>${pkg}</li>`;
-  }*/
   for (const pkg of transpiled.imports) {
     const block = document.createElement('div');
     imports.appendChild(block);
-    if (pkg.startsWith('@bytecodealliance/preview2-shim/')) {
-      block.innerHTML = `<li>${pkg} ✅</li>`;
-    } else {
+    if (!pkg.startsWith('@bytecodealliance/preview2-shim/')) {
       block.innerHTML = `<li>Provide import ${pkg}</li>`;
       const code = document.createElement('textarea');
       code.style.width = '28em';
