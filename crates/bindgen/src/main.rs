@@ -1,12 +1,12 @@
-use std::io::Read;
 use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 
-mod source;
 mod ast;
+mod source;
 
 fn main() -> anyhow::Result<()> {
-    let path = Path::new("../../public/adder.wasm");
+    let path = Path::new("../../public/lists.wasm");
     let mut file = File::open(path)?;
     let mut buf = Vec::new();
     file.read_to_end(&mut buf)?;

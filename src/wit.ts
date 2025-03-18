@@ -94,6 +94,8 @@ export class InterfaceClass extends Type<any> {
 }
 
 export const Null = new NullClass();
+export const U8 = new FixedNatClass(8);
+export const U16 = new FixedNatClass(16);
 export const U32 = new FixedNatClass(32);
 export const U64 = new FixedNatClass(64);
 export function Enum(tags: Array<string>): EnumClass {

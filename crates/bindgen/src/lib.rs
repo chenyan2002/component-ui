@@ -1,7 +1,7 @@
+mod ast;
 #[allow(warnings)]
 mod bindings;
 mod source;
-mod ast;
 
 use bindings::Guest;
 
