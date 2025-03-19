@@ -31,14 +31,14 @@ impl Bindgen<'_> {
                 self.src.push_str(")");
             }
             TypeDefKind::Tuple(ts) => {
-                self.src.push_str("IDL.Tuple(");
+                self.src.push_str("IDL.Tuple([");
                 for (i, ty) in ts.types.iter().enumerate() {
                     if i > 0 {
                         self.src.push_str(", ");
                     }
                     self.pp_ty(ty);
                 }
-                self.src.push_str(")");
+                self.src.push_str("])");
             }
             TypeDefKind::Result(r) => {
                 self.src.push_str("IDL.Variant({'ok': ");
@@ -144,7 +144,7 @@ impl Bindgen<'_> {
             self.pp_ty(&ty);
         }
         self.src.push_str("]");
-        self.src.push_str(")\n");
+        self.src.push_str("),\n");
     }
     fn interface(&mut self, resolve: &Resolve, name: &str, id: InterfaceId) {
         let id_name = resolve.id_of(id).unwrap_or_else(|| name.to_string());

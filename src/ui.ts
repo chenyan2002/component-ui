@@ -38,6 +38,51 @@ export class Render extends IDL.Visitor<null, InputBox> {
     public visitNull(t: IDL.NullClass, d: null): InputBox {
         return inputBox(t, {});
     }
+    public visitVec(t: IDL.VecClass, ty: IDL.Type, d: null): InputBox {
+        const len = document.createElement('input');
+        len.type = 'number';
+        len.min = '0';
+        len.max = '100';
+        len.style.width = '8rem';
+        len.placeholder = 'len';
+        len.classList.add('open');
+        const container = document.createElement('div');
+        container.classList.add('popup-form');
+        const form = vecForm(ty, { open: len, event: 'change', container });
+        return inputBox(t, { form });
+    }
+    public visitOpt(t: IDL.OptClass, ty: IDL.Type, d: null): InputBox {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.classList.add('open');
+        const form = optForm(ty, { open: checkbox, event: 'change' });
+        return inputBox(t, { form });
+    }
+    public visitRecord(t: IDL.RecordClass, fields: Record<string, IDL.Type>, d: null): InputBox {
+        let config = {};
+        const fs = Object.entries(fields);
+        if (fs.length > 1) {
+          const container = document.createElement('div');
+          container.classList.add('popup-form');
+          config = { container };
+        }
+        const form = recordForm(fs, config);
+        return inputBox(t, { form });
+      }
+      public visitTuple(
+        t: IDL.TupleClass,
+        components: IDL.Type[],
+        d: null,
+      ): InputBox {
+        let config = {};
+        if (components.length > 1) {
+          const container = document.createElement('div');
+          container.classList.add('popup-form');
+          config = { container };
+        }
+        const form = tupleForm(components, config);
+        return inputBox(t, { form });
+    }    
     public visitVariant(t: IDL.VariantClass, fields: Record<string, IDL.Type>, d: null): InputBox {
         const flist = Object.entries(fields);
         const select = document.createElement('select');
@@ -68,12 +113,28 @@ class Parse extends IDL.Visitor<string, any> {
     public visitNull(t: IDL.NullClass, v: string): null {
       return null;
     }
+    public visitBool(t: IDL.BoolClass, v: string): boolean {
+        return v === 'true';
+    }
+    public visitString(t: IDL.StringClass, v: string): string {
+        return v;
+    }
     public visitFixedNat(t: IDL.FixedNatClass, v: string): number | bigint {
         if (t._bits <= 32) {
           return parseInt(v, 10);
         } else {
           return BigInt(v);
         }
+    }
+    public visitIntNat(t: IDL.FixedIntClass, v: string): number | bigint {
+        if (t._bits <= 32) {
+          return parseInt(v, 10);
+        } else {
+          return BigInt(v);
+        }
+    }
+    public visitFloat(t: IDL.FixedFloatClass, v: string): number {
+        return parseFloat(v);
     }
     public visitNumber(t: IDL.Type, v: string): bigint {
         return BigInt(v);
@@ -83,6 +144,12 @@ class Random extends IDL.Visitor<string, any> {
     public visitNull(t: IDL.NullClass, v: string): null {
       return null;
     }
+    public visitBool(t: IDL.BoolClass, v: string): boolean {
+        return Math.random() < 0.5;
+    }
+    public visitString(t: IDL.StringClass, v: string): string {
+        return Math.random().toString(36).substring(6);
+    }
     public visitFixedNat(t: IDL.FixedNatClass, v: string): number | bigint {
         const x = this.generateNumber(false);
         if (t._bits <= 32) {
@@ -90,6 +157,17 @@ class Random extends IDL.Visitor<string, any> {
         } else {
           return BigInt(x);
         }
+    }
+    public visitFixedInt(t: IDL.FixedIntClass, v: string): number | bigint {
+        const x = this.generateNumber(true);
+        if (t._bits <= 32) {
+          return x;
+        } else {
+          return BigInt(x);
+        }
+    }
+    public visitFixedFloat(t: IDL.FixedFloatClass, v: string): number {
+        return Math.random() * 100;
     }
     private generateNumber(signed: boolean): number {
         const num = Math.floor(Math.random() * 100);

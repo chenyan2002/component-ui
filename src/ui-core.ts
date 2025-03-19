@@ -193,15 +193,14 @@ export interface ParseConfig {
       const variant = this.ui.render(type);
       this.form = [variant];
     }
-    public parse(config: ParseConfig): Record<string, any> | undefined {
+    public parse(config: ParseConfig): { tag: string, val?: any } | undefined {
       const select = this.ui.open as HTMLSelectElement;
       const selected = select.options[select.selectedIndex].value;
       const value = this.form[0].parse(config);
       if (value === undefined) {
         return undefined;
       }
-      const v: Record<string, any> = {};
-      v[selected] = value;
+      const v = { tag: selected, val: value };
       return v;
     }
   }
@@ -237,6 +236,7 @@ export interface ParseConfig {
         this.form = [];
       }
     }
+    // TODO make sure the return type is correct
     public parse<T>(config: ParseConfig): [T] | [] | undefined {
       if (this.form.length === 0) {
         return [];
