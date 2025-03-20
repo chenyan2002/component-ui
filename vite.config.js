@@ -1,10 +1,12 @@
 import { defineConfig } from 'vite';
 import path from 'path';
 import fs from 'fs';
+import topLevelAwait from 'vite-plugin-top-level-await';
 
 export default defineConfig({
     base: '/component-ui/',
     plugins: [
+      topLevelAwait(),
         {
             name: 'server-wasm',
             configureServer(server) {
