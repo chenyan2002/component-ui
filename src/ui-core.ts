@@ -1,5 +1,6 @@
 import * as IDL from './wit';
 
+export type Option<T> = { tag: 'none' } | { tag: 'some', val: T };
 export interface ParseConfig {
     random?: boolean;
   }
@@ -236,16 +237,15 @@ export interface ParseConfig {
         this.form = [];
       }
     }
-    // TODO make sure the return type is correct
-    public parse<T>(config: ParseConfig): [T] | [] | undefined {
+    public parse<T>(config: ParseConfig): Option<T> | undefined {
       if (this.form.length === 0) {
-        return [];
+        return { tag: 'none' };
       } else {
         const value = this.form[0].parse(config);
         if (value === undefined) {
           return undefined;
         }
-        return [value];
+        return { tag: 'some', val: value };
       }
     }
   }

@@ -100,6 +100,22 @@ function init() {
       processWasm(file);
     }
   });
+  // Add drag-and-drop event listeners
+  document.addEventListener('dragover', (event) => {
+    event.preventDefault();
+  });
+  document.addEventListener('drop', async (event) => {
+    event.preventDefault();
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      if (file.type === 'application/wasm') {
+        processWasm(file);
+      } else {
+        console.error('Please drop a valid .wasm file.');
+      }
+    }
+  });
 }
 function renderExports() {
   const exports = document.getElementById('exports') as HTMLElement;
@@ -153,13 +169,13 @@ function renderExports() {
 }
 async function callAndRender(iface_name: string, method:string, args: any[]) {
   const logs = document.getElementById('logs') as HTMLElement;
-  logs.innerHTML += `<div>${method}(${args.join(', ')})</div>`;
+  logs.innerHTML += `<div>${method}(${args.map((s) => JSON.stringify(s, null, 2)).join(', ')})</div>`;
   let mod = instantiated;
   if (iface_name !== 'UNNAMED') {
     mod = instantiated[iface_name];
   }
   const result = await mod[method](...args);
-  logs.innerHTML += `<div>Result: ${result}</div>`;
+  logs.innerHTML += `<div>Result: ${JSON.stringify(result, null, 2)}</div>`;
 }
 function initUIAfterLoad(transpiled: Transpiled) {
   const app = document.querySelector<HTMLDivElement>('#app')!;

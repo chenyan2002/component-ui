@@ -133,7 +133,7 @@ class Parse extends IDL.Visitor<string, any> {
           return BigInt(v);
         }
     }
-    public visitFloat(t: IDL.FixedFloatClass, v: string): number {
+    public visitFixedFloat(t: IDL.FixedFloatClass, v: string): number {
         return parseFloat(v);
     }
     public visitNumber(t: IDL.Type, v: string): bigint {
