@@ -120,6 +120,13 @@ export class OptClass extends Type<any> {
     get name(): string {
         return `option {${this._ty.name}}`;
     }
+    public maybe_null(): boolean {
+        if (this._ty instanceof OptClass) {
+            return !this._ty.maybe_null();
+        } else {
+            return false;
+        }
+    }
 }
 export class VecClass extends Type<Array<any>> {
     constructor(public readonly _ty: Type) {
