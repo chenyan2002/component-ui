@@ -47,6 +47,9 @@ export abstract class Visitor<D, R> {
     public visitInterface(t: InterfaceClass, data: D): R {
         return this.visitType(t, data);
     }
+    public visitResource(t: ResourceClass, fields: Record<string, FuncClass>, data: D): R {
+        return this.visitType(t, data);
+    }
 }
 
 export abstract class Type<T = any> {
@@ -184,7 +187,7 @@ export class EnumClass extends Type<Array<string>> {
     }
 }
 export class FuncClass extends Type<any> {
-    constructor(public readonly _args: Array<[string, Type]>, public readonly _ret: Type[]) {
+    constructor(public readonly _args: Array<[string, Type]>, public readonly _ret: Type[], public readonly _kind: string = '') {
         super();
     }
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
@@ -194,8 +197,19 @@ export class FuncClass extends Type<any> {
         return `func(${this._args.map((a) => a[1].name).join(', ')}) -> (${this._ret.map((a) => a.name).join(', ')})`;
     }
 }
-export class InterfaceClass extends Type<any> {
+export class ResourceClass extends Type<any> {
     constructor(public readonly _name: string, public readonly _fields: Record<string, FuncClass>) {
+        super();
+    }
+    public accept<D, R>(v: Visitor<D, R>, d: D): R {
+        return v.visitResource(this, this._fields, d);
+    }
+    get name(): string {
+        return `resource ${this._name}`;
+    }
+}
+export class InterfaceClass extends Type<any> {
+    constructor(public readonly _name: string, public readonly _fields: Record<string, FuncClass>, public readonly _resources: Array<ResourceClass> = []) {
         super();
     }
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
@@ -237,9 +251,12 @@ export function Enum(tags: Array<string>): EnumClass {
 export function Variant(fields: Record<string, Type>): VariantClass {
     return new VariantClass(fields);
 }
-export function Func(args: Array<[string, Type]>, ret: Type[]): FuncClass {
-    return new FuncClass(args, ret);
+export function Func(args: Array<[string, Type]>, ret: [] | [Type], kind: string): FuncClass {
+    return new FuncClass(args, ret, kind);
 }
-export function Interface(name: string, fields: Record<string, FuncClass>): InterfaceClass {
-    return new InterfaceClass(name, fields);
+export function Interface(name: string, fields: Record<string, FuncClass>, resources: Array<ResourceClass>): InterfaceClass {
+    return new InterfaceClass(name, fields, resources);
+}
+export function Resource(name: string, fields: Record<string, FuncClass>): ResourceClass {
+    return new ResourceClass(name, fields);
 }

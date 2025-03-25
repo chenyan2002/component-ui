@@ -1,15 +1,25 @@
 use crate::source::Source;
 use anyhow::Result;
+use std::collections::BTreeMap;
 use heck::{ToLowerCamelCase, ToUpperCamelCase};
 use wit_component::DecodedWasm;
-use wit_parser::{Function, InterfaceId, Resolve, Type, TypeDefKind, WorldItem, WorldKey};
+use wit_parser::{Function, InterfaceId, Resolve, Type, TypeDefKind, WorldItem, WorldKey, Handle, FunctionKind};
 
 struct Bindgen<'a> {
     src: Source,
     resolve: &'a Resolve,
     export_interfaces: Vec<String>,
+    resources: BTreeMap<String, Bindgen<'a>>,
 }
-impl Bindgen<'_> {
+impl<'a> Bindgen<'a> {
+    fn new(resolve: &'a Resolve) -> Bindgen<'a> {
+        Self {
+            src: Source::default(),
+            resolve,
+            export_interfaces: Vec::new(),
+            resources: Default::default(),
+        }
+    }
     fn pp_optional_ty(&mut self, ty: Option<&Type>) {
         match ty {
             Some(ty) => self.pp_ty(ty),
@@ -88,8 +98,17 @@ impl Bindgen<'_> {
                 );
                 self.src.push_str("])");
             }
+            TypeDefKind::Handle(h) => {
+                let ty = match h {
+                    Handle::Own(r) => r,
+                    Handle::Borrow(r) => r,
+                };
+                let ty = &self.resolve.types[*ty];
+                let Some(name) = &ty.name else { panic!("anonymous resource handle") };
+                self.src.push_str(&name.to_upper_camel_case());
+            }
             TypeDefKind::Future(_) | TypeDefKind::Stream(_) => todo!(),
-            TypeDefKind::Resource | TypeDefKind::Handle(_) => todo!(),
+            TypeDefKind::Resource => unreachable!(),
             TypeDefKind::Unknown => unreachable!(),
         }
     }
@@ -121,44 +140,78 @@ impl Bindgen<'_> {
     fn type_defs(&mut self, iface_id: InterfaceId) {
         let iface = &self.resolve.interfaces[iface_id];
         for (name, id) in &iface.types {
-            let name = name.to_upper_camel_case();
-            self.src.push_str(&format!("const {name} = "));
             let ty = &self.resolve.types[*id];
-            self.pp_ty_kind(&ty.kind);
-            self.src.push_str(";\n");
-        }
-    }
-    fn func(&mut self, func: &Function, _is_async: bool) {
-        let out_name = func.item_name().to_lower_camel_case();
-        self.src.push_str(&format!("'{out_name}': IDL.Func(["));
-        for (i, (name, ty)) in func.params.iter().enumerate() {
-            if i > 0 {
-                self.src.push_str(", ");
+            match &ty.kind {
+                TypeDefKind::Resource => {
+                    let resource = ty.name.clone().unwrap().to_upper_camel_case();
+                    self.resources.entry(resource).or_insert_with(|| Bindgen::new(self.resolve));
+                }
+                kind => {
+                    let name = name.to_upper_camel_case();
+                    self.src.push_str(&format!("const {name} = "));
+                    self.pp_ty_kind(kind);
+                    self.src.push_str(";\n");
+                }
             }
-            self.src.push_str(&format!("['{name}', "));
-            self.pp_ty(ty);
-            self.src.push_str("]");
         }
-        self.src.push_str("], [");
-        if let Some(ty) = func.result {
-            self.pp_ty(&ty);
-        }
-        self.src.push_str("]");
-        self.src.push_str("),\n");
     }
-    fn interface(&mut self, resolve: &Resolve, name: &str, id: InterfaceId) {
-        let id_name = resolve.id_of(id).unwrap_or_else(|| name.to_string());
+    fn func(&mut self, func: &Function) {
+        let iface = if let FunctionKind::Method(ty) | FunctionKind::Static(ty) | FunctionKind::Constructor(ty) = func.kind {
+            let ty = &self.resolve.types[ty];
+            let resource = ty.name.clone().unwrap().to_upper_camel_case();
+            self.resources.entry(resource).or_insert_with(|| Bindgen::new(self.resolve))
+        } else {
+            self
+        };
+        let out_name = func.item_name().to_lower_camel_case();
+        iface.src.push_str(&format!("'{out_name}': IDL.Func(["));
+        let param_start = match &func.kind {
+            FunctionKind::Method(_) | FunctionKind::AsyncMethod(_) => 1,
+            _ => 0,
+        };
+        for (i, (name, ty)) in func.params[param_start..].iter().enumerate() {
+            if i > 0 {
+                iface.src.push_str(", ");
+            }
+            iface.src.push_str(&format!("['{name}', "));
+            iface.pp_ty(ty);
+            iface.src.push_str("]");
+        }
+        iface.src.push_str("], [");
+        if let Some(ty) = func.result {
+            if !matches!(func.kind, FunctionKind::Constructor(_)) {
+                iface.pp_ty(&ty);
+            }
+        }
+        iface.src.push_str("], ");
+        let kind = match &func.kind {
+            FunctionKind::Freestanding => "''",
+            FunctionKind::Method(_) => "'method'",
+            FunctionKind::Static(_) => "'static'",
+            FunctionKind::Constructor(_) => "'constructor'",
+            FunctionKind::AsyncFreestanding => "'async'",
+            FunctionKind::AsyncMethod(_) => "'async method'",
+            FunctionKind::AsyncStatic(_) => "'async static'",
+        };
+        iface.src.push_str(kind);
+        iface.src.push_str("),\n");
+    }
+    fn interface(&mut self, name: &str, id: InterfaceId) -> String {
+        let id_name = self.resolve.id_of(id).unwrap_or_else(|| name.to_string());
         let identifier = interface_type_name(&id_name);
         self.type_defs(id);
         self.src.push_str(&format!(
             "const {identifier} = IDL.Interface('{id_name}', {{\n"
         ));
-        let iface = &resolve.interfaces[id];
+        let iface = &self.resolve.interfaces[id];
         for (_, func) in &iface.functions {
-            self.func(func, true);
+            self.func(func);
         }
-        self.src.push_str("});\n");
-        self.export_interfaces.push(identifier);
+        self.src.push_str("}, [");
+        let resources: Vec<_> = self.resources.keys().cloned().collect();
+        self.src.push_str(&resources.join(", "));
+        self.src.push_str("]);\n");
+        identifier
     }
     fn exported_funcs(&mut self, funcs: &[&Function]) {
         if funcs.is_empty() {
@@ -169,10 +222,22 @@ impl Bindgen<'_> {
             "const {unnamed} = IDL.Interface('{unnamed}', {{\n"
         ));
         for func in funcs {
-            self.func(func, true);
+            self.func(func);
         }
         self.src.push_str("});\n");
         self.export_interfaces.push(unnamed);
+    }
+    fn emit_resources(&mut self, resources: &BTreeMap<String, Bindgen>) {
+        for (resource, src) in resources {
+            self.src.push_str(&format!("const {resource} = IDL.Resource('{resource}', {{\n"));
+            self.src.push_str(&src.src);
+            self.src.push_str("});\n");
+        }
+    }
+    fn module_return(&mut self) {
+        self.src.push_str("return [");
+        self.src.push_str(&self.export_interfaces.join(", "));
+        self.src.push_str("];\n}\n");
     }
 }
 
@@ -183,11 +248,7 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
         _ => unimplemented!(),
     };
     let world = &resolve.worlds[id];
-    let mut bindgen = Bindgen {
-        src: Source::default(),
-        resolve: &resolve,
-        export_interfaces: Vec::new(),
-    };
+    let mut bindgen = Bindgen::new(&resolve);
     bindgen
         .src
         .push_str("export const Factory = ({IDL}) => {\n");
@@ -199,16 +260,19 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
                     WorldKey::Name(export) => export,
                     WorldKey::Interface(interface) => &resolve.id_of(*interface).unwrap(),
                 };
-                bindgen.interface(&resolve, name, *id);
+                let mut iface = Bindgen::new(&resolve);
+                let id = iface.interface(name, *id);
+                // reorder so that resources come first
+                bindgen.emit_resources(&iface.resources);
+                bindgen.src.push_str(&iface.src);
+                bindgen.export_interfaces.push(id);
             }
             WorldItem::Function(f) => funcs.push(f),
             WorldItem::Type(_) => unimplemented!(),
         }
     }
     bindgen.exported_funcs(&funcs);
-    bindgen.src.push_str("return [");
-    bindgen.src.push_str(&bindgen.export_interfaces.join(", "));
-    bindgen.src.push_str("];\n}\n");
+    bindgen.module_return();
     Ok(bindgen.src.to_string())
 }
 
