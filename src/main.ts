@@ -37,7 +37,11 @@ async function instantiate(transpiled: Transpiled) {
   const imports: Record<string, any> = {
     "@bytecodealliance/preview2-shim/cli": await import('@bytecodealliance/preview2-shim/cli'),
     "@bytecodealliance/preview2-shim/filesystem": await import('@bytecodealliance/preview2-shim/filesystem'),
-    "@bytecodealliance/preview2-shim/io": await import('@bytecodealliance/preview2-shim/io'),    
+    "@bytecodealliance/preview2-shim/io": await import('@bytecodealliance/preview2-shim/io'),
+    "@bytecodealliance/preview2-shim/random": await import('@bytecodealliance/preview2-shim/random'),
+    "@bytecodealliance/preview2-shim/sockets": await import('@bytecodealliance/preview2-shim/sockets'),
+    "@bytecodealliance/preview2-shim/http": await import('@bytecodealliance/preview2-shim/http'),
+    "@bytecodealliance/preview2-shim/clocks": await import('@bytecodealliance/preview2-shim/clocks'),
   };
   for (const pkg of transpiled.imports) {
     if (!pkg.startsWith('@bytecodealliance/preview2-shim/')) {
@@ -50,10 +54,9 @@ async function instantiate(transpiled: Transpiled) {
   const source = transpiled.files.find(([file, _]) => file === 'test.js')![1];
   const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
   const { instantiate } = await import(/* @vite-ignore */url);
-  let mod = await instantiate((core, imports) => {
+  let mod = await instantiate(core => {
     const file = transpiled.files.find((f) => f[0] === core)![1];
     const mod = WebAssembly.compile(file);
-    //console.log(`compiled ${core} (imports ${imports})`);
     return mod;
   }, imports);
   console.log(mod);
