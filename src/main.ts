@@ -1,6 +1,10 @@
 import './style.css'
 import { generate, Transpiled } from '@bytecodealliance/jco/component';
+import { renderInput, InputBox } from './ui';
+import * as WIT from './wit';
+import { generateAst } from './obj/bindgen';
 
+let IDL: Array<WIT.InterfaceClass> = [];
 async function loadComponent(component: Uint8Array) {
   const name = 'test';
   const output = await generate(component, {
@@ -20,14 +24,24 @@ async function loadComponent(component: Uint8Array) {
     ],
   });
   console.log(output);
+  const binding = generateAst(component);
+  console.log(binding);
+  const url = URL.createObjectURL(new Blob([binding], { type: 'text/javascript' }));
+  const mod = await import(/* @vite-ignore */url);
+  IDL = mod.Factory({IDL: WIT});
   return output;
 }
 const customImportCode: Record<string, HTMLTextAreaElement> = {};
+let instantiated: any;
 async function instantiate(transpiled: Transpiled) {
   const imports: Record<string, any> = {
     "@bytecodealliance/preview2-shim/cli": await import('@bytecodealliance/preview2-shim/cli'),
     "@bytecodealliance/preview2-shim/filesystem": await import('@bytecodealliance/preview2-shim/filesystem'),
-    "@bytecodealliance/preview2-shim/io": await import('@bytecodealliance/preview2-shim/io'),    
+    "@bytecodealliance/preview2-shim/io": await import('@bytecodealliance/preview2-shim/io'),
+    "@bytecodealliance/preview2-shim/random": await import('@bytecodealliance/preview2-shim/random'),
+    "@bytecodealliance/preview2-shim/sockets": await import('@bytecodealliance/preview2-shim/sockets'),
+    "@bytecodealliance/preview2-shim/http": await import('@bytecodealliance/preview2-shim/http'),
+    "@bytecodealliance/preview2-shim/clocks": await import('@bytecodealliance/preview2-shim/clocks'),
   };
   for (const pkg of transpiled.imports) {
     if (!pkg.startsWith('@bytecodealliance/preview2-shim/')) {
@@ -40,17 +54,13 @@ async function instantiate(transpiled: Transpiled) {
   const source = transpiled.files.find(([file, _]) => file === 'test.js')![1];
   const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
   const { instantiate } = await import(/* @vite-ignore */url);
-  let mod = await instantiate((core, imports) => {
+  let mod = await instantiate(core => {
     const file = transpiled.files.find((f) => f[0] === core)![1];
     const mod = WebAssembly.compile(file);
-    //console.log(`compiled ${core} (imports ${imports})`);
     return mod;
   }, imports);
   console.log(mod);
-  const res = mod.calculate.evalExpression('add', 1, 2);
-  console.log(res);
-  const logs = document.getElementById('logs') as HTMLElement;
-  logs.innerHTML = `<div>Calling calculate.evalExpression('add', 1, 2)</div><div>Result: ${res}</div>`;
+  instantiated = mod;
 }
 
 async function fetchWasm(file: string | File): Promise<Uint8Array> {
@@ -93,29 +103,104 @@ function init() {
       processWasm(file);
     }
   });
+  // Add drag-and-drop event listeners
+  document.addEventListener('dragover', (event) => {
+    event.preventDefault();
+  });
+  document.addEventListener('drop', async (event) => {
+    event.preventDefault();
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      if (file.type === 'application/wasm') {
+        processWasm(file);
+      } else {
+        console.error('Please drop a valid .wasm file.');
+      }
+    }
+  });
+}
+function renderExports() {
+  const exports = document.getElementById('exports') as HTMLElement;
+  exports.innerHTML = '';
+  for (const iface of IDL) {
+    const iface_name = iface._name;
+    const header = document.createElement('div');
+    header.innerHTML = `Interface ${iface_name}`;
+    exports.appendChild(header);
+    for (const [name, func] of Object.entries(iface._fields)) {
+      const item = document.createElement('li');
+      exports.appendChild(item);
+      item.innerHTML = `<div class="signature">
+      ${name}: (${func._args.map((a) => `${a[0]}: ${a[1].name}`).join(', ')}) -> (${func._ret.map((a) => a.name).join(', ')})
+      </div>`;
+      // input arguments UI
+      const inputContainer = document.createElement('div');
+      inputContainer.className = 'input-container';
+      item.appendChild(inputContainer);
+      const inputs: InputBox[] = [];
+      func._args.forEach(([name, arg]) => {
+      const inputbox = renderInput(arg);
+      inputbox.label = `${name} `;
+      inputs.push(inputbox);
+      inputbox.render(inputContainer);
+      });
+      // Call button
+      const buttonContainer = document.createElement('div');
+      const buttonCall = document.createElement('button');
+      buttonCall.innerText = 'Call';
+      buttonContainer.appendChild(buttonCall);
+      const buttonRandom = document.createElement('button');
+      buttonRandom.innerText = 'Random';
+      buttonContainer.appendChild(buttonRandom);
+      item.appendChild(buttonContainer);
+      buttonCall.addEventListener('click', async () => {
+        const args = inputs.map((arg) => arg.parse());
+        const isRejected = inputs.some((arg) => arg.isRejected());
+        if (isRejected) {
+          return;
+        }
+        await callAndRender(iface_name, name, args);
+      });
+      buttonRandom.addEventListener('click', async () => {
+        const args = inputs.map((arg) => arg.parse({ random: true }));
+        const isRejected = inputs.some((arg) => arg.isRejected());
+        if (isRejected) {
+          return;
+        }
+        await callAndRender(iface_name, name, args);
+      });
+    }
+  }
+}
+async function callAndRender(iface_name: string, method:string, args: any[]) {
+  const logs = document.getElementById('logs') as HTMLElement;
+  logs.innerHTML += `<div>${method}(${args.map((s) => JSON.stringify(s, null, 2)).join(', ')})</div>`;
+  let mod = instantiated;
+  if (iface_name !== 'UNNAMED') {
+    mod = instantiated[iface_name];
+  }
+  const result = await mod[method](...args);
+  logs.innerHTML += `<div>Result: ${JSON.stringify(result, null, 2)}</div>`;
 }
 function initUIAfterLoad(transpiled: Transpiled) {
   const app = document.querySelector<HTMLDivElement>('#app')!;
   app.innerHTML = `
-  <div id="exports" class="frame"><p>This component exports the following interfaces</p></div>
-  <div id="imports" class="frame"><p>This component imports the following interfaces</p></div>
+  <div id="imports"></div>
   <div><button id="instantiate">Instantiate</button></div>
-  <div id="logs"></div>
+  <div id="container">
+   <div id="main-content">
+    <ul id="exports"></ul>
+   </div>
+   <div id="logs"></div>
+  </div>
   `;
-  const exports = document.getElementById('exports') as HTMLElement;
   const imports = document.getElementById('imports') as HTMLElement;
   const button = document.getElementById('instantiate') as HTMLButtonElement;
-  for (const pkg of transpiled.exports) {
-    const div = document.createElement('div');
-    exports.appendChild(div);
-    div.innerHTML = `<li>${pkg}</li>`;
-  }
   for (const pkg of transpiled.imports) {
     const block = document.createElement('div');
     imports.appendChild(block);
-    if (pkg.startsWith('@bytecodealliance/preview2-shim/')) {
-      block.innerHTML = `<li>${pkg} ✅</li>`;
-    } else {
+    if (!pkg.startsWith('@bytecodealliance/preview2-shim/')) {
       block.innerHTML = `<li>Provide import ${pkg}</li>`;
       const code = document.createElement('textarea');
       code.style.width = '28em';
@@ -129,6 +214,7 @@ function initUIAfterLoad(transpiled: Transpiled) {
   }
   button.onclick = async () => {
     await instantiate(transpiled);
+    renderExports();
   };
 }
 

@@ -11,6 +11,23 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  --header-height: 4rem;
+  --pad-sm: 0.8rem;
+  --pad-md: 1.5rem;
+  --pad-lg: 2.4rem;
+  --font-sm: 1.2rem;
+  --font-md: 1.4rem;
+  --font-lg: 2.4rem;
+  --light-bg: #f6f6f7;
+  --white: #f9f9f9;
+  --lightest: #ebf0fa;
+  --lighter: #eaeaea;
+  --light: #e5e5e5;
+  --medium: #c3c3c4;
+  --dark: #818284;
+  --darker: #545454;
+  --darkest: #292a2e;
+  --error: #b82121;
 }
 
 a {
@@ -36,10 +53,98 @@ h1 {
 }
 
 #app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  font-size: var(--font-md);
+  padding: 1rem;
+}
+#container {
+  display: flex;
+  flex-direction: row;
+  overflow: auto;
+  height: calc(100vh - var(--header-height));
+}
+#main-content {
+  flex: 1;
+  overflow: auto;
+  padding: 0 3rem 5rem;
+}
+#exports {
+  font-family: 'Vremena Grotesk', 'Roboto Mono', monospace;
+  padding: 0;
+  margin: 0;
+}
+#exports li {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  padding: var(--pad-md);
+  margin-top: var(--pad-lg);
+  border: 1px solid var(--dark);
+}
+#logs {
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  width: 20rem;
+}
+.signature {
+  font-weight: lighter;
+  margin-bottom: var(--pad-md);
+}
+
+input,
+select {
+  font-size: var(--font-md);
+  margin-bottom: var(--pad-lg);
+}
+input:not([type='checkbox']),
+select {
+  padding: 1rem var(--pad-md);
+  border: 1px solid var(--dark);
+}
+label {
+  font-family: 'Circular Std', 'Roboto', sans-serif;
+  margin-right: var(--pad-sm);
+}
+label.small {
+  font-size: 1rem;
+}
+.popup-form {
+  padding-left: var(--pad-md);
+  width: 100%;
+}
+input[type='checkbox'] ~ .popup-form {
+  padding-left: var(--pad-md);
+}
+.checkbox-label {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 0;
+}
+.checkbox-label input[type='checkbox'] {
+  margin-bottom: 0;
+}
+.input-container > span > .popup-form,
+.ui-result > span > .popup-form {
+  padding-left: 0;
+}
+.input-container span:not(.status),
+.ui-result span:not(.status) {
+  position: relative;
+  overflow-y: visible;
+}
+.input-container span:not(:first-child):not(.status),
+.ui-result span:not(:first-child):not(.status) {
+  margin-left: var(--pad-md);
+}
+
+.reject {
+  border-color: var(--error) !important;
+  box-shadow: 0 0 1px var(--error);
 }
 
 .frame {
