@@ -131,7 +131,9 @@ function renderExports() {
     for (const [name, func] of Object.entries(iface._fields)) {
       const item = document.createElement('li');
       exports.appendChild(item);
-      item.innerHTML = `<div class="signature">${name}: (${func._args.map((a) => a[1].name).join(', ')}) -> (${func._ret.map((a) => a.name).join(', ')})</div>`;
+      item.innerHTML = `<div class="signature">
+      ${name}: (${func._args.map((a) => `${a[0]}: ${a[1].name}`).join(', ')}) -> (${func._ret.map((a) => a.name).join(', ')})
+      </div>`;
       // input arguments UI
       const inputContainer = document.createElement('div');
       inputContainer.className = 'input-container';

@@ -61,7 +61,7 @@ export class NullClass extends Type<void> {
         return v.visitNull(this, d);
     }
     get name(): string {
-        return 'null';
+        return '_';
     }
 }
 export class BoolClass extends Type<boolean> {
@@ -121,7 +121,7 @@ export class OptClass extends Type<any> {
         return v.visitOpt(this, this._ty, d);
     }
     get name(): string {
-        return `option {${this._ty.name}}`;
+        return `option&lt;${this._ty.name}&gt;`;
     }
     public maybe_null(): boolean {
         if (this._ty instanceof OptClass) {
@@ -139,7 +139,7 @@ export class VecClass extends Type<Array<any>> {
         return v.visitVec(this, this._ty, d);
     }
     get name(): string {
-        return `vec {${this._ty.name}}`;
+        return `list&lt;${this._ty.name}&gt;`;
     }
 }
 export class RecordClass extends Type<Record<string, any>> {
@@ -161,7 +161,7 @@ export class TupleClass extends Type<Array<any>> {
         return v.visitTuple(this, this._components, d);
     }
     get name(): string {    
-        return `tuple { ${this._components.map((c) => c.name).join(', ')} }`;
+        return `tuple&lt;${this._components.map((c) => c.name).join(', ')}&gt;`;
     }
 }
 export class VariantClass extends Type<Record<string, Type>> {
@@ -172,7 +172,9 @@ export class VariantClass extends Type<Record<string, Type>> {
         return v.visitVariant(this, this._fields, d);
     }
     get name(): string {
-        return `variant { ${Object.entries(this._fields).map(([k, v]) => `${k}: ${v.name}`).join(', ')} }`;
+        return `variant { ${Object.entries(this._fields).map(([k, v]) => {
+            return k + v.name === '_' ? '' : `(${v.name})`;
+        }).join(', ')} }`;
     }
 }
 export class EnumClass extends Type<Array<string>> {
@@ -194,7 +196,7 @@ export class FuncClass extends Type<any> {
         return v.visitFunc(this, d);
     }
     get name(): string {
-        return `func(${this._args.map((a) => a[1].name).join(', ')}) -> (${this._ret.map((a) => a.name).join(', ')})`;
+        return `func(${this._args.map((a) => `${a[0]}: ${a[1].name}`).join(', ')}) -> (${this._ret.map((a) => a.name).join(', ')})`;
     }
 }
 export class ResourceClass extends Type<any> {
