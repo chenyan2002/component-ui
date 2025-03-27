@@ -173,7 +173,7 @@ export class VariantClass extends Type<Record<string, Type>> {
     }
     get name(): string {
         return `variant { ${Object.entries(this._fields).map(([k, v]) => {
-            return k + v.name === '_' ? '' : `(${v.name})`;
+            return k + (v.name === '_' ? '' : `(${v.name})`);
         }).join(', ')} }`;
     }
 }
