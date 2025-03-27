@@ -131,9 +131,10 @@ function renderExports() {
     for (const [name, func] of Object.entries(iface._fields)) {
       const item = document.createElement('li');
       exports.appendChild(item);
-      item.innerHTML = `<li>${name}: (${func._args.map((a) => a[1].name).join(', ')}) -> (${func._ret.map((a) => a.name).join(', ')})</li>`;
+      item.innerHTML = `<div class="signature">${name}: (${func._args.map((a) => a[1].name).join(', ')}) -> (${func._ret.map((a) => a.name).join(', ')})</div>`;
       // input arguments UI
       const inputContainer = document.createElement('div');
+      inputContainer.className = 'input-container';
       item.appendChild(inputContainer);
       const inputs: InputBox[] = [];
       func._args.forEach(([name, arg]) => {
@@ -185,10 +186,12 @@ function initUIAfterLoad(transpiled: Transpiled) {
   app.innerHTML = `
   <div id="imports"></div>
   <div><button id="instantiate">Instantiate</button></div>
-  <div>
-   <ul id="exports"></ul>
+  <div id="container">
+   <div id="main-content">
+    <ul id="exports"></ul>
+   </div>
+   <div id="logs"><h2>Output Log</h2></div>
   </div>
-  <div id="logs"></div>
   `;
   const imports = document.getElementById('imports') as HTMLElement;
   const button = document.getElementById('instantiate') as HTMLButtonElement;
