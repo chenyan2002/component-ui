@@ -190,7 +190,7 @@ function initUIAfterLoad(transpiled: Transpiled) {
    <div id="main-content">
     <ul id="exports"></ul>
    </div>
-   <div id="logs"><h2>Output Log</h2></div>
+   <div id="logs"></div>
   </div>
   `;
   const imports = document.getElementById('imports') as HTMLElement;

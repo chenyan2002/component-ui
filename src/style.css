@@ -87,7 +87,7 @@ h1 {
 #logs {
   display: flex;
   flex-direction: column;
-  padding: 0;
+  padding: 1rem;
   width: 20rem;
 }
 .signature {
