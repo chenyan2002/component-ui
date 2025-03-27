@@ -38,12 +38,19 @@ export class Render extends IDL.Visitor<null, InputBox> {
     public visitNull(t: IDL.NullClass, d: null): InputBox {
         return inputBox(t, {});
     }
+    public visitBool(t: IDL.BoolClass, d: null): UI.InputBox {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.classList.add('open');
+        checkbox.value = 'true';
+        return inputBox(t, { input: checkbox });
+    }
     public visitVec(t: IDL.VecClass, ty: IDL.Type, d: null): InputBox {
         const len = document.createElement('input');
         len.type = 'number';
         len.min = '0';
         len.max = '100';
-        len.style.width = '8rem';
+        //len.style.width = '8rem';
         len.placeholder = 'len';
         len.classList.add('open');
         const container = document.createElement('div');
@@ -109,48 +116,48 @@ export class Render extends IDL.Visitor<null, InputBox> {
         return inputBox(t, { form });
     }
 }
-class Parse extends IDL.Visitor<string, any> {
-    public visitNull(t: IDL.NullClass, v: string): null {
+class Parse extends IDL.Visitor<HTMLInputElement, any> {
+    public visitNull(t: IDL.NullClass, v: HTMLInputElement): null {
       return null;
     }
-    public visitBool(t: IDL.BoolClass, v: string): boolean {
-        return v === 'true';
+    public visitBool(t: IDL.BoolClass, v: HTMLInputElement): boolean {
+        return v.checked;
     }
-    public visitString(t: IDL.StringClass, v: string): string {
-        return v;
+    public visitString(t: IDL.StringClass, v: HTMLInputElement): string {
+        return v.value;
     }
-    public visitFixedNat(t: IDL.FixedNatClass, v: string): number | bigint {
+    public visitFixedNat(t: IDL.FixedNatClass, v: HTMLInputElement): number | bigint {
         if (t._bits <= 32) {
-          return parseInt(v, 10);
+          return parseInt(v.value, 10);
         } else {
-          return BigInt(v);
+          return BigInt(v.value);
         }
     }
-    public visitIntNat(t: IDL.FixedIntClass, v: string): number | bigint {
+    public visitIntNat(t: IDL.FixedIntClass, v: HTMLInputElement): number | bigint {
         if (t._bits <= 32) {
-          return parseInt(v, 10);
+          return parseInt(v.value, 10);
         } else {
-          return BigInt(v);
+          return BigInt(v.value);
         }
     }
-    public visitFixedFloat(t: IDL.FixedFloatClass, v: string): number {
-        return parseFloat(v);
+    public visitFixedFloat(t: IDL.FixedFloatClass, v: HTMLInputElement): number {
+        return parseFloat(v.value);
     }
-    public visitNumber(t: IDL.Type, v: string): bigint {
-        return BigInt(v);
+    public visitNumber(t: IDL.Type, v: HTMLInputElement): bigint {
+        return BigInt(v.value);
     }
 }
-class Random extends IDL.Visitor<string, any> {
-    public visitNull(t: IDL.NullClass, v: string): null {
+class Random extends IDL.Visitor<HTMLInputElement, any> {
+    public visitNull(t: IDL.NullClass, v: HTMLInputElement): null {
       return null;
     }
-    public visitBool(t: IDL.BoolClass, v: string): boolean {
+    public visitBool(t: IDL.BoolClass, v: HTMLInputElement): boolean {
         return Math.random() < 0.5;
     }
-    public visitString(t: IDL.StringClass, v: string): string {
+    public visitString(t: IDL.StringClass, v: HTMLInputElement): string {
         return Math.random().toString(36).substring(6);
     }
-    public visitFixedNat(t: IDL.FixedNatClass, v: string): number | bigint {
+    public visitFixedNat(t: IDL.FixedNatClass, v: HTMLInputElement): number | bigint {
         const x = this.generateNumber(false);
         if (t._bits <= 32) {
           return x;
@@ -158,7 +165,7 @@ class Random extends IDL.Visitor<string, any> {
           return BigInt(x);
         }
     }
-    public visitFixedInt(t: IDL.FixedIntClass, v: string): number | bigint {
+    public visitFixedInt(t: IDL.FixedIntClass, v: HTMLInputElement): number | bigint {
         const x = this.generateNumber(true);
         if (t._bits <= 32) {
           return x;
@@ -166,7 +173,7 @@ class Random extends IDL.Visitor<string, any> {
           return BigInt(x);
         }
     }
-    public visitFixedFloat(t: IDL.FixedFloatClass, v: string): number {
+    public visitFixedFloat(t: IDL.FixedFloatClass, v: HTMLInputElement): number {
         return Math.random() * 100;
     }
     private generateNumber(signed: boolean): number {
@@ -178,8 +185,8 @@ class Random extends IDL.Visitor<string, any> {
         }
     }    
 }
-function parsePrimitive(t: IDL.Type, config: UI.ParseConfig, d: string) {
-    if (config.random && d === '') {
+function parsePrimitive(t: IDL.Type, config: UI.ParseConfig, d: HTMLInputElement) {
+    if (config.random && (t instanceof IDL.BoolClass || d.value === '')) {
       return t.accept(new Random(), d);
     } else {
       return t.accept(new Parse(), d);

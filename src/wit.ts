@@ -242,6 +242,9 @@ export function Vec(ty: Type): VecClass {
 export function Record(fields: Record<string, Type>): RecordClass {
     return new RecordClass(fields);
 }
+export function Flags(flags: Array<string>): RecordClass {
+    return new RecordClass(Object.fromEntries(flags.map((f) => [f, Bool])));
+}
 export function Tuple(components: Array<Type>): TupleClass {
     return new TupleClass(components);
 }

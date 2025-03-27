@@ -8,7 +8,7 @@ export interface ParseConfig {
   export interface UIConfig {
     input?: HTMLElement;
     form?: InputForm;
-    parse(t: IDL.Type, config: ParseConfig, v: string): any;
+    parse(t: IDL.Type, config: ParseConfig, v: HTMLInputElement): any;
   }
   
   export interface FormConfig {
@@ -56,7 +56,7 @@ export interface ParseConfig {
       if (this.ui.input) {
         const input = this.ui.input as HTMLInputElement;
         try {
-          const value = this.ui.parse(this.idl, config, input.value);
+          const value = this.ui.parse(this.idl, config, input);
           //if (!this.idl.covariant(value)) {
           //  throw new Error(`${input.value} is not of type ${this.idl.display()}`);
           //}
