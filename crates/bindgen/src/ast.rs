@@ -208,7 +208,7 @@ impl<'a> Bindgen<'a> {
             self.func(func);
         }
         self.src.push_str("}, [");
-        let resources: Vec<_> = self.resources.keys().cloned().collect();
+        let resources: Vec<_> = self.resources.keys().map(|k| format!("{k}._type")).collect();
         self.src.push_str(&resources.join(", "));
         self.src.push_str("]);\n");
         identifier
@@ -229,9 +229,10 @@ impl<'a> Bindgen<'a> {
     }
     fn emit_resources(&mut self, resources: &BTreeMap<String, Bindgen>) {
         for (resource, src) in resources {
-            self.src.push_str(&format!("const {resource} = IDL.Resource('{resource}', {{\n"));
+            self.src.push_str(&format!("const {resource} = IDL.Rec();\n"));
+            self.src.push_str(&format!("{resource}.fill(IDL.Resource('{resource}', {{\n"));
             self.src.push_str(&src.src);
-            self.src.push_str("});\n");
+            self.src.push_str("}));\n");
         }
     }
     fn module_return(&mut self) {

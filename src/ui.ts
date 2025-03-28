@@ -115,6 +115,9 @@ export class Render extends IDL.Visitor<null, InputBox> {
         const form = enumForm(tags, config);
         return inputBox(t, { form });
     }
+    public visitRec(t: IDL.RecClass, ty: IDL.Type, d: null): InputBox {
+        return renderInput(ty);
+    }
 }
 class Parse extends IDL.Visitor<HTMLInputElement, any> {
     public visitNull(t: IDL.NullClass, v: HTMLInputElement): null {
