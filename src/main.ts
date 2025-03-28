@@ -3,6 +3,11 @@ import { generate, Transpiled } from '@bytecodealliance/jco/component';
 import { renderInput, InputBox } from './ui';
 import * as WIT from './wit';
 import { generateAst } from './obj/bindgen';
+interface ResourceHook {
+  resource: WIT.ResourceClass;
+  container: HTMLElement;
+  instance?: string;
+}
 
 let IDL: Array<WIT.InterfaceClass> = [];
 async function loadComponent(component: Uint8Array) {
@@ -128,60 +133,113 @@ function renderExports() {
     const header = document.createElement('div');
     header.innerHTML = `Interface ${iface_name}`;
     exports.appendChild(header);
+    // render resources
+    for (const resource of iface._resources) {
+      const item = document.createElement('li');
+      exports.appendChild(item);
+      item.innerHTML = `<div>Resource ${resource._name}</div>`;
+      const ul = document.createElement('ul');
+      item.appendChild(ul);
+      const hooks: ResourceHook = { resource, container: ul };
+      for (const [name, func] of resource.get_static_funcs()) {
+        const li = document.createElement('li');
+        ul.appendChild(li);
+        renderFunc(li, iface_name, name, func, hooks);
+      }
+    }
+    // render functions
     for (const [name, func] of Object.entries(iface._fields)) {
       const item = document.createElement('li');
       exports.appendChild(item);
-      item.innerHTML = `<div class="signature">
-      ${name}: (${func._args.map((a) => `${a[0]}: ${a[1].name}`).join(', ')}) -> (${func._ret.map((a) => a.name).join(', ')})
-      </div>`;
-      // input arguments UI
-      const inputContainer = document.createElement('div');
-      inputContainer.className = 'input-container';
-      item.appendChild(inputContainer);
-      const inputs: InputBox[] = [];
-      func._args.forEach(([name, arg]) => {
-      const inputbox = renderInput(arg);
-      inputbox.label = `${name} `;
-      inputs.push(inputbox);
-      inputbox.render(inputContainer);
-      });
-      // Call button
-      const buttonContainer = document.createElement('div');
-      const buttonCall = document.createElement('button');
-      buttonCall.innerText = 'Call';
-      buttonContainer.appendChild(buttonCall);
-      const buttonRandom = document.createElement('button');
-      buttonRandom.innerText = 'Random';
-      buttonContainer.appendChild(buttonRandom);
-      item.appendChild(buttonContainer);
-      buttonCall.addEventListener('click', async () => {
-        const args = inputs.map((arg) => arg.parse());
-        const isRejected = inputs.some((arg) => arg.isRejected());
-        if (isRejected) {
-          return;
-        }
-        await callAndRender(iface_name, name, args);
-      });
-      buttonRandom.addEventListener('click', async () => {
-        const args = inputs.map((arg) => arg.parse({ random: true }));
-        const isRejected = inputs.some((arg) => arg.isRejected());
-        if (isRejected) {
-          return;
-        }
-        await callAndRender(iface_name, name, args);
-      });
+      renderFunc(item, iface_name, name, func);
     }
   }
 }
-async function callAndRender(iface_name: string, method:string, args: any[]) {
+function renderAndStoreResourceInstance(hook: ResourceHook, obj: any) {
+  const { resource, container } = hook;
+  const instance = resource.add_instance(obj);
+  const item = document.createElement('li');
+  container.appendChild(item);
+  item.innerHTML = `<div>Instance ${instance}</div>`;
+  const ul = document.createElement('ul');
+  item.appendChild(ul);
+  for (const [name, func] of resource.get_method_funcs()) {
+    const li = document.createElement('li');
+    ul.appendChild(li);
+    renderFunc(li, 'UNNAMED', name, func, { instance, ...hook });
+  }
+}
+function renderFunc(item: HTMLElement, iface_name: string, name: string, func: WIT.FuncClass, resource_hook?: ResourceHook) {
+  item.innerHTML = `<div class="signature">
+  ${name}: func(${func._args.map((a) => `${a[0]}: ${a[1].name}`).join(', ')})` +
+  (func._ret.length === 0 ? '' : ` -> ${func._ret.map((a) => a.name).join(', ')}`) +
+  `</div>`;
+  // input arguments UI
+  const inputContainer = document.createElement('div');
+  inputContainer.className = 'input-container';
+  item.appendChild(inputContainer);
+  const inputs: InputBox[] = [];
+  func._args.forEach(([name, arg]) => {
+  const inputbox = renderInput(arg);
+  inputbox.label = `${name} `;
+  inputs.push(inputbox);
+  inputbox.render(inputContainer);
+  });
+  // Call button
+  const buttonContainer = document.createElement('div');
+  const buttonCall = document.createElement('button');
+  buttonCall.innerText = 'Call';
+  buttonContainer.appendChild(buttonCall);
+  item.appendChild(buttonContainer);
+  buttonCall.addEventListener('click', async () => {
+    const args = inputs.map((arg) => arg.parse());
+    const isRejected = inputs.some((arg) => arg.isRejected());
+    if (isRejected) {
+      return;
+    }
+    await callAndRender(iface_name, name, args, func._kind, resource_hook);
+  });
+  if (func._args.length > 0) {
+    const buttonRandom = document.createElement('button');
+    buttonRandom.innerText = 'Random';
+    buttonContainer.appendChild(buttonRandom);
+    buttonRandom.addEventListener('click', async () => {
+      const args = inputs.map((arg) => arg.parse({ random: true }));
+      const isRejected = inputs.some((arg) => arg.isRejected());
+      if (isRejected) {
+       return;
+      }
+      await callAndRender(iface_name, name, args, func._kind, resource_hook);
+    });
+  }
+}
+async function callAndRender(iface_name: string, method:string, args: any[], kind: string, resource_hook?: ResourceHook) {
   const logs = document.getElementById('logs') as HTMLElement;
-  logs.innerHTML += `<div>${method}(${args.map((s) => JSON.stringify(s, null, 2)).join(', ')})</div>`;
   let mod = instantiated;
   if (iface_name !== 'UNNAMED') {
     mod = instantiated[iface_name];
   }
-  const result = await mod[method](...args);
-  logs.innerHTML += `<div>Result: ${JSON.stringify(result, null, 2)}</div>`;
+  const args_string = args.map((s) => customStringify(s)).join(', ');
+  let result: any;
+  if (kind.endsWith('constructor')) {
+    const resource_name = resource_hook!.resource._name;
+    logs.innerHTML += `<div>new ${resource_name}(${args_string})</div>`;
+    result = new mod[resource_name!](...args);
+    renderAndStoreResourceInstance(resource_hook!, result);
+  } else if (kind.endsWith('static')) {
+    const resource_name = resource_hook!.resource._name;
+    logs.innerHTML += `<div>${resource_name}.${method}(${args_string})</div>`;
+    result = mod[resource_name!][method](...args);
+  } else if (kind.endsWith('method')) {
+    const { resource, instance } = resource_hook!;
+    mod = resource.instances[instance!];
+    logs.innerHTML += `<div>${instance}.${method}(${args_string})</div>`;
+    result = mod[method](...args);
+  } else {
+    logs.innerHTML += `<div>${method}(${args_string})</div>`;
+    result = await mod[method](...args);
+  }
+  logs.innerHTML += `<div>Result: ${customStringify(result)}</div>`;
 }
 function initUIAfterLoad(transpiled: Transpiled) {
   const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -216,6 +274,17 @@ function initUIAfterLoad(transpiled: Transpiled) {
     await instantiate(transpiled);
     renderExports();
   };
+}
+function customStringify(obj: any): string {
+  return JSON.stringify(obj, (key, value) => {
+    if (typeof value === 'function' || typeof value === 'bigint' || typeof value === 'symbol') {
+      return value.toString();
+    }
+    /*if (value.constructor && value.constructor.name) {
+      return `[object ${value.constructor.name}]`;
+    }*/
+    return value;
+  }, 2);
 }
 
 init();

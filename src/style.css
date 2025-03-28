@@ -141,10 +141,18 @@ input[type='checkbox'] ~ .popup-form {
 .ui-result span:not(:first-child):not(.status) {
   margin-left: var(--pad-md);
 }
-
 .reject {
   border-color: var(--error) !important;
   box-shadow: 0 0 1px var(--error);
+}
+.status {
+  display: none;
+  position: absolute;
+  top: 3.1rem;
+  left: 0.2rem;
+  font-size: 1.2rem;
+  color: var(--error);
+  white-space: pre;
 }
 
 .frame {

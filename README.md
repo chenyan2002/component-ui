@@ -4,7 +4,6 @@
 * Resolve cross interface reference
 * Handle recursive resource types
 * Shortcut for option values
-* Resource UI
 * Import Wasm
-* Import JS stub
+* Import JS stub, including resource
 * Random for composite types
