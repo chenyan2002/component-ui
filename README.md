@@ -2,9 +2,9 @@
 ## TODO
 
 * Resolve cross interface reference
-* Handle recursive resource types
+* Handle Resource ownership in the UI
+* Detect resource value from return
 * Shortcut for option values
-* Resource UI
 * Import Wasm
-* Import JS stub
+* Import JS stub, including resource
 * Random for composite types

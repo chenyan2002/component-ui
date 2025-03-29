@@ -100,12 +100,19 @@ impl<'a> Bindgen<'a> {
             }
             TypeDefKind::Handle(h) => {
                 let ty = match h {
-                    Handle::Own(r) => r,
-                    Handle::Borrow(r) => r,
+                    Handle::Own(r) => {
+                        self.src.push_str("IDL.Owned(");
+                        r
+                    }
+                    Handle::Borrow(r) => {
+                        self.src.push_str("IDL.Borrow(");
+                        r
+                    }
                 };
                 let ty = &self.resolve.types[*ty];
                 let Some(name) = &ty.name else { panic!("anonymous resource handle") };
                 self.src.push_str(&name.to_upper_camel_case());
+                self.src.push_str(")");
             }
             TypeDefKind::Future(_) | TypeDefKind::Stream(_) => todo!(),
             TypeDefKind::Resource => unreachable!(),
@@ -208,7 +215,7 @@ impl<'a> Bindgen<'a> {
             self.func(func);
         }
         self.src.push_str("}, [");
-        let resources: Vec<_> = self.resources.keys().cloned().collect();
+        let resources: Vec<_> = self.resources.keys().map(|k| format!("{k}._type")).collect();
         self.src.push_str(&resources.join(", "));
         self.src.push_str("]);\n");
         identifier
@@ -229,9 +236,10 @@ impl<'a> Bindgen<'a> {
     }
     fn emit_resources(&mut self, resources: &BTreeMap<String, Bindgen>) {
         for (resource, src) in resources {
-            self.src.push_str(&format!("const {resource} = IDL.Resource('{resource}', {{\n"));
+            self.src.push_str(&format!("const {resource} = IDL.Rec();\n"));
+            self.src.push_str(&format!("{resource}.fill(IDL.Resource('{resource}', {{\n"));
             self.src.push_str(&src.src);
-            self.src.push_str("});\n");
+            self.src.push_str("}));\n");
         }
     }
     fn module_return(&mut self) {

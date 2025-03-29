@@ -115,6 +115,9 @@ export class Render extends IDL.Visitor<null, InputBox> {
         const form = enumForm(tags, config);
         return inputBox(t, { form });
     }
+    public visitRec(t: IDL.RecClass, ty: IDL.Type, d: null): InputBox {
+        return renderInput(ty);
+    }
 }
 class Parse extends IDL.Visitor<HTMLInputElement, any> {
     public visitNull(t: IDL.NullClass, v: HTMLInputElement): null {
@@ -146,6 +149,13 @@ class Parse extends IDL.Visitor<HTMLInputElement, any> {
     public visitNumber(t: IDL.Type, v: HTMLInputElement): bigint {
         return BigInt(v.value);
     }
+    public visitResource(t: IDL.ResourceClass, v: HTMLInputElement): any {
+        const result = t.instances[v.value];
+        if (result === undefined) {
+          throw new Error(`Resource not found: ${v.value}`);
+        }
+        return result;
+    }
 }
 class Random extends IDL.Visitor<HTMLInputElement, any> {
     public visitNull(t: IDL.NullClass, v: HTMLInputElement): null {
@@ -176,6 +186,13 @@ class Random extends IDL.Visitor<HTMLInputElement, any> {
     public visitFixedFloat(t: IDL.FixedFloatClass, v: HTMLInputElement): number {
         return Math.random() * 100;
     }
+    public visitResource(t: IDL.ResourceClass, v: HTMLInputElement): any {
+        const keys = Object.keys(t.instances);
+        if (keys.length === 0) {
+          throw new Error(`No resource ${t._name} available`);
+        }
+        return t.instances[keys[Math.floor(Math.random() * keys.length)]];
+    }
     private generateNumber(signed: boolean): number {
         const num = Math.floor(Math.random() * 100);
         if (signed && Math.random() < 0.5) {
@@ -186,7 +203,7 @@ class Random extends IDL.Visitor<HTMLInputElement, any> {
     }    
 }
 function parsePrimitive(t: IDL.Type, config: UI.ParseConfig, d: HTMLInputElement) {
-    if (config.random && (t instanceof IDL.BoolClass || d.value === '')) {
+    if (config.random && (t instanceof IDL.BoolClass || t instanceof IDL.ResourceClass || d.value === '')) {
       return t.accept(new Random(), d);
     } else {
       return t.accept(new Parse(), d);

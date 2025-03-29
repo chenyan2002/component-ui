@@ -47,7 +47,10 @@ export abstract class Visitor<D, R> {
     public visitInterface(t: InterfaceClass, data: D): R {
         return this.visitType(t, data);
     }
-    public visitResource(t: ResourceClass, fields: Record<string, FuncClass>, data: D): R {
+    public visitResource(t: ResourceClass, data: D): R {
+        return this.visitType(t, data);
+    }
+    public visitRec(t: RecClass, ty: Type, data: D): R {
         return this.visitType(t, data);
     }
 }
@@ -188,6 +191,29 @@ export class EnumClass extends Type<Array<string>> {
         return `enum { ${this._tags.join(', ')} }`;
     }
 }
+export class RecClass extends Type<any> {
+    private static _counter = 0;
+    private _id = RecClass._counter++;
+    private _type: Type | undefined = undefined;
+    public accept<D, R>(v: Visitor<D, R>, d: D): R {
+        if (!this._type) {
+            throw new Error('Recursive type uninitialized');
+        }
+        return v.visitRec(this, this._type, d);
+    }
+    public fill(t: Type) {
+        this._type = t;
+    }
+    public get_type() {
+        return this._type;
+    }
+    get name(): string {
+        if (!this._type) {
+            return `rec_${this._id}`;
+        }
+        return this._type.name;
+    }
+}
 export class FuncClass extends Type<any> {
     constructor(public readonly _args: Array<[string, Type]>, public readonly _ret: Type[], public readonly _kind: string = '') {
         super();
@@ -200,14 +226,49 @@ export class FuncClass extends Type<any> {
     }
 }
 export class ResourceClass extends Type<any> {
+    public instances: Record<string, any> = {};
+    private _counter = 0;
     constructor(public readonly _name: string, public readonly _fields: Record<string, FuncClass>) {
         super();
     }
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
-        return v.visitResource(this, this._fields, d);
+        return v.visitResource(this, d);
     }
     get name(): string {
         return `resource ${this._name}`;
+    }
+    public get_static_funcs(): Array<[string, FuncClass]> {
+        return Object.entries(this._fields).filter(([_, f]) => f._kind.endsWith('static') || f._kind.endsWith('constructor'));
+    }
+    public get_method_funcs(): Array<[string, FuncClass]> {
+        return Object.entries(this._fields).filter(([_, f]) => f._kind.endsWith('method'));
+    }
+    public add_instance(obj: any): string {
+        const name = `${this._name.toLowerCase()}_${this._counter++}`;
+        this.instances[name] = obj;
+        return name;
+    }
+}
+export class OwnedClass extends Type<any> {
+    constructor(public readonly _ty: RecClass) {
+        super();
+    }
+    public accept<D, R>(v: Visitor<D, R>, d: D): R {
+        return this._ty.accept(v, d);
+    }
+    get name(): string {
+        return `${this._ty.name}`;
+    }
+}
+export class BorrowClass extends Type<any> {
+    constructor(public readonly _ty: RecClass) {
+        super();
+    }
+    public accept<D, R>(v: Visitor<D, R>, d: D): R {
+        return this._ty.accept(v, d);
+    }
+    get name(): string {
+        return `borrow&lt;${this._ty.name}&gt;`;
     }
 }
 export class InterfaceClass extends Type<any> {
@@ -264,4 +325,13 @@ export function Interface(name: string, fields: Record<string, FuncClass>, resou
 }
 export function Resource(name: string, fields: Record<string, FuncClass>): ResourceClass {
     return new ResourceClass(name, fields);
+}
+export function Rec(): RecClass {
+    return new RecClass();
+}
+export function Owned(ty: RecClass): OwnedClass {
+    return new OwnedClass(ty);
+}
+export function Borrow(ty: RecClass): BorrowClass {
+    return new BorrowClass(ty);
 }
