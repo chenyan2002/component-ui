@@ -13,11 +13,11 @@
   -moz-osx-font-smoothing: grayscale;
   --header-height: 4rem;
   --pad-sm: 0.8rem;
-  --pad-md: 1.5rem;
-  --pad-lg: 2.4rem;
-  --font-sm: 1.2rem;
-  --font-md: 1.4rem;
-  --font-lg: 2.4rem;
+  --pad-md: 1rem;
+  --pad-lg: 2rem;
+  --font-sm: 0.8rem;
+  --font-md: 1rem;
+  --font-lg: 2rem;
   --light-bg: #f6f6f7;
   --white: #f9f9f9;
   --lightest: #ebf0fa;
