@@ -276,15 +276,19 @@ function initUIAfterLoad(transpiled: Transpiled) {
   };
 }
 function customStringify(obj: any): string {
-  return JSON.stringify(obj, (key, value) => {
+  const json = JSON.stringify(obj, (key, value) => {
     if (typeof value === 'function' || typeof value === 'bigint' || typeof value === 'symbol') {
       return value.toString();
     }
-    /*if (value.constructor && value.constructor.name) {
-      return `[object ${value.constructor.name}]`;
-    }*/
+    if (value instanceof Uint8Array) {
+      return Array.from(value);
+    }
     return value;
   }, 2);
+  if (json === '{}' && obj.constructor && obj.constructor.name) {
+    return `[object ${obj.constructor.name}]`;
+  }
+  return json;
 }
 
 init();

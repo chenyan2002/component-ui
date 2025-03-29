@@ -100,12 +100,19 @@ impl<'a> Bindgen<'a> {
             }
             TypeDefKind::Handle(h) => {
                 let ty = match h {
-                    Handle::Own(r) => r,
-                    Handle::Borrow(r) => r,
+                    Handle::Own(r) => {
+                        self.src.push_str("IDL.Owned(");
+                        r
+                    }
+                    Handle::Borrow(r) => {
+                        self.src.push_str("IDL.Borrow(");
+                        r
+                    }
                 };
                 let ty = &self.resolve.types[*ty];
                 let Some(name) = &ty.name else { panic!("anonymous resource handle") };
                 self.src.push_str(&name.to_upper_camel_case());
+                self.src.push_str(")");
             }
             TypeDefKind::Future(_) | TypeDefKind::Stream(_) => todo!(),
             TypeDefKind::Resource => unreachable!(),

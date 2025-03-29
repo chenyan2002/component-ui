@@ -249,6 +249,28 @@ export class ResourceClass extends Type<any> {
         return name;
     }
 }
+export class OwnedClass extends Type<any> {
+    constructor(public readonly _ty: RecClass) {
+        super();
+    }
+    public accept<D, R>(v: Visitor<D, R>, d: D): R {
+        return this._ty.accept(v, d);
+    }
+    get name(): string {
+        return `${this._ty.name}`;
+    }
+}
+export class BorrowClass extends Type<any> {
+    constructor(public readonly _ty: RecClass) {
+        super();
+    }
+    public accept<D, R>(v: Visitor<D, R>, d: D): R {
+        return this._ty.accept(v, d);
+    }
+    get name(): string {
+        return `borrow&lt;${this._ty.name}&gt;`;
+    }
+}
 export class InterfaceClass extends Type<any> {
     constructor(public readonly _name: string, public readonly _fields: Record<string, FuncClass>, public readonly _resources: Array<ResourceClass> = []) {
         super();
@@ -306,4 +328,10 @@ export function Resource(name: string, fields: Record<string, FuncClass>): Resou
 }
 export function Rec(): RecClass {
     return new RecClass();
+}
+export function Owned(ty: RecClass): OwnedClass {
+    return new OwnedClass(ty);
+}
+export function Borrow(ty: RecClass): BorrowClass {
+    return new BorrowClass(ty);
 }
