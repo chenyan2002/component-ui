@@ -2,7 +2,7 @@
 ## TODO
 
 * Resolve cross interface reference
-* Handle Resource ownership
+* Handle Resource ownership in the UI
 * Detect resource value from return
 * Shortcut for option values
 * Import Wasm
