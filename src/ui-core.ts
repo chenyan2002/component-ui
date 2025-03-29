@@ -237,16 +237,27 @@ export interface ParseConfig {
         this.form = [];
       }
     }
-    public parse<T>(config: ParseConfig): Option<T> | undefined {
+    public parse<T>(config: ParseConfig): Option<T> | undefined | T | null {
       if (this.form.length === 0) {
-        return { tag: 'none' };
+        return this.shrinkValue({ tag: 'none' });
       } else {
         const value = this.form[0].parse(config);
         if (value === undefined) {
           return undefined;
         }
-        return { tag: 'some', val: value };
+        return this.shrinkValue({ tag: 'some', val: value });
       }
+    }
+    private shrinkValue<T>(value: Option<T>): Option<T> | T | null {
+      const ty = IDL.Opt(this.ty);
+      if (!ty.maybe_null()) {
+        if (value.tag === 'some') {
+          return value.val;
+        } else {
+          return null;
+        }
+      }
+      return value;
     }
   }
   
