@@ -154,6 +154,9 @@ input[type='checkbox'] ~ .popup-form {
   color: var(--error);
   white-space: pre;
 }
+.error {
+  color: var(--error);
+}
 
 .frame {
   border: 1px solid #888;

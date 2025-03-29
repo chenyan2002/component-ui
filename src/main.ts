@@ -220,26 +220,31 @@ async function callAndRender(iface_name: string, method:string, args: any[], kin
     mod = instantiated[iface_name];
   }
   const args_string = args.map((s) => customStringify(s)).join(', ');
-  let result: any;
-  if (kind.endsWith('constructor')) {
-    const resource_name = resource_hook!.resource._name;
-    logs.innerHTML += `<div>new ${resource_name}(${args_string})</div>`;
-    result = new mod[resource_name!](...args);
-    renderAndStoreResourceInstance(resource_hook!, result);
-  } else if (kind.endsWith('static')) {
-    const resource_name = resource_hook!.resource._name;
-    logs.innerHTML += `<div>${resource_name}.${method}(${args_string})</div>`;
-    result = mod[resource_name!][method](...args);
-  } else if (kind.endsWith('method')) {
-    const { resource, instance } = resource_hook!;
-    mod = resource.instances[instance!];
-    logs.innerHTML += `<div>${instance}.${method}(${args_string})</div>`;
-    result = mod[method](...args);
-  } else {
-    logs.innerHTML += `<div>${method}(${args_string})</div>`;
-    result = await mod[method](...args);
+  try {
+    let result: any;
+    if (kind.endsWith('constructor')) {
+      const resource_name = resource_hook!.resource._name;
+      logs.innerHTML += `<div>› new ${resource_name}(${args_string})</div>`;
+      result = new mod[resource_name!](...args);
+      renderAndStoreResourceInstance(resource_hook!, result);
+    } else if (kind.endsWith('static')) {
+      const resource_name = resource_hook!.resource._name;
+      logs.innerHTML += `<div>› ${resource_name}.${method}(${args_string})</div>`;
+      result = mod[resource_name!][method](...args);
+    } else if (kind.endsWith('method')) {
+      const { resource, instance } = resource_hook!;
+      mod = resource.instances[instance!];
+      logs.innerHTML += `<div>› ${instance}.${method}(${args_string})</div>`;
+      result = mod[method](...args);
+    } else {
+      logs.innerHTML += `<div>› ${method}(${args_string})</div>`;
+      result = await mod[method](...args);
+    }
+    logs.innerHTML += `<div>${customStringify(result)}</div>`;
+  } catch (err) {
+    logs.innerHTML += `<div class="error">${(err as Error).message}</div>`;
+    console.error(err);
   }
-  logs.innerHTML += `<div>Result: ${customStringify(result)}</div>`;
 }
 function initUIAfterLoad(transpiled: Transpiled) {
   const app = document.querySelector<HTMLDivElement>('#app')!;
