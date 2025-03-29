@@ -136,7 +136,7 @@ class Parse extends IDL.Visitor<HTMLInputElement, any> {
           return BigInt(v.value);
         }
     }
-    public visitIntNat(t: IDL.FixedIntClass, v: HTMLInputElement): number | bigint {
+    public visitFixedInt(t: IDL.FixedIntClass, v: HTMLInputElement): number | bigint {
         if (t._bits <= 32) {
           return parseInt(v.value, 10);
         } else {
@@ -145,9 +145,6 @@ class Parse extends IDL.Visitor<HTMLInputElement, any> {
     }
     public visitFixedFloat(t: IDL.FixedFloatClass, v: HTMLInputElement): number {
         return parseFloat(v.value);
-    }
-    public visitNumber(t: IDL.Type, v: HTMLInputElement): bigint {
-        return BigInt(v.value);
     }
     public visitResource(t: IDL.ResourceClass, v: HTMLInputElement): any {
         const result = t.instances[v.value];
