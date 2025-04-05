@@ -277,8 +277,6 @@ impl<'a> Bindgen<'a> {
             return identifier;
         }
         let mut defs = Bindgen::new(&self.resolve);
-        defs.src
-            .push_str(&format!("let {identifier}; // {id_name}\n{{\n"));
         defs.type_defs(id);
         self.src
             .push_str(&format!("{identifier} = IDL.Interface('{id_name}', {{\n"));
@@ -288,6 +286,8 @@ impl<'a> Bindgen<'a> {
         }
         // insert resources after type defs
         defs.emit_resources(&self.resources);
+        defs.src
+            .prepend_str(&format!("let {identifier}; // {id_name}\n{{\n"));
         self.src.prepend_str(&defs.src);
 
         self.src.push_str("}, {");
@@ -314,7 +314,7 @@ impl<'a> Bindgen<'a> {
     fn emit_resources(&mut self, resources: &BTreeMap<String, Bindgen>) {
         for (resource, src) in resources {
             self.src
-                .push_str(&format!("const {resource} = IDL.Rec();\n"));
+                .prepend_str(&format!("const {resource} = IDL.Rec();\n"));
             self.src
                 .push_str(&format!("{resource}.fill(IDL.Resource('{resource}', {{\n"));
             self.src.push_str(&src.src);
