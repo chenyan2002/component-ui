@@ -1,3 +1,4 @@
+use crate::names::LocalNames;
 use crate::source::Source;
 use anyhow::Result;
 use heck::{ToLowerCamelCase, ToUpperCamelCase};
@@ -14,6 +15,7 @@ struct Bindgen<'a> {
     defs: Vec<String>,
     export_interfaces: Vec<String>,
     resources: BTreeMap<String, Bindgen<'a>>,
+    local_names: LocalNames,
 }
 impl<'a> Bindgen<'a> {
     fn new(resolve: &'a Resolve) -> Bindgen<'a> {
@@ -23,7 +25,13 @@ impl<'a> Bindgen<'a> {
             defs: Vec::new(),
             export_interfaces: Vec::new(),
             resources: Default::default(),
+            local_names: LocalNames::default(),
         }
+    }
+    fn fork(&self) -> Bindgen<'a> {
+        let mut res = Self::new(self.resolve);
+        res.local_names = self.local_names.clone();
+        res
     }
     fn pp_optional_ty(&mut self, ty: Option<&Type>) {
         match ty {
@@ -64,6 +72,11 @@ impl<'a> Bindgen<'a> {
                             .unwrap()
                             .to_upper_camel_case();
                         let owned_iface_name = interface_type_name(&owned_interface_id);
+                        let owned_iface_name = self
+                            .local_names
+                            .get_or_create(&owned_interface_id, &owned_iface_name)
+                            .0
+                            .to_string();
                         self.src
                             .push_str(&format!("{owned_iface_name}.{orig_name}"));
                     }
@@ -256,12 +269,17 @@ impl<'a> Bindgen<'a> {
     fn interface(&mut self, name: &str, id: InterfaceId) -> String {
         let id_name = self.resolve.id_of(id).unwrap_or_else(|| name.to_string());
         let identifier = interface_type_name(&id_name);
+        let identifier = self
+            .local_names
+            .get_or_create(&id_name, &identifier)
+            .0
+            .to_string();
         let mut defs = Bindgen::new(&self.resolve);
-        defs.src.push_str(&format!("let {identifier}; // {id_name}\n{{\n"));
+        defs.src
+            .push_str(&format!("let {identifier}; // {id_name}\n{{\n"));
         defs.type_defs(id);
-        self.src.push_str(&format!(
-            "{identifier} = IDL.Interface('{id_name}', {{\n"
-        ));
+        self.src
+            .push_str(&format!("{identifier} = IDL.Interface('{id_name}', {{\n"));
         let iface = &self.resolve.interfaces[id];
         for (_, func) in &iface.functions {
             self.func(func);
@@ -326,9 +344,10 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
                     WorldKey::Name(export) => export,
                     WorldKey::Interface(interface) => &resolve.id_of(*interface).unwrap(),
                 };
-                let mut iface = Bindgen::new(&resolve);
+                let mut iface = bindgen.fork();
                 iface.interface(name, *id);
                 bindgen.src.push_str(&iface.src);
+                bindgen.local_names = iface.local_names;
             }
             _ => (),
         }
@@ -341,10 +360,11 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
                     WorldKey::Name(export) => export,
                     WorldKey::Interface(interface) => &resolve.id_of(*interface).unwrap(),
                 };
-                let mut iface = Bindgen::new(&resolve);
+                let mut iface = bindgen.fork();
                 let id = iface.interface(name, *id);
                 bindgen.src.push_str(&iface.src);
                 bindgen.export_interfaces.push(id);
+                bindgen.local_names = iface.local_names;
             }
             WorldItem::Function(f) => funcs.push(f),
             WorldItem::Type(_) => unimplemented!(),

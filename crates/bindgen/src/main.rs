@@ -3,6 +3,7 @@ use std::io::Read;
 use std::path::Path;
 
 mod ast;
+mod names;
 mod source;
 
 fn main() -> anyhow::Result<()> {
