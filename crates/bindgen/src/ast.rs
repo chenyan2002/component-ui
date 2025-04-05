@@ -269,11 +269,13 @@ impl<'a> Bindgen<'a> {
     fn interface(&mut self, name: &str, id: InterfaceId) -> String {
         let id_name = self.resolve.id_of(id).unwrap_or_else(|| name.to_string());
         let identifier = interface_type_name(&id_name);
-        let identifier = self
+        let (identifier, seen) = self
             .local_names
-            .get_or_create(&id_name, &identifier)
-            .0
-            .to_string();
+            .get_or_create(&id_name, &identifier);
+        let identifier = identifier.to_string();
+        if seen {
+            return identifier;
+        }
         let mut defs = Bindgen::new(&self.resolve);
         defs.src
             .push_str(&format!("let {identifier}; // {id_name}\n{{\n"));
