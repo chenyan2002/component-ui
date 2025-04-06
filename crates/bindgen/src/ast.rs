@@ -41,7 +41,6 @@ impl<'a> Bindgen<'a> {
     }
     fn pp_ty_kind(&mut self, id: TypeId, kind: &TypeDefKind, parent_id: Option<InterfaceId>) {
         match kind {
-            // TODO: handle cross interface reference
             TypeDefKind::Type(t) => {
                 let owner_not_parent = match t {
                     Type::Id(type_def_id) => {
