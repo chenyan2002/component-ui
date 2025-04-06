@@ -134,7 +134,7 @@ function renderExports() {
     header.innerHTML = `Interface ${iface_name}`;
     exports.appendChild(header);
     // render resources
-    for (const resource of iface._resources) {
+    for (const resource of iface.get_resources()) {
       const item = document.createElement('li');
       exports.appendChild(item);
       item.innerHTML = `<div>Resource ${resource._name}</div>`;

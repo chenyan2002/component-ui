@@ -1,24 +1,37 @@
+use crate::names::LocalNames;
 use crate::source::Source;
 use anyhow::Result;
-use std::collections::BTreeMap;
 use heck::{ToLowerCamelCase, ToUpperCamelCase};
+use std::collections::BTreeMap;
 use wit_component::DecodedWasm;
-use wit_parser::{Function, InterfaceId, Resolve, Type, TypeDefKind, WorldItem, WorldKey, Handle, FunctionKind};
+use wit_parser::{
+    Function, FunctionKind, Handle, InterfaceId, Resolve, Type, TypeDefKind, TypeId, TypeOwner,
+    WorldItem, WorldKey,
+};
 
 struct Bindgen<'a> {
     src: Source,
     resolve: &'a Resolve,
+    defs: Vec<String>,
     export_interfaces: Vec<String>,
     resources: BTreeMap<String, Bindgen<'a>>,
+    local_names: LocalNames,
 }
 impl<'a> Bindgen<'a> {
     fn new(resolve: &'a Resolve) -> Bindgen<'a> {
         Self {
             src: Source::default(),
             resolve,
+            defs: Vec::new(),
             export_interfaces: Vec::new(),
             resources: Default::default(),
+            local_names: LocalNames::default(),
         }
+    }
+    fn fork(&self) -> Bindgen<'a> {
+        let mut res = Self::new(self.resolve);
+        res.local_names = self.local_names.clone();
+        res
     }
     fn pp_optional_ty(&mut self, ty: Option<&Type>) {
         match ty {
@@ -26,10 +39,49 @@ impl<'a> Bindgen<'a> {
             None => self.src.push_str("IDL.Null"),
         }
     }
-    fn pp_ty_kind(&mut self, kind: &TypeDefKind) {
+    fn pp_ty_kind(&mut self, id: TypeId, kind: &TypeDefKind, parent_id: Option<InterfaceId>) {
         match kind {
-            // TODO: handle cross interface reference
-            TypeDefKind::Type(t) => self.pp_ty(t),
+            TypeDefKind::Type(t) => {
+                let owner_not_parent = match t {
+                    Type::Id(type_def_id) => {
+                        let ty = &self.resolve.types[*type_def_id];
+                        match ty.owner {
+                            TypeOwner::Interface(i) => {
+                                if let Some(parent_id) = parent_id {
+                                    if parent_id == i {
+                                        None
+                                    } else {
+                                        Some(self.resolve.id_of(i).unwrap())
+                                    }
+                                } else {
+                                    Some(self.resolve.id_of(i).unwrap())
+                                }
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                match owner_not_parent {
+                    Some(owned_interface_id) => {
+                        let orig_id = dealias(self.resolve, id);
+                        let orig_name = self.resolve.types[orig_id]
+                            .name
+                            .as_ref()
+                            .unwrap()
+                            .to_upper_camel_case();
+                        let owned_iface_name = interface_type_name(&owned_interface_id);
+                        let owned_iface_name = self
+                            .local_names
+                            .get_or_create(&owned_interface_id, &owned_iface_name)
+                            .0
+                            .to_string();
+                        self.src
+                            .push_str(&format!("{owned_iface_name}.{orig_name}"));
+                    }
+                    None => self.pp_ty(t),
+                }
+            }
             TypeDefKind::List(t) => {
                 self.src.push_str("IDL.Vec(");
                 self.pp_ty(t);
@@ -110,7 +162,9 @@ impl<'a> Bindgen<'a> {
                     }
                 };
                 let ty = &self.resolve.types[*ty];
-                let Some(name) = &ty.name else { panic!("anonymous resource handle") };
+                let Some(name) = &ty.name else {
+                    panic!("anonymous resource handle")
+                };
                 self.src.push_str(&name.to_upper_camel_case());
                 self.src.push_str(")");
             }
@@ -140,7 +194,7 @@ impl<'a> Bindgen<'a> {
                 if let Some(name) = &ty.name {
                     return self.src.push_str(&name.to_upper_camel_case());
                 }
-                self.pp_ty_kind(&ty.kind);
+                self.pp_ty_kind(*id, &ty.kind, None);
             }
         }
     }
@@ -151,22 +205,30 @@ impl<'a> Bindgen<'a> {
             match &ty.kind {
                 TypeDefKind::Resource => {
                     let resource = ty.name.clone().unwrap().to_upper_camel_case();
-                    self.resources.entry(resource).or_insert_with(|| Bindgen::new(self.resolve));
+                    self.resources
+                        .entry(resource)
+                        .or_insert_with(|| Bindgen::new(self.resolve));
                 }
                 kind => {
                     let name = name.to_upper_camel_case();
                     self.src.push_str(&format!("const {name} = "));
-                    self.pp_ty_kind(kind);
+                    self.pp_ty_kind(*id, kind, Some(iface_id));
                     self.src.push_str(";\n");
+                    self.defs.push(name);
                 }
             }
         }
     }
     fn func(&mut self, func: &Function) {
-        let iface = if let FunctionKind::Method(ty) | FunctionKind::Static(ty) | FunctionKind::Constructor(ty) = func.kind {
+        let iface = if let FunctionKind::Method(ty)
+        | FunctionKind::Static(ty)
+        | FunctionKind::Constructor(ty) = func.kind
+        {
             let ty = &self.resolve.types[ty];
             let resource = ty.name.clone().unwrap().to_upper_camel_case();
-            self.resources.entry(resource).or_insert_with(|| Bindgen::new(self.resolve))
+            self.resources
+                .entry(resource)
+                .or_insert_with(|| Bindgen::new(self.resolve))
         } else {
             self
         };
@@ -206,18 +268,32 @@ impl<'a> Bindgen<'a> {
     fn interface(&mut self, name: &str, id: InterfaceId) -> String {
         let id_name = self.resolve.id_of(id).unwrap_or_else(|| name.to_string());
         let identifier = interface_type_name(&id_name);
-        self.type_defs(id);
-        self.src.push_str(&format!(
-            "const {identifier} = IDL.Interface('{id_name}', {{\n"
-        ));
+        let (identifier, seen) = self
+            .local_names
+            .get_or_create(&id_name, &identifier);
+        let identifier = identifier.to_string();
+        if seen {
+            return identifier;
+        }
+        let mut defs = Bindgen::new(&self.resolve);
+        defs.type_defs(id);
+        self.src
+            .push_str(&format!("{identifier} = IDL.Interface('{id_name}', {{\n"));
         let iface = &self.resolve.interfaces[id];
         for (_, func) in &iface.functions {
             self.func(func);
         }
-        self.src.push_str("}, [");
-        let resources: Vec<_> = self.resources.keys().map(|k| format!("{k}._type")).collect();
-        self.src.push_str(&resources.join(", "));
-        self.src.push_str("]);\n");
+        // insert resources after type defs
+        defs.emit_resources(&self.resources);
+        defs.src
+            .prepend_str(&format!("let {identifier}; // {id_name}\n{{\n"));
+        self.src.prepend_str(&defs.src);
+
+        self.src.push_str("}, {");
+        for v in self.resources.keys().chain(defs.defs.iter()) {
+            self.src.push_str(&format!("'{v}': {v}, "));
+        }
+        self.src.push_str("});\n}\n");
         identifier
     }
     fn exported_funcs(&mut self, funcs: &[&Function]) {
@@ -236,8 +312,10 @@ impl<'a> Bindgen<'a> {
     }
     fn emit_resources(&mut self, resources: &BTreeMap<String, Bindgen>) {
         for (resource, src) in resources {
-            self.src.push_str(&format!("const {resource} = IDL.Rec();\n"));
-            self.src.push_str(&format!("{resource}.fill(IDL.Resource('{resource}', {{\n"));
+            self.src
+                .prepend_str(&format!("const {resource} = IDL.Rec();\n"));
+            self.src
+                .push_str(&format!("{resource}.fill(IDL.Resource('{resource}', {{\n"));
             self.src.push_str(&src.src);
             self.src.push_str("}));\n");
         }
@@ -260,6 +338,21 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
     bindgen
         .src
         .push_str("export const Factory = ({IDL}) => {\n");
+    for (name, import) in &world.imports {
+        match import {
+            WorldItem::Interface { id, .. } => {
+                let name = match name {
+                    WorldKey::Name(export) => export,
+                    WorldKey::Interface(interface) => &resolve.id_of(*interface).unwrap(),
+                };
+                let mut iface = bindgen.fork();
+                iface.interface(name, *id);
+                bindgen.src.push_str(&iface.src);
+                bindgen.local_names = iface.local_names;
+            }
+            _ => (),
+        }
+    }
     let mut funcs = Vec::new();
     for (name, export) in &world.exports {
         match export {
@@ -268,12 +361,11 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
                     WorldKey::Name(export) => export,
                     WorldKey::Interface(interface) => &resolve.id_of(*interface).unwrap(),
                 };
-                let mut iface = Bindgen::new(&resolve);
+                let mut iface = bindgen.fork();
                 let id = iface.interface(name, *id);
-                // reorder so that resources come first
-                bindgen.emit_resources(&iface.resources);
                 bindgen.src.push_str(&iface.src);
                 bindgen.export_interfaces.push(id);
+                bindgen.local_names = iface.local_names;
             }
             WorldItem::Function(f) => funcs.push(f),
             WorldItem::Type(_) => unimplemented!(),
@@ -292,4 +384,12 @@ fn interface_type_name(iface_name: &str) -> String {
     iface_name_sans_version
         .replace(['/', ':'], "-")
         .to_upper_camel_case()
+}
+fn dealias(resolve: &Resolve, mut id: TypeId) -> TypeId {
+    loop {
+        match &resolve.types[id].kind {
+            TypeDefKind::Type(Type::Id(that_id)) => id = *that_id,
+            _ => break id,
+        }
+    }
 }

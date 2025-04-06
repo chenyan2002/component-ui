@@ -272,14 +272,21 @@ export class BorrowClass extends Type<any> {
     }
 }
 export class InterfaceClass extends Type<any> {
-    constructor(public readonly _name: string, public readonly _fields: Record<string, FuncClass>, public readonly _resources: Array<ResourceClass> = []) {
+    [key: string]: any; // Add an index signature to allow dynamic property assignment
+    constructor(public readonly _name: string, public readonly _fields: Record<string, FuncClass>, public readonly _vars: Record<string, Type> = {}) {
         super();
+        for (const [k, v] of Object.entries(_vars)) {
+            this[k] = v;
+        }
     }
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitInterface(this, d);
     }
     get name(): string {
         return `interface ${this._name}`;
+    }
+    public get_resources(): Array<ResourceClass> {
+        return Object.entries(this._vars).filter(([_, ty]) => ty instanceof RecClass && ty.get_type() instanceof ResourceClass).map(([_, ty]) => (ty as RecClass).get_type() as ResourceClass);
     }
 }
 
