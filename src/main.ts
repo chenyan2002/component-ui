@@ -3,6 +3,7 @@ import { generate, Transpiled } from '@bytecodealliance/jco/component';
 import { renderInput, InputBox } from './ui';
 import * as WIT from './wit';
 import { generateAst } from './obj/bindgen';
+import * as HttpMock from './http';
 interface ResourceHook {
   resource: WIT.ResourceClass;
   container: HTMLElement;
@@ -45,7 +46,7 @@ async function instantiate(transpiled: Transpiled) {
     "@bytecodealliance/preview2-shim/io": await import('@bytecodealliance/preview2-shim/io'),
     "@bytecodealliance/preview2-shim/random": await import('@bytecodealliance/preview2-shim/random'),
     "@bytecodealliance/preview2-shim/sockets": await import('@bytecodealliance/preview2-shim/sockets'),
-    "@bytecodealliance/preview2-shim/http": await import('@bytecodealliance/preview2-shim/http'),
+    "@bytecodealliance/preview2-shim/http": await import('./http'),
     "@bytecodealliance/preview2-shim/clocks": await import('@bytecodealliance/preview2-shim/clocks'),
   };
   for (const pkg of transpiled.imports) {
@@ -145,6 +146,20 @@ function renderExports() {
         const li = document.createElement('li');
         ul.appendChild(li);
         renderFunc(li, iface_name, name, func, hooks);
+      }
+      if (resource._name === 'IncomingRequest') {
+        const obj = HttpMock.incomingRequestMock(
+          {tag: 'get'}, 
+          'http://example.com/?query=test',
+          { tag: 'HTTP'}, 
+          'example.com', 
+          HttpMock.fieldsMock([]),
+          0,
+        );
+        renderAndStoreResourceInstance(hooks, obj);
+      } else if (resource._name === 'ResponseOutparam') {
+        const obj = HttpMock.responseOutparamMock((res) => { console.log("Response sent:", res); });
+        renderAndStoreResourceInstance(hooks, obj);
       }
     }
     // render functions
