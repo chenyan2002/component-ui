@@ -1,4 +1,5 @@
-import { el } from './dom';
+import { html, LitElement, nothing, PropertyValues } from 'lit';
+import { customElement, query, state } from 'lit/decorators.js';
 
 export function customStringify(obj: any): string {
   if (obj === undefined) {
@@ -32,45 +33,80 @@ export interface LogEntry {
   error(err: unknown): void;
 }
 
-export class ConsolePanel {
-  constructor(private readonly list: HTMLElement) {
-    this.clear();
+interface Entry {
+  call: string;
+  time: string;
+  status: 'pending' | 'ok' | 'error';
+  output?: string;
+  elapsed?: number;
+}
+
+@customElement('console-panel')
+export class ConsolePanel extends LitElement {
+  @state() accessor entries: Entry[] = [];
+  @query('.console') accessor list!: HTMLElement;
+
+  // Render into the light DOM so the global stylesheet applies.
+  protected createRenderRoot() {
+    return this;
   }
 
   public clear() {
-    this.list.replaceChildren(el('div', { className: 'console-empty' }, 'Call a function to see results here.'));
+    this.entries = [];
   }
 
   public logCall(call: string): LogEntry {
-    this.list.querySelector('.console-empty')?.remove();
     const started = performance.now();
-    const time = el('span', { className: 'log-meta' }, new Date().toLocaleTimeString());
-    const entry = el('div', { className: 'log-entry pending' },
-      el('div', { className: 'log-call' },
-        el('span', { className: 'log-prompt' }, '›'),
-        el('code', {}, call),
-        time,
-      ),
-    );
-    this.list.appendChild(entry);
-    this.scrollToEnd();
-
-    const finish = (text: string, className: string) => {
-      const elapsed = Math.round(performance.now() - started);
-      time.textContent += ` · ${elapsed} ms`;
-      const copy = el('wa-copy-button', { className: 'log-copy' });
-      copy.setAttribute('value', text);
-      entry.classList.replace('pending', className);
-      entry.appendChild(el('div', { className: 'log-output' }, el('pre', {}, text), copy));
-      this.scrollToEnd();
+    const entry: Entry = { call, time: new Date().toLocaleTimeString(), status: 'pending' };
+    this.entries = [...this.entries, entry];
+    const finish = (status: Entry['status'], output: string) => {
+      Object.assign(entry, { status, output, elapsed: Math.round(performance.now() - started) });
+      this.requestUpdate();
     };
     return {
-      result: (value) => finish(customStringify(value), 'ok'),
-      error: (err) => finish(errorText(err), 'error'),
+      result: (value) => finish('ok', customStringify(value)),
+      error: (err) => finish('error', errorText(err)),
     };
   }
 
-  private scrollToEnd() {
+  protected updated(_changed: PropertyValues) {
     this.list.scrollTop = this.list.scrollHeight;
+  }
+
+  protected render() {
+    return html`
+      <div class="console-header">
+        <span class="console-title"><wa-icon name="terminal"></wa-icon> Console</span>
+        <wa-button size="s" appearance="plain" @click=${() => this.clear()}>Clear</wa-button>
+      </div>
+      <div class="console">
+        ${this.entries.length === 0
+          ? html`<div class="console-empty">Call a function to see results here.</div>`
+          : this.entries.map((entry) => this.renderEntry(entry))}
+      </div>
+    `;
+  }
+
+  private renderEntry(entry: Entry) {
+    const meta = entry.elapsed === undefined ? entry.time : `${entry.time} · ${entry.elapsed} ms`;
+    return html`<div class="log-entry ${entry.status}">
+      <div class="log-call">
+        <span class="log-prompt">›</span>
+        <code>${entry.call}</code>
+        <span class="log-meta">${meta}</span>
+      </div>
+      ${entry.output === undefined
+        ? nothing
+        : html`<div class="log-output">
+            <pre>${entry.output}</pre>
+            <wa-copy-button class="log-copy" .value=${entry.output}></wa-copy-button>
+          </div>`}
+    </div>`;
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'console-panel': ConsolePanel;
   }
 }

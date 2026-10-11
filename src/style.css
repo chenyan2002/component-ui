@@ -9,11 +9,19 @@
 }
 
 body {
-  display: flex;
-  flex-direction: column;
   height: 100vh;
   overflow: hidden;
   background: var(--wa-color-surface-lowered);
+}
+
+component-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+func-card {
+  display: block;
 }
 
 code,
@@ -178,9 +186,6 @@ pre {
   align-items: start;
   gap: var(--wa-space-m);
 }
-.func-grid:empty {
-  display: none;
-}
 .subheading {
   margin: 0;
   font-size: var(--wa-font-size-s);
@@ -291,6 +296,10 @@ pre {
   padding-left: var(--wa-space-m);
   border-left: 2px solid var(--wa-color-neutral-border-quiet);
 }
+/* Values filled in by Random; they are replaced on the next Random. */
+.field .auto {
+  font-style: italic;
+}
 .reject {
   border-color: var(--wa-color-danger-border-loud) !important;
 }
@@ -301,10 +310,13 @@ pre {
 
 /* Console */
 .console-pane {
-  display: flex;
-  flex-direction: column;
   overflow: hidden;
   background: var(--wa-color-surface-raised);
+}
+console-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 .console-header {
   display: flex;
@@ -400,7 +412,7 @@ pre {
   backdrop-filter: blur(2px);
   pointer-events: none;
 }
-body.dragging .drop-overlay {
+.drop-overlay.visible {
   display: block;
 }
 .drop-target {
