@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
@@ -14,6 +15,7 @@
     "vite-plugin-top-level-await": "^1.5.0"
   },
   "dependencies": {
+    "@awesome.me/webawesome": "^3.14.0",
     "@bytecodealliance/jco": "^1.10.2",
     "@bytecodealliance/preview2-shim": "^0.17.2"
   }

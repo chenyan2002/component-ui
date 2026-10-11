@@ -4,21 +4,80 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + TS</title>
+    <title>Component UI · WebAssembly component explorer</title>
   </head>
   <body>
-    <div id="app">
-      <div><select id="preselectedWasmFile">
-      <option value="" disabled selected>Select a Wasm file</option>
-      <option value="calculator.wasm">Calculator</option>
-      <option value="adder.wasm">Adder</option>
-      <option value="variants.wasm">Variants</option>
-      <option value="resource.wasm">Resource</option>
-      <option value="wasi-http.wasm">WASI HTTP</option>
-      </select></div>
-      <div>Or, upload a Wasm file: <input type="file" id="wasmFileInput" accept=".wasm" /></div>
-      <div>Or, drop a Wasm file onto the webpage</div>
+    <header class="app-header">
+      <div class="brand">
+        <wa-icon name="cubes" class="brand-icon"></wa-icon>
+        <span class="brand-title">Component UI</span>
+        <wa-tag id="componentName" size="s" variant="brand" pill hidden></wa-tag>
+      </div>
+      <div class="toolbar">
+        <select id="preselectedWasmFile" aria-label="Example components">
+          <option value="" disabled selected>Load an example…</option>
+          <option value="calculator.wasm">Calculator</option>
+          <option value="adder.wasm">Adder</option>
+          <option value="variants.wasm">Variants</option>
+          <option value="resource.wasm">Resource</option>
+          <option value="wasi-http.wasm">WASI HTTP</option>
+        </select>
+        <wa-button id="uploadButton" appearance="outlined">
+          <wa-icon slot="start" name="upload"></wa-icon>
+          Upload .wasm
+        </wa-button>
+        <input type="file" id="wasmFileInput" accept=".wasm" hidden />
+      </div>
+    </header>
+
+    <main id="welcome" class="welcome">
+      <wa-card class="welcome-card">
+        <div class="welcome-body">
+          <wa-icon name="file-import" class="welcome-icon"></wa-icon>
+          <h2>Explore a WebAssembly component</h2>
+          <p class="muted">
+            Pick an example above, upload a <code>.wasm</code> component, or drop one anywhere on this page.
+            Every exported function gets a form generated from its WIT signature.
+          </p>
+          <div id="loading" class="loading" hidden><wa-spinner></wa-spinner> Loading component…</div>
+          <div id="loadError" hidden></div>
+        </div>
+      </wa-card>
+    </main>
+
+    <wa-split-panel id="workspace" class="workspace" hidden>
+      <section slot="start" class="pane component-pane">
+        <wa-card id="importsCard" class="imports-card" hidden>
+          <div slot="header" class="card-title">
+            <span>Imports</span>
+            <span class="muted">Provide a JavaScript implementation for each non-WASI import.</span>
+          </div>
+          <div id="imports" class="imports"></div>
+          <div slot="footer" class="func-actions">
+            <wa-button id="instantiateButton" variant="brand">
+              <wa-icon slot="start" name="play"></wa-icon>
+              Instantiate
+            </wa-button>
+          </div>
+        </wa-card>
+        <div id="exports" class="exports"></div>
+      </section>
+      <aside slot="end" class="pane console-pane">
+        <div class="console-header">
+          <span class="console-title"><wa-icon name="terminal"></wa-icon> Console</span>
+          <wa-button id="clearConsole" size="s" appearance="plain">Clear</wa-button>
+        </div>
+        <div id="console" class="console"></div>
+      </aside>
+    </wa-split-panel>
+
+    <div class="drop-overlay" aria-hidden="true">
+      <div class="drop-target">
+        <wa-icon name="file-arrow-down"></wa-icon>
+        Drop a .wasm component to load it
+      </div>
     </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
