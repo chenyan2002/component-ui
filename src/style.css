@@ -198,10 +198,26 @@ pre {
   flex-direction: column;
   gap: var(--wa-space-m);
 }
+.instance-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wa-space-s);
+}
 .instance-title {
   display: flex;
   align-items: center;
   gap: var(--wa-space-xs);
+  min-width: 0;
+}
+.instance-origin {
+  font-family: var(--wa-font-family-code);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.instance-card.dead {
+  opacity: 0.6;
 }
 
 /* Function cards */

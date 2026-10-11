@@ -1,11 +1,19 @@
 import { html, LitElement, nothing, PropertyValues } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 
-export function customStringify(obj: any): string {
+// Marks a string produced by `describe` so it is shown unquoted.
+const RAW = '\uE000';
+
+// Pretty-prints a value; `describe` can replace objects (e.g. resource handles) by a name.
+export function customStringify(obj: any, describe?: (value: any) => string | undefined): string {
   if (obj === undefined) {
     return 'undefined';
   }
   const json = JSON.stringify(obj, (_key, value) => {
+    const name = describe?.(value);
+    if (name !== undefined) {
+      return RAW + name;
+    }
     if (typeof value === 'function' || typeof value === 'bigint' || typeof value === 'symbol') {
       return value.toString();
     }
@@ -17,7 +25,7 @@ export function customStringify(obj: any): string {
   if (json === '{}' && obj?.constructor?.name) {
     return `[object ${obj.constructor.name}]`;
   }
-  return json;
+  return json.replace(new RegExp(`"${RAW}([^"]*)"`, 'g'), '$1');
 }
 
 function errorText(err: unknown): string {
@@ -29,7 +37,8 @@ function errorText(err: unknown): string {
 }
 
 export interface LogEntry {
-  result(value: any): void;
+  // `text` is the formatted result.
+  result(text: string): void;
   error(err: unknown): void;
 }
 
@@ -64,7 +73,7 @@ export class ConsolePanel extends LitElement {
       this.requestUpdate();
     };
     return {
-      result: (value) => finish('ok', customStringify(value)),
+      result: (text) => finish('ok', text),
       error: (err) => finish('error', errorText(err)),
     };
   }

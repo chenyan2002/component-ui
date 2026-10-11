@@ -53,6 +53,19 @@ export abstract class Visitor<D, R> {
     public visitRec(t: RecClass, _ty: Type, data: D): R {
         return this.visitType(t, data);
     }
+    // Handles default to visiting the resource type itself.
+    public visitOwned(_t: OwnedClass, ty: Type, data: D): R {
+        return ty.accept(this, data);
+    }
+    public visitBorrow(_t: BorrowClass, ty: Type, data: D): R {
+        return ty.accept(this, data);
+    }
+}
+
+// jco exposes record fields (and flags) in lowerCamelCase, e.g. `link-count` as `linkCount`.
+export function jsFieldName(name: string): string {
+    const [first, ...rest] = name.split('-');
+    return first.toLowerCase() + rest.map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('');
 }
 
 export abstract class Type<T = any> {
@@ -238,8 +251,6 @@ export class FuncClass extends Type<any> {
     }
 }
 export class ResourceClass extends Type<any> {
-    public instances: Record<string, any> = {};
-    private _counter = 0;
     constructor(public readonly _name: string, public readonly _fields: Record<string, FuncClass>) {
         super();
     }
@@ -255,24 +266,23 @@ export class ResourceClass extends Type<any> {
     public get_method_funcs(): Array<[string, FuncClass]> {
         return Object.entries(this._fields).filter(([_, f]) => f.callKind === 'method');
     }
-    public clear_instances() {
-        this.instances = {};
-    }
-    public add_instance(obj: any): string {
-        const name = `${this._name.toLowerCase()}_${this._counter++}`;
-        this.instances[name] = obj;
-        return name;
-    }
+}
+function resourceName(ty: RecClass): string {
+    const resource = ty.get_type();
+    return resource instanceof ResourceClass ? resource._name : ty.name;
 }
 export class OwnedClass extends Type<any> {
     constructor(public readonly _ty: RecClass) {
         super();
     }
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
-        return this._ty.accept(v, d);
+        return v.visitOwned(this, this._ty, d);
+    }
+    get resource(): ResourceClass {
+        return this._ty.get_type() as ResourceClass;
     }
     get name(): string {
-        return `${this._ty.name}`;
+        return `own<${resourceName(this._ty)}>`;
     }
 }
 export class BorrowClass extends Type<any> {
@@ -280,10 +290,13 @@ export class BorrowClass extends Type<any> {
         super();
     }
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
-        return this._ty.accept(v, d);
+        return v.visitBorrow(this, this._ty, d);
+    }
+    get resource(): ResourceClass {
+        return this._ty.get_type() as ResourceClass;
     }
     get name(): string {
-        return `borrow<${this._ty.name}>`;
+        return `borrow<${resourceName(this._ty)}>`;
     }
 }
 // Name the bindgen gives to the interface holding world-level exports.

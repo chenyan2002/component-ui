@@ -1,4 +1,5 @@
 import * as IDL from './wit';
+import { ResourceRegistry } from './resources';
 
 // A draft is the editable state of an argument form, shaped after its WIT type.
 interface DraftBase {
@@ -92,6 +93,9 @@ function randomNumber(signed: boolean): number {
 
 // Fills empty (or previously randomized) values in place, leaving user input alone.
 class Randomize extends IDL.Visitor<Draft, void> {
+  constructor(private readonly registry: ResourceRegistry) {
+    super();
+  }
   public visitType<T>(_t: IDL.Type<T>, _d: Draft): void {}
   public visitString(_t: IDL.StringClass, d: Draft): void {
     this.fillText(d as TextDraft, () => Math.random().toString(36).substring(6));
@@ -109,10 +113,13 @@ class Randomize extends IDL.Visitor<Draft, void> {
     (d as BoolDraft).checked = Math.random() < 0.5;
   }
   public visitResource(t: IDL.ResourceClass, d: Draft): void {
-    const keys = Object.keys(t.instances);
-    if (keys.length > 0) {
-      const text = d as TextDraft;
-      text.text = keys[randomInt(keys.length)];
+    const text = d as TextDraft;
+    const live = this.registry.live(t);
+    // Also replace a selection that is no longer live, e.g. after it was moved.
+    const selected = this.registry.get(text.text);
+    if (live.length > 0 && (text.text === '' || text.auto || selected?.state !== 'live')) {
+      text.text = live[randomInt(live.length)].id;
+      text.auto = true;
       text.error = undefined;
     }
   }
@@ -165,8 +172,8 @@ class Randomize extends IDL.Visitor<Draft, void> {
   }
 }
 
-export function randomize(t: IDL.Type, d: Draft) {
-  t.accept(new Randomize(), d);
+export function randomize(t: IDL.Type, d: Draft, registry: ResourceRegistry) {
+  t.accept(new Randomize(registry), d);
 }
 
 // Converts to the JS representation jco expects: `number` up to 32 bits, `bigint` above.
@@ -190,6 +197,9 @@ function parseInteger(bits: number, signed: boolean, text: string): number | big
 // Converts a draft into the JS value jco expects. Invalid drafts get an `error`
 // and yield INVALID; every field is visited so all errors show at once.
 class Parse extends IDL.Visitor<Draft, any> {
+  constructor(private readonly registry: ResourceRegistry) {
+    super();
+  }
   public visitType<T>(t: IDL.Type<T>, d: Draft): any {
     return this.leaf(d, () => {
       throw new Error(`Unsupported type ${t.name}`);
@@ -223,14 +233,14 @@ class Parse extends IDL.Visitor<Draft, any> {
   public visitResource(t: IDL.ResourceClass, d: Draft): any {
     return this.leaf(d, () => {
       const id = (d as TextDraft).text;
-      if (id === '' && Object.keys(t.instances).length === 0) {
-        throw new Error(`No ${t._name} instances yet`);
+      const instance = this.registry.get(id);
+      if (!instance) {
+        throw new Error(this.registry.live(t).length > 0 ? 'Select an instance' : `No ${t._name} instances yet`);
       }
-      const result = t.instances[id];
-      if (result === undefined) {
-        throw new Error(`Resource not found: ${id}`);
+      if (instance.state !== 'live') {
+        throw new Error(`${id} was ${instance.fate}`);
       }
-      return result;
+      return instance.obj;
     });
   }
   public visitOpt(t: IDL.OptClass, ty: IDL.Type, d: Draft): any {
@@ -252,7 +262,7 @@ class Parse extends IDL.Visitor<Draft, any> {
   public visitRecord(_t: IDL.RecordClass, fields: Record<string, IDL.Type>, d: Draft): any {
     const entries = Object.entries(fields);
     const values = this.all(entries.map(([_, ty], i) => ty.accept(this, (d as FieldsDraft).fields[i])));
-    return values === INVALID ? INVALID : Object.fromEntries(entries.map(([key], i) => [key, values[i]]));
+    return values === INVALID ? INVALID : Object.fromEntries(entries.map(([key], i) => [IDL.jsFieldName(key), values[i]]));
   }
   public visitTuple(_t: IDL.TupleClass, components: IDL.Type[], d: Draft): any {
     return this.all(components.map((ty, i) => ty.accept(this, (d as FieldsDraft).fields[i])));
@@ -297,12 +307,12 @@ class Parse extends IDL.Visitor<Draft, any> {
 }
 
 // Parses a single value, recording errors on the draft. Returns INVALID on failure.
-export function parseDraft(t: IDL.Type, d: Draft): any {
-  return t.accept(new Parse(), d);
+export function parseDraft(t: IDL.Type, d: Draft, registry: ResourceRegistry): any {
+  return t.accept(new Parse(registry), d);
 }
 
 // Parses all arguments, or returns undefined if any of them is invalid.
-export function parseArgs(types: IDL.Type[], drafts: Draft[]): any[] | undefined {
-  const values = types.map((t, i) => parseDraft(t, drafts[i]));
+export function parseArgs(types: IDL.Type[], drafts: Draft[], registry: ResourceRegistry): any[] | undefined {
+  const values = types.map((t, i) => parseDraft(t, drafts[i], registry));
   return values.includes(INVALID) ? undefined : values;
 }

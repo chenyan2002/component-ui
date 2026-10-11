@@ -7,6 +7,7 @@ import { instantiate, loadComponent, LoadedComponent, readWasm } from './loader'
 import { ExportsContext } from './calls';
 import { ConsolePanel } from './console';
 import { renderExports } from './exports-view';
+import { ResourceRegistry } from './resources';
 
 const EXAMPLES: Array<[file: string, label: string]> = [
   ['calculator.wasm', 'Calculator'],
@@ -228,17 +229,10 @@ export class ComponentApp extends LitElement {
       if (s !== this.session) {
         return;
       }
-      // Instances from a previous instantiation belong to a different component instance.
-      s.component.interfaces.forEach((iface) => iface.get_resources().forEach((r) => r.clear_instances()));
-      s.ctx = {
-        exports,
-        log: (call) => this.consolePanel!.logCall(call),
-        addInstance: (resource, obj) => {
-          const instance = resource.add_instance(obj);
-          this.requestUpdate();
-          return instance;
-        },
-      };
+      // Each component instance has its own resource instances.
+      const registry = new ResourceRegistry();
+      registry.addEventListener('change', () => this.requestUpdate());
+      s.ctx = { exports, log: (call) => this.consolePanel!.logCall(call), registry };
       s.status = 'ready';
       s.generation++;
     } catch (err) {

@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import * as WIT from './wit';
 import { call, CallTarget, ExportsContext } from './calls';
 import { Draft, initDraft, parseArgs, randomize } from './draft';
-import { renderField } from './form';
+import { FormContext, renderField } from './form';
 
 const MAX_TYPE_LENGTH = 48;
 
@@ -32,20 +32,36 @@ export class FuncCard extends LitElement {
 
   // Drafts are mutated in place by the form, which then calls requestUpdate().
   private drafts: Draft[] = [];
+  // Resource pickers list live instances, so re-render when they change.
+  private readonly onRegistryChange = () => this.requestUpdate();
 
   protected createRenderRoot() {
     return this;
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.ctx?.registry.addEventListener('change', this.onRegistryChange);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this.ctx?.registry.removeEventListener('change', this.onRegistryChange);
   }
 
   protected willUpdate(changed: PropertyValues<this>) {
     if (changed.has('func')) {
       this.drafts = this.func._args.map(([_, type]) => initDraft(type));
     }
+    if (changed.has('ctx')) {
+      changed.get('ctx')?.registry.removeEventListener('change', this.onRegistryChange);
+      this.ctx.registry.addEventListener('change', this.onRegistryChange);
+    }
   }
 
   protected render() {
     const args = this.func._args;
-    const update = () => this.requestUpdate();
+    const form: FormContext = { update: () => this.requestUpdate(), registry: this.ctx.registry };
     return html`<wa-card class="func-card">
       <div slot="header" class="func-header">
         ${renderSignature(this.name, this.func)}
@@ -54,7 +70,7 @@ export class FuncCard extends LitElement {
       <div class="func-args">
         ${args.length === 0
           ? html`<span class="muted">No arguments</span>`
-          : args.map(([arg, type], i) => renderField(type, this.drafts[i], update, arg))}
+          : args.map(([arg, type], i) => renderField(type, this.drafts[i], form, arg))}
       </div>
       <div slot="footer" class="func-actions">
         <wa-button variant="brand" size="s" ?loading=${this.busy === 'call'} @click=${() => this.submit(false)}>
@@ -80,17 +96,18 @@ export class FuncCard extends LitElement {
       return;
     }
     const types = this.func._args.map(([_, type]) => type);
+    const { registry } = this.ctx;
     if (random) {
-      types.forEach((type, i) => randomize(type, this.drafts[i]));
+      types.forEach((type, i) => randomize(type, this.drafts[i], registry));
     }
-    const args = parseArgs(types, this.drafts);
+    const args = parseArgs(types, this.drafts, registry);
     this.requestUpdate();
     if (!args) {
       return;
     }
     this.busy = random ? 'random' : 'call';
     try {
-      await call(this.ctx, this.target, this.name, args);
+      await call(this.ctx, this.target, this.name, this.func, args);
     } finally {
       this.busy = undefined;
     }
