@@ -371,6 +371,28 @@ console-panel {
   border-left-color: var(--wa-color-danger-border-loud);
   background: var(--wa-color-danger-fill-quiet);
 }
+.log-entry.stream {
+  display: flex;
+  align-items: baseline;
+  gap: var(--wa-space-s);
+  border-left-color: var(--wa-color-neutral-border-normal);
+}
+.log-entry.stderr {
+  border-left-color: var(--wa-color-warning-border-loud);
+}
+.log-stream {
+  flex-shrink: 0;
+  font-family: var(--wa-font-family-body);
+  font-size: var(--wa-font-size-xs);
+  color: var(--wa-color-text-quiet);
+  text-transform: uppercase;
+}
+.log-entry.stream pre {
+  flex: 1;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .log-call {
   display: flex;
   align-items: baseline;

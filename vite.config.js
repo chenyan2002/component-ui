@@ -17,7 +17,7 @@ export default defineConfig({
                   const wasmFile = path.basename(req.url);
                   const wasmPath = path.resolve(
                         __dirname,
-                        `node_modules/@bytecodealliance/jco/obj/${wasmFile}`
+                        `node_modules/@bytecodealliance/jco-transpile/vendor/${wasmFile}`
                       ); 
                   fs.readFile(wasmPath, (err, data) => {
                     if (err) {

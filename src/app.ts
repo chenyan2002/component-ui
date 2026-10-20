@@ -225,7 +225,10 @@ export class ComponentApp extends LitElement {
     s.status = 'instantiating';
     this.requestUpdate();
     try {
-      const exports = await instantiate(s.component.transpiled, s.importCode);
+      const exports = await instantiate(s.component.transpiled, s.importCode, {
+        stdout: (text) => this.consolePanel?.print('stdout', text),
+        stderr: (text) => this.consolePanel?.print('stderr', text),
+      });
       if (s !== this.session) {
         return;
       }

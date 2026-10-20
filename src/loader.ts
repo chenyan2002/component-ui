@@ -1,25 +1,70 @@
-import { generate, Transpiled } from '@bytecodealliance/jco/component';
+import { generate } from '@bytecodealliance/jco/component';
+import { filesystem, sockets } from '@bytecodealliance/preview2-shim';
+import { WASIShim } from '@bytecodealliance/preview2-shim/instantiation';
 import * as WIT from './wit';
 import { generateAst } from './obj/bindgen';
 
-const SHIM_PREFIX = '@bytecodealliance/preview2-shim/';
-// Each WASI package is mapped by jco to the matching preview2-shim module.
-const WASI_SHIMS: Record<string, () => Promise<unknown>> = {
-  cli: () => import('@bytecodealliance/preview2-shim/cli'),
-  clocks: () => import('@bytecodealliance/preview2-shim/clocks'),
-  filesystem: () => import('@bytecodealliance/preview2-shim/filesystem'),
-  http: () => import('@bytecodealliance/preview2-shim/http'),
-  io: () => import('@bytecodealliance/preview2-shim/io'),
-  random: () => import('@bytecodealliance/preview2-shim/random'),
-  sockets: () => import('@bytecodealliance/preview2-shim/sockets'),
-};
+export type Transpiled = Awaited<ReturnType<typeof generate>>;
+
+// jco types its output files as possibly SharedArrayBuffer-backed, but they are plain ArrayBuffers.
+function fileBytes(transpiled: Transpiled, name: string): Uint8Array<ArrayBuffer> {
+  const [_, bytes] = transpiled.files.find(([file]) => file === name)!;
+  return bytes as Uint8Array<ArrayBuffer>;
+}
+
 const TRANSPILED_NAME = 'component';
+
+// Interfaces implemented by the preview2 shim, keyed like jco's import specifiers (`wasi:cli/stdout`).
+const WASI_INTERFACES = new Set(Object.keys(new WASIShim().getImportObject()));
+
+// `wasi:cli/stdout@0.2.3` → `wasi:cli/stdout`.
+function unversioned(specifier: string): string {
+  return specifier.replace(/@[^/]*$/, '');
+}
 
 export interface LoadedComponent {
   transpiled: Transpiled;
   interfaces: WIT.InterfaceClass[];
-  // Imports that are not WASI and must be provided as JS source by the user.
+  // Imports the WASI shim doesn't provide; the user supplies them as JS source.
   customImports: string[];
+}
+
+// Receives the text the component writes to stdout and stderr, as it is written.
+export interface ComponentOutput {
+  stdout(text: string): void;
+  stderr(text: string): void;
+}
+
+// An output stream handler that decodes UTF-8, keeping multi-byte characters split across writes intact.
+function textStream(onText: (text: string) => void) {
+  const decoder = new TextDecoder();
+  const emit = (text: string) => {
+    if (text) {
+      onText(text);
+    }
+  };
+  const flush = () => emit(decoder.decode());
+  return {
+    write: (contents: Uint8Array) => emit(decoder.decode(contents, { stream: true })),
+    flush,
+    blockingFlush: flush,
+  };
+}
+
+// The WASI imports for one component instance, with the shim's opt-in capabilities enabled.
+function wasiImports(output: ComponentOutput): Record<string, unknown> {
+  return new WASIShim({
+    stdout: textStream(output.stdout),
+    stderr: textStream(output.stderr),
+    // An ephemeral filesystem with an empty root directory.
+    browserFilesystem: {
+      adapter: new filesystem.InMemoryFilesystemAdapter(),
+      preopens: { '/': { dir: {} } },
+    },
+    // Browsers have no raw sockets; these only connect endpoints within this page.
+    tcpSockets: new sockets.InMemoryTcpSockets(),
+    udpSockets: new sockets.InMemoryUdpSockets(),
+  }).getImportObject();
 }
 
 export async function importFromSource(code: BlobPart): Promise<any> {
@@ -50,28 +95,42 @@ export async function loadComponent(component: Uint8Array): Promise<LoadedCompon
     noTypescript: true,
     base64Cutoff: 1000000,
     instantiation: { tag: 'async' },
-    map: Object.keys(WASI_SHIMS).map((pkg) => [`wasi:${pkg}/*`, `${SHIM_PREFIX}${pkg}#*`]),
   });
   const binding = await importFromSource(generateAst(component));
   const interfaces: WIT.InterfaceClass[] = binding.Factory({ IDL: WIT });
-  const customImports = transpiled.imports.filter((pkg) => !pkg.startsWith(SHIM_PREFIX));
+  const customImports = transpiled.imports.filter((pkg) => !WASI_INTERFACES.has(unversioned(pkg)));
   return { transpiled, interfaces, customImports };
 }
 
-export async function instantiate(transpiled: Transpiled, customImportCode: Record<string, string>): Promise<any> {
+// jco checks at instantiation that every imported function exists. Stub the ones the user
+// didn't provide, so the component still instantiates and only fails if it calls them.
+function stubMissingImports(pkg: string, mod: object): object {
+  return new Proxy(mod, {
+    get(target, key, receiver) {
+      // `then` is excluded so the module isn't mistaken for a promise.
+      if (typeof key !== 'string' || key === 'then' || key in target) {
+        return Reflect.get(target, key, receiver);
+      }
+      // A plain function, so it also works where a resource class is expected.
+      return function missingImport() {
+        throw new Error(`Import ${pkg}#${key} is not implemented. Provide it in the Imports card.`);
+      };
+    },
+  });
+}
+
+export async function instantiate(
+  transpiled: Transpiled,
+  customImportCode: Record<string, string>,
+  output: ComponentOutput,
+): Promise<any> {
+  const wasi = wasiImports(output);
   const imports: Record<string, unknown> = {};
-  for (const [pkg, load] of Object.entries(WASI_SHIMS)) {
-    imports[`${SHIM_PREFIX}${pkg}`] = await load();
-  }
   for (const pkg of transpiled.imports) {
-    if (!pkg.startsWith(SHIM_PREFIX)) {
-      imports[pkg] = await importFromSource(customImportCode[pkg] ?? '');
-    }
+    imports[pkg] = WASI_INTERFACES.has(unversioned(pkg))
+      ? wasi[unversioned(pkg)]
+      : stubMissingImports(pkg, await importFromSource(customImportCode[pkg] ?? ''));
   }
-  const source = transpiled.files.find(([file]) => file === `${TRANSPILED_NAME}.js`)![1];
-  const mod = await importFromSource(source);
-  return mod.instantiate((core: string) => {
-    const [_, file] = transpiled.files.find(([name]) => name === core)!;
-    return WebAssembly.compile(file);
-  }, imports);
+  const mod = await importFromSource(fileBytes(transpiled, `${TRANSPILED_NAME}.js`));
+  return mod.instantiate((core: string) => WebAssembly.compile(fileBytes(transpiled, core)), imports);
 }

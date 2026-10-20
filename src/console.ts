@@ -42,13 +42,23 @@ export interface LogEntry {
   error(err: unknown): void;
 }
 
-interface Entry {
+interface CallEntry {
+  kind: 'call';
   call: string;
   time: string;
   status: 'pending' | 'ok' | 'error';
   output?: string;
   elapsed?: number;
 }
+
+// Text the component wrote to stdout or stderr.
+interface StreamEntry {
+  kind: 'stream';
+  stream: 'stdout' | 'stderr';
+  text: string;
+}
+
+type Entry = CallEntry | StreamEntry;
 
 @customElement('console-panel')
 export class ConsolePanel extends LitElement {
@@ -66,9 +76,9 @@ export class ConsolePanel extends LitElement {
 
   public logCall(call: string): LogEntry {
     const started = performance.now();
-    const entry: Entry = { call, time: new Date().toLocaleTimeString(), status: 'pending' };
+    const entry: CallEntry = { kind: 'call', call, time: new Date().toLocaleTimeString(), status: 'pending' };
     this.entries = [...this.entries, entry];
-    const finish = (status: Entry['status'], output: string) => {
+    const finish = (status: CallEntry['status'], output: string) => {
       Object.assign(entry, { status, output, elapsed: Math.round(performance.now() - started) });
       this.requestUpdate();
     };
@@ -76,6 +86,17 @@ export class ConsolePanel extends LitElement {
       result: (text) => finish('ok', text),
       error: (err) => finish('error', errorText(err)),
     };
+  }
+
+  public print(stream: StreamEntry['stream'], text: string) {
+    // Consecutive writes to the same stream share an entry.
+    const last = this.entries[this.entries.length - 1];
+    if (last?.kind === 'stream' && last.stream === stream) {
+      last.text += text;
+      this.requestUpdate();
+    } else {
+      this.entries = [...this.entries, { kind: 'stream', stream, text }];
+    }
   }
 
   protected updated(_changed: PropertyValues) {
@@ -97,6 +118,12 @@ export class ConsolePanel extends LitElement {
   }
 
   private renderEntry(entry: Entry) {
+    if (entry.kind === 'stream') {
+      return html`<div class="log-entry stream ${entry.stream}">
+        <span class="log-stream">${entry.stream}</span>
+        <pre>${entry.text.replace(/\r?\n$/, '')}</pre>
+      </div>`;
+    }
     const meta = entry.elapsed === undefined ? entry.time : `${entry.time} · ${entry.elapsed} ms`;
     return html`<div class="log-entry ${entry.status}">
       <div class="log-call">
