@@ -1,27 +1,36 @@
 name: Deploy to GitHub Pages
 
 on:
-  #pull_request:
   push:
     branches:
       - main
+
 jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
+    # Never push to gh-pages from two runs at once; a newer deploy waits for the current one.
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18' # or your node version
+          node-version: '22'
+          cache: npm
 
       - name: Install dependencies
-        run: npm install # or yarn install or pnpm install
+        run: npm ci
 
       - name: Build project
-        run: npm run build # or yarn build or pnpm build
+        run: npm run build
 
       - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
