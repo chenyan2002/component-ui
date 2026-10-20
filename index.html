@@ -4,21 +4,10 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + TS</title>
+    <title>Component UI · WebAssembly component explorer</title>
   </head>
   <body>
-    <div id="app">
-      <div><select id="preselectedWasmFile">
-      <option value="" disabled selected>Select a Wasm file</option>
-      <option value="calculator.wasm">Calculator</option>
-      <option value="adder.wasm">Adder</option>
-      <option value="variants.wasm">Variants</option>
-      <option value="resource.wasm">Resource</option>
-      <option value="wasi-http.wasm">WASI HTTP</option>
-      </select></div>
-      <div>Or, upload a Wasm file: <input type="file" id="wasmFileInput" accept=".wasm" /></div>
-      <div>Or, drop a Wasm file onto the webpage</div>
-    </div>
+    <component-app></component-app>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -1,6 +1,6 @@
 export abstract class Visitor<D, R> {
-    public visitType<T>(t: Type<T>, data: D): R {
-        throw new Error('Not implemented');
+    public visitType<T>(t: Type<T>, _data: D): R {
+        throw new Error(`Type ${t.name} not implemented`);
     }
     public visitNull(t: NullClass, data: D): R {
         return this.visitType(t, data);
@@ -23,22 +23,22 @@ export abstract class Visitor<D, R> {
     public visitFixedFloat(t: FixedFloatClass, data: D): R {
         return this.visitNumber(t, data);
     }
-    public visitOpt(t: OptClass, ty: Type, data: D): R {
+    public visitOpt(t: OptClass, _ty: Type, data: D): R {
         return this.visitType(t, data);
     }
-    public visitVec(t: VecClass, ty: Type, data: D): R {
+    public visitVec(t: VecClass, _ty: Type, data: D): R {
         return this.visitType(t, data);
     }
-    public visitRecord(t: RecordClass, fields: Record<string, Type>, data: D): R {
+    public visitRecord(t: RecordClass, _fields: Record<string, Type>, data: D): R {
         return this.visitType(t, data);
     }
-    public visitTuple(t: TupleClass, components: Array<Type>, data: D): R {
+    public visitTuple(t: TupleClass, _components: Array<Type>, data: D): R {
         return this.visitType(t, data);
     }
-    public visitVariant(t: VariantClass, fields: Record<string, Type>, data: D): R {
+    public visitVariant(t: VariantClass, _fields: Record<string, Type>, data: D): R {
         return this.visitType(t, data);
     }
-    public visitEnum(t: EnumClass, tags: Array<string>, data: D): R {
+    public visitEnum(t: EnumClass, _tags: Array<string>, data: D): R {
         return this.visitType(t, data);
     }
     public visitFunc(t: FuncClass, data: D): R {
@@ -50,12 +50,27 @@ export abstract class Visitor<D, R> {
     public visitResource(t: ResourceClass, data: D): R {
         return this.visitType(t, data);
     }
-    public visitRec(t: RecClass, ty: Type, data: D): R {
+    public visitRec(t: RecClass, _ty: Type, data: D): R {
         return this.visitType(t, data);
+    }
+    // Handles default to visiting the resource type itself.
+    public visitOwned(_t: OwnedClass, ty: Type, data: D): R {
+        return ty.accept(this, data);
+    }
+    public visitBorrow(_t: BorrowClass, ty: Type, data: D): R {
+        return ty.accept(this, data);
     }
 }
 
+// jco exposes record fields (and flags) in lowerCamelCase, e.g. `link-count` as `linkCount`.
+export function jsFieldName(name: string): string {
+    const [first, ...rest] = name.split('-');
+    return first.toLowerCase() + rest.map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('');
+}
+
 export abstract class Type<T = any> {
+    // Phantom field so `T` (the JS value type) participates in type checking.
+    declare protected readonly _value?: T;
     public abstract readonly name: string;
     public abstract accept<D, R>(v: Visitor<D, R>, d: D): R;
 }
@@ -124,7 +139,7 @@ export class OptClass extends Type<any> {
         return v.visitOpt(this, this._ty, d);
     }
     get name(): string {
-        return `option&lt;${this._ty.name}&gt;`;
+        return `option<${this._ty.name}>`;
     }
     public maybe_null(): boolean {
         if (this._ty instanceof OptClass) {
@@ -142,7 +157,7 @@ export class VecClass extends Type<Array<any>> {
         return v.visitVec(this, this._ty, d);
     }
     get name(): string {
-        return `list&lt;${this._ty.name}&gt;`;
+        return `list<${this._ty.name}>`;
     }
 }
 export class RecordClass extends Type<Record<string, any>> {
@@ -164,7 +179,7 @@ export class TupleClass extends Type<Array<any>> {
         return v.visitTuple(this, this._components, d);
     }
     get name(): string {    
-        return `tuple&lt;${this._components.map((c) => c.name).join(', ')}&gt;`;
+        return `tuple<${this._components.map((c) => c.name).join(', ')}>`;
     }
 }
 export class VariantClass extends Type<Record<string, Type>> {
@@ -214,6 +229,7 @@ export class RecClass extends Type<any> {
         return this._type.name;
     }
 }
+export type CallKind = 'func' | 'constructor' | 'static' | 'method';
 export class FuncClass extends Type<any> {
     constructor(public readonly _args: Array<[string, Type]>, public readonly _ret: Type[], public readonly _kind: string = '') {
         super();
@@ -221,13 +237,20 @@ export class FuncClass extends Type<any> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitFunc(this, d);
     }
+    // `_kind` may carry an 'async ' prefix, e.g. 'async method'.
+    get callKind(): CallKind {
+        for (const kind of ['constructor', 'static', 'method'] as const) {
+            if (this._kind.endsWith(kind)) {
+                return kind;
+            }
+        }
+        return 'func';
+    }
     get name(): string {
         return `func(${this._args.map((a) => `${a[0]}: ${a[1].name}`).join(', ')}) -> (${this._ret.map((a) => a.name).join(', ')})`;
     }
 }
 export class ResourceClass extends Type<any> {
-    public instances: Record<string, any> = {};
-    private _counter = 0;
     constructor(public readonly _name: string, public readonly _fields: Record<string, FuncClass>) {
         super();
     }
@@ -238,26 +261,28 @@ export class ResourceClass extends Type<any> {
         return `resource ${this._name}`;
     }
     public get_static_funcs(): Array<[string, FuncClass]> {
-        return Object.entries(this._fields).filter(([_, f]) => f._kind.endsWith('static') || f._kind.endsWith('constructor'));
+        return Object.entries(this._fields).filter(([_, f]) => f.callKind === 'static' || f.callKind === 'constructor');
     }
     public get_method_funcs(): Array<[string, FuncClass]> {
-        return Object.entries(this._fields).filter(([_, f]) => f._kind.endsWith('method'));
+        return Object.entries(this._fields).filter(([_, f]) => f.callKind === 'method');
     }
-    public add_instance(obj: any): string {
-        const name = `${this._name.toLowerCase()}_${this._counter++}`;
-        this.instances[name] = obj;
-        return name;
-    }
+}
+function resourceName(ty: RecClass): string {
+    const resource = ty.get_type();
+    return resource instanceof ResourceClass ? resource._name : ty.name;
 }
 export class OwnedClass extends Type<any> {
     constructor(public readonly _ty: RecClass) {
         super();
     }
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
-        return this._ty.accept(v, d);
+        return v.visitOwned(this, this._ty, d);
+    }
+    get resource(): ResourceClass {
+        return this._ty.get_type() as ResourceClass;
     }
     get name(): string {
-        return `${this._ty.name}`;
+        return `own<${resourceName(this._ty)}>`;
     }
 }
 export class BorrowClass extends Type<any> {
@@ -265,12 +290,17 @@ export class BorrowClass extends Type<any> {
         super();
     }
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
-        return this._ty.accept(v, d);
+        return v.visitBorrow(this, this._ty, d);
+    }
+    get resource(): ResourceClass {
+        return this._ty.get_type() as ResourceClass;
     }
     get name(): string {
-        return `borrow&lt;${this._ty.name}&gt;`;
+        return `borrow<${resourceName(this._ty)}>`;
     }
 }
+// Name the bindgen gives to the interface holding world-level exports.
+export const ROOT_INTERFACE = 'UNNAMED';
 export class InterfaceClass extends Type<any> {
     [key: string]: any; // Add an index signature to allow dynamic property assignment
     constructor(public readonly _name: string, public readonly _fields: Record<string, FuncClass>, public readonly _vars: Record<string, Type> = {}) {
@@ -284,6 +314,9 @@ export class InterfaceClass extends Type<any> {
     }
     get name(): string {
         return `interface ${this._name}`;
+    }
+    get isRoot(): boolean {
+        return this._name === ROOT_INTERFACE;
     }
     public get_resources(): Array<ResourceClass> {
         return Object.entries(this._vars).filter(([_, ty]) => ty instanceof RecClass && ty.get_type() instanceof ResourceClass).map(([_, ty]) => (ty as RecClass).get_type() as ResourceClass);
@@ -327,8 +360,8 @@ export function Variant(fields: Record<string, Type>): VariantClass {
 export function Func(args: Array<[string, Type]>, ret: [] | [Type], kind: string): FuncClass {
     return new FuncClass(args, ret, kind);
 }
-export function Interface(name: string, fields: Record<string, FuncClass>, resources: Array<ResourceClass>): InterfaceClass {
-    return new InterfaceClass(name, fields, resources);
+export function Interface(name: string, fields: Record<string, FuncClass>, vars: Record<string, Type> = {}): InterfaceClass {
+    return new InterfaceClass(name, fields, vars);
 }
 export function Resource(name: string, fields: Record<string, FuncClass>): ResourceClass {
     return new ResourceClass(name, fields);

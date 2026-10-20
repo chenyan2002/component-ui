@@ -5,6 +5,8 @@ import topLevelAwait from 'vite-plugin-top-level-await';
 
 export default defineConfig({
     base: '/component-ui/',
+    // Lower the standard decorators used by the Lit components; browsers don't support them yet.
+    esbuild: { target: 'es2022' },
     plugins: [
       topLevelAwait(),
         {
@@ -15,7 +17,7 @@ export default defineConfig({
                   const wasmFile = path.basename(req.url);
                   const wasmPath = path.resolve(
                         __dirname,
-                        `node_modules/@bytecodealliance/jco/obj/${wasmFile}`
+                        `node_modules/@bytecodealliance/jco-transpile/vendor/${wasmFile}`
                       ); 
                   fs.readFile(wasmPath, (err, data) => {
                     if (err) {
