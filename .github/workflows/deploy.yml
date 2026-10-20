@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+# Read-only by default; only the deploy job can push.
+permissions:
+  contents: read
+
 jobs:
   test:
     uses: ./.github/workflows/test.yml
@@ -12,16 +16,19 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
+    # The deploy action pushes to the gh-pages branch with the workflow's GITHUB_TOKEN.
+    permissions:
+      contents: write
     # Never push to gh-pages from two runs at once; a newer deploy waits for the current one.
     concurrency:
       group: deploy
       cancel-in-progress: false
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -35,7 +42,6 @@ jobs:
       - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          ssh-key: ${{ secrets.DEPLOY_KEY }}
           branch: gh-pages
           single-commit: true
           folder: dist
