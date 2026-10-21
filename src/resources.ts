@@ -75,12 +75,13 @@ export class ResourceRegistry extends EventTarget {
   // The object whose destructor `drop` is running, which isn't the guest dropping it.
   private dropping?: object;
 
-  // Registers an instance returned by an export.
-  public add(resource: WIT.ResourceClass, obj: object, origin: string): Instance {
+  // Registers an instance returned to the UI, by an export or, when `fromGuest` is false, by
+  // the host directly.
+  public add(resource: WIT.ResourceClass, obj: object, origin: string, fromGuest = true): Instance {
     const existing = this.byObj.get(obj);
     if (existing?.holders) {
-      // Returning a host object takes it from the guest.
-      this.hold(existing, existing.holders.guest - 1, true);
+      // An export returning a host object takes it from the guest.
+      this.hold(existing, existing.holders.guest - (fromGuest ? 1 : 0), true);
     }
     if (existing) {
       return existing;
@@ -145,8 +146,12 @@ export class ResourceRegistry extends EventTarget {
     return this.byId.get(id);
   }
 
+  public instanceOf(obj: unknown): Instance | undefined {
+    return typeof obj === 'object' && obj !== null ? this.byObj.get(obj) : undefined;
+  }
+
   public idOf(obj: unknown): string | undefined {
-    return typeof obj === 'object' && obj !== null ? this.byObj.get(obj)?.id : undefined;
+    return this.instanceOf(obj)?.id;
   }
 
   // Table rows by handle index; instances without one come last, in creation order.
@@ -166,9 +171,10 @@ export class ResourceRegistry extends EventTarget {
     return [...new Set(instances.filter(callable).map((i) => i.resource))];
   }
 
-  // Updates instance states after an export call. `owned` are the objects passed as owned
-  // handles; a host object passed on success now has a guest handle instead.
-  public settle(owned: object[], fate: string, succeeded: boolean) {
+  // Updates instance states after a call to the guest or, `into` the host, directly to the host.
+  // `owned` are the objects passed as owned handles; on success, a host object passed to the
+  // guest now has a guest handle, and one passed to the host is gone.
+  public settle(owned: object[], fate: string, succeeded: boolean, into: 'guest' | 'host' = 'guest') {
     let changed = false;
     for (const slot of this.slots.values()) {
       const instance = slot.current;
@@ -177,7 +183,8 @@ export class ResourceRegistry extends EventTarget {
       }
       if (instance.holders) {
         if (succeeded && owned.includes(instance.obj)) {
-          this.hold(instance, instance.holders.guest + 1, false);
+          const guest = instance.holders.guest + (into === 'guest' ? 1 : 0);
+          this.hold(instance, guest, false, ['moved', fate]);
         }
         continue;
       }

@@ -21,12 +21,17 @@ function summary(kind: string, name: string, count: number, unit: string) {
   </div>`;
 }
 
+// Resources an interface uses may be imported; their functions then run on the host.
+function resourceKind(ctx: ExportsContext, resource: WIT.ResourceClass): string {
+  return ctx.host.isImported(resource) ? 'host resource' : 'resource';
+}
+
 function renderResource(ctx: ExportsContext, iface: WIT.InterfaceClass, resource: WIT.ResourceClass) {
   const statics = resource.get_static_funcs();
   const methods = resource.get_method_funcs();
   // Collapsed by default; resource sections can be long.
   return html`<wa-details class="resource">
-    ${summary('resource', resource._name, statics.length + methods.length, 'function')}
+    ${summary(resourceKind(ctx, resource), resource._name, statics.length + methods.length, 'function')}
     ${funcCards(ctx, statics, (func) => ({ type: func.callKind as 'constructor' | 'static', iface, resource }))}
     ${funcCards(ctx, methods, () => ({ type: 'method', resource }))}
   </wa-details>`;
@@ -38,7 +43,7 @@ function renderOtherResources(ctx: ExportsContext, interfaces: WIT.InterfaceClas
   return ctx.registry.resources().filter((r) => !exported.has(r)).map((resource) => {
     const methods = resource.get_method_funcs();
     return html`<wa-details class="interface resource">
-      ${summary('resource', resource._name, methods.length, 'method')}
+      ${summary(resourceKind(ctx, resource), resource._name, methods.length, 'method')}
       ${funcCards(ctx, methods, () => ({ type: 'method', resource }))}
     </wa-details>`;
   });

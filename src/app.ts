@@ -270,7 +270,7 @@ export class ComponentApp extends LitElement {
         return;
       }
       registry.addEventListener('change', () => this.requestUpdate());
-      s.ctx = { exports, log: (call) => this.consolePanel!.logCall(call), registry };
+      s.ctx = { exports, log: (call) => this.consolePanel!.logCall(call), registry, host };
       s.status = 'ready';
       s.generation++;
     } catch (err) {

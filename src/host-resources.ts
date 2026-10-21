@@ -37,14 +37,40 @@ function unversioned(pkg: string): string {
 }
 
 // Observes the imports of a component instance: resources the host hands to the guest are
-// registered, and the guest's handles on them are counted as it moves and drops them.
+// registered, and the guest's handles on them are counted as it moves and drops them. The UI
+// can also call the host's imported resources directly, e.g. to create arguments for exports.
 export class HostResources {
   private readonly interfaces: Map<string, WIT.InterfaceClass>;
+  private readonly imported: Set<WIT.ResourceClass>;
+  // The host's class for each imported resource, from the import jco takes it from.
+  private readonly classes = new Map<WIT.ResourceClass, Function>();
+  // Set while the UI calls the host directly, which isn't the guest using its imports.
+  private direct = 0;
 
   constructor(private readonly registry: ResourceRegistry, interfaces: WIT.InterfaceClass[]) {
     // jco may key imports without their version.
     this.interfaces = new Map(interfaces.map((iface) => [unversioned(iface._name), iface]));
+    this.imported = new Set(interfaces.flatMap((iface) => iface.get_resources()));
     registry.onHostInstance = (instance) => this.hook(instance);
+  }
+
+  // Whether the host implements the resource, i.e. an import defines it.
+  public isImported(resource: WIT.ResourceClass): boolean {
+    return this.imported.has(resource);
+  }
+
+  public hostClass(resource: WIT.ResourceClass): Function | undefined {
+    return this.classes.get(resource);
+  }
+
+  // Runs a call the UI makes on the host, e.g. a host resource's constructor.
+  public callDirect<T>(call: () => T): T {
+    this.direct++;
+    try {
+      return call();
+    } finally {
+      this.direct--;
+    }
   }
 
   // Wraps the import object for `pkg`, e.g. `wasi:cli/stdout`.
@@ -66,6 +92,10 @@ export class HostResources {
         if (!wrapped.has(key)) {
           const func = ownFunc(iface._fields, key);
           const resource = resources.get(key);
+          if (resource && !func) {
+            // jco takes a resource class from the import that defines it.
+            this.classes.set(resource, value);
+          }
           wrapped.set(key, func
             ? this.wrapFunc(func, value, (args) => `${name}#${key}(${this.format(args)})`)
             : resource ? this.wrapClass(resource, value) : value);
@@ -142,6 +172,9 @@ export class HostResources {
   // Calls an import for the guest. Owned arguments move from the guest to the host; owned
   // results, including in a thrown `err` payload, are handed to the guest.
   private observe(func: WIT.FuncClass, args: any[], invoke: () => any, label: () => string, constructs?: WIT.ResourceClass) {
+    if (this.direct > 0) {
+      return invoke();
+    }
     let name: string | undefined;
     const callLabel = () => (name ??= label());
     const owned = func._args.flatMap(([_, type], i) => ownedHandles(type, args[i]).map(([_, obj]) => obj));

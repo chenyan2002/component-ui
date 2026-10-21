@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { arg, call, callEntries, callEntry, expectCall, funcCard, loadExample, streamEntries } from './helpers';
+import { arg, call, callEntries, callEntry, expectCall, funcCard, loadExample, resource, row, streamEntries } from './helpers';
 
 const PUBLIC_DIR = path.join(import.meta.dirname, '..', '..', 'public');
 
@@ -58,6 +58,53 @@ test('kv-store: instantiates with stubbed Fastly imports', async ({ page }) => {
   // Every card renders its signature; a type that failed to resolve leaves one blank.
   const cards = page.locator('func-card');
   await expect(cards.locator('.sig-name')).toHaveCount(await cards.count());
+});
+
+test('kv-store: host resources created in the UI are passed to handle', async ({ page }) => {
+  await page.goto('./');
+  await page.locator('#preselectedWasmFile').selectOption('kv-store.wasm');
+  const stub = (pkg: string) => page.locator(`#importsCard wa-textarea[label="${pkg}"] textarea`);
+  await stub('fastly:compute/http-req').fill([
+    'export class Request {',
+    "  #method = 'GET';",
+    '  static new() { return new Request() }',
+    '  getMethod() { return this.#method }',
+    '  setMethod(method) { this.#method = method }',
+    '}',
+  ].join('\n'));
+  await stub('fastly:compute/async-io').fill('export class Pollable { static newReady() { return new Pollable() } }');
+  await page.locator('#instantiateButton').click();
+
+  // `Request` and `Pollable` (as `body`) are imported, so their functions run on the stubs.
+  const request = resource(page, 'Request');
+  await expect(request.locator('.section-summary wa-tag')).toHaveText('host resource');
+  await request.locator('.section-summary').click();
+  await call(funcCard(request, 'new'));
+  await expectCall(page, 'Request.new()', 'ok', 'request_host0');
+  await expect(row(page, 'request_host0').locator('td.handle')).toHaveText('host');
+  await expect(row(page, 'request_host0').locator('.instance-holders')).toHaveText('held by you');
+  const pollable = resource(page, 'Pollable');
+  await pollable.locator('.section-summary').click();
+  await call(funcCard(pollable, 'newReady'));
+  await expectCall(page, 'Pollable.newReady()', 'ok', 'pollable_host1');
+
+  const setMethod = funcCard(request, 'setMethod');
+  await arg(setMethod, 0).locator('select').selectOption('request_host0');
+  await arg(setMethod, 1).locator('input').fill('POST');
+  await call(setMethod);
+  const getMethod = funcCard(request, 'getMethod');
+  await arg(getMethod, 0).locator('select').selectOption('request_host0');
+  await arg(getMethod, 1).locator('input').fill('10');
+  await call(getMethod);
+  await expectCall(page, 'request_host0.getMethod("10")', 'ok', '"POST"');
+
+  // The guest accepts them and runs until it needs an import the stubs don't provide.
+  const handle = funcCard(page, 'handle');
+  await arg(handle, 0).locator('select').selectOption('request_host0');
+  await arg(handle, 1).locator('select').selectOption('pollable_host1');
+  await call(handle);
+  await expectCall(page, 'handle(request_host0, pollable_host1)', 'error',
+    'Import fastly:private/privileged-kv-store-service#get is not implemented. Provide it in the Imports card.');
 });
 
 test('adder: rejects invalid numbers without calling', async ({ page }) => {
