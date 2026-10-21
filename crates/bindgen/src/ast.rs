@@ -14,6 +14,7 @@ struct Bindgen<'a> {
     resolve: &'a Resolve,
     defs: Vec<String>,
     export_interfaces: Vec<String>,
+    import_interfaces: Vec<String>,
     resources: BTreeMap<String, Bindgen<'a>>,
     local_names: LocalNames,
 }
@@ -24,6 +25,7 @@ impl<'a> Bindgen<'a> {
             resolve,
             defs: Vec::new(),
             export_interfaces: Vec::new(),
+            import_interfaces: Vec::new(),
             resources: Default::default(),
             local_names: LocalNames::default(),
         }
@@ -283,6 +285,12 @@ impl<'a> Bindgen<'a> {
         for (_, func) in &iface.functions {
             self.func(func);
         }
+        // Resources without functions in this world are only known from the type defs.
+        for resource in std::mem::take(&mut defs.resources).into_keys() {
+            self.resources
+                .entry(resource)
+                .or_insert_with(|| Bindgen::new(self.resolve));
+        }
         // insert resources after type defs
         defs.emit_resources(&self.resources);
         defs.src
@@ -321,9 +329,11 @@ impl<'a> Bindgen<'a> {
         }
     }
     fn module_return(&mut self) {
-        self.src.push_str("return [");
+        self.src.push_str("return { exports: [");
         self.src.push_str(&self.export_interfaces.join(", "));
-        self.src.push_str("];\n}\n");
+        self.src.push_str("], imports: [");
+        self.src.push_str(&self.import_interfaces.join(", "));
+        self.src.push_str("] };\n}\n");
     }
 }
 
@@ -346,8 +356,9 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
                     WorldKey::Interface(interface) => &resolve.id_of(*interface).unwrap(),
                 };
                 let mut iface = bindgen.fork();
-                iface.interface(name, *id);
+                let id = iface.interface(name, *id);
                 bindgen.src.push_str(&iface.src);
+                bindgen.import_interfaces.push(id);
                 bindgen.local_names = iface.local_names;
             }
             _ => (),

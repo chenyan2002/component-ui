@@ -23,6 +23,6 @@ strip = true
 [dependencies]
 anyhow = "1.0.97"
 heck = "0.5.0"
-wit-bindgen-rt = "0.41.0"
+wit-bindgen = "0.62.0"
 wit-component = "0.227.1"
 wit-parser = { version = "0.227.1", default-features = false }

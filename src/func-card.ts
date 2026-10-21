@@ -2,7 +2,7 @@ import { html, LitElement, nothing, PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import * as WIT from './wit';
 import { call, CallTarget, ExportsContext } from './calls';
-import { Draft, initDraft, parseArgs, randomize } from './draft';
+import { Draft, initDraft, parseArgs, randomize, TextDraft } from './draft';
 import { FormContext, renderField } from './form';
 
 const MAX_TYPE_LENGTH = 48;
@@ -49,9 +49,24 @@ export class FuncCard extends LitElement {
     this.ctx?.registry.removeEventListener('change', this.onRegistryChange);
   }
 
+  // Selects `id` as the `self` argument of a method.
+  public selectSelf(id: string) {
+    const self = this.drafts[0] as TextDraft;
+    self.text = id;
+    self.auto = false;
+    self.error = undefined;
+    this.requestUpdate();
+  }
+
+  // The arguments of the form; methods take the instance first.
+  private get args(): Array<[string, WIT.Type]> {
+    const args = this.func._args;
+    return this.target.type === 'method' ? [['self', this.target.resource], ...args] : args;
+  }
+
   protected willUpdate(changed: PropertyValues<this>) {
     if (changed.has('func')) {
-      this.drafts = this.func._args.map(([_, type]) => initDraft(type));
+      this.drafts = this.args.map(([_, type]) => initDraft(type));
     }
     if (changed.has('ctx')) {
       changed.get('ctx')?.registry.removeEventListener('change', this.onRegistryChange);
@@ -60,7 +75,7 @@ export class FuncCard extends LitElement {
   }
 
   protected render() {
-    const args = this.func._args;
+    const args = this.args;
     const form: FormContext = { update: () => this.requestUpdate(), registry: this.ctx.registry };
     return html`<wa-card class="func-card">
       <div slot="header" class="func-header">
@@ -95,7 +110,7 @@ export class FuncCard extends LitElement {
     if (this.busy) {
       return;
     }
-    const types = this.func._args.map(([_, type]) => type);
+    const types = this.args.map(([_, type]) => type);
     const { registry } = this.ctx;
     if (random) {
       types.forEach((type, i) => randomize(type, this.drafts[i], registry));

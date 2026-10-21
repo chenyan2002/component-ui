@@ -1,6 +1,6 @@
 import * as WIT from './wit';
 import { customStringify, LogEntry } from './console';
-import { ownedHandles, ResourceRegistry } from './resources';
+import { ownedHandles, ResourceRegistry, returnedType } from './resources';
 
 export interface ExportsContext {
   // Exports of the instantiated component, as returned by jco's `instantiate`.
@@ -12,7 +12,8 @@ export interface ExportsContext {
 export type CallTarget =
   | { type: 'func'; iface: WIT.InterfaceClass }
   | { type: 'constructor' | 'static'; iface: WIT.InterfaceClass; resource: WIT.ResourceClass }
-  | { type: 'method'; resource: WIT.ResourceClass; instance: string };
+  // Methods take the instance (`self`) as their first argument.
+  | { type: 'method'; resource: WIT.ResourceClass };
 
 interface Call {
   label: string;
@@ -44,24 +45,11 @@ function resolveCall(ctx: ExportsContext, target: CallTarget, name: string, args
       return { label: `${target.resource._name}.${name}(${argList})`, invoke: () => cls[name](...args) };
     }
     case 'method': {
-      const obj: any = ctx.registry.get(target.instance)!.obj;
-      return { label: `${target.instance}.${name}(${argList})`, invoke: () => obj[name](...args) };
+      const [self, ...rest] = args;
+      const restList = rest.map((arg) => format(ctx, arg)).join(', ');
+      return { label: `${format(ctx, self)}.${name}(${restList})`, invoke: () => self[name](...rest) };
     }
   }
-}
-
-// The type of the JS value a call returns. jco returns the `ok` payload of a top-level
-// `result` and throws on `err`. The bindgen encodes results as `variant { ok, err }`.
-function returnedType(func: WIT.FuncClass): WIT.Type | undefined {
-  const [ret] = func._ret;
-  const inner = ret instanceof WIT.RecClass ? ret.get_type() : ret;
-  if (inner instanceof WIT.VariantClass) {
-    const cases = Object.keys(inner._fields);
-    if (cases.length === 2 && cases[0] === 'ok' && cases[1] === 'err') {
-      return inner._fields.ok;
-    }
-  }
-  return ret;
 }
 
 export async function call(ctx: ExportsContext, target: CallTarget, name: string, func: WIT.FuncClass, args: any[]) {
@@ -73,27 +61,30 @@ export async function call(ctx: ExportsContext, target: CallTarget, name: string
     return;
   }
   const { registry } = ctx;
-  const owned = func._args.flatMap(([_, type], i) => ownedHandles(type, args[i]).map(([_, obj]) => obj));
+  const funcArgs = target.type === 'method' ? args.slice(1) : args;
+  const owned = func._args.flatMap(([_, type], i) => ownedHandles(type, funcArgs[i]).map(([_, obj]) => obj));
+  const fate = `moved into ${resolved.label}`;
   const entry = ctx.log(resolved.label);
-  let succeeded = false;
+  let result: any;
   try {
-    const result = await resolved.invoke();
-    succeeded = true;
-    if (target.type === 'constructor') {
-      registry.add(target.resource, result, resolved.label);
-    } else {
-      const type = returnedType(func);
-      for (const [resource, obj] of type ? ownedHandles(type, result) : []) {
-        registry.add(resource, obj, resolved.label);
-      }
-    }
-    entry.result(format(ctx, result));
+    result = await resolved.invoke();
   } catch (err) {
+    registry.settle(owned, fate, false);
     entry.error(err);
     console.error(err);
-  } finally {
-    registry.settle(owned, `moved into ${resolved.label}`, succeeded);
+    return;
   }
+  // Settle moved arguments first: returned resources may reuse their handle indices.
+  registry.settle(owned, fate, true);
+  if (target.type === 'constructor') {
+    registry.add(target.resource, result, resolved.label);
+  } else {
+    const type = returnedType(func);
+    for (const [resource, obj] of type ? ownedHandles(type, result) : []) {
+      registry.add(resource, obj, resolved.label);
+    }
+  }
+  entry.result(format(ctx, result));
 }
 
 export function drop(ctx: ExportsContext, instance: string) {

@@ -1,10 +1,8 @@
 mod ast;
-#[allow(warnings)]
-mod bindings;
 mod names;
 mod source;
 
-use bindings::Guest;
+wit_bindgen::generate!({ path: "wit/bindgen.wit", world: "bindgen" });
 
 struct Component;
 impl Guest for Component {
@@ -13,4 +11,4 @@ impl Guest for Component {
     }
 }
 
-bindings::export!(Component with_types_in bindings);
+export!(Component);

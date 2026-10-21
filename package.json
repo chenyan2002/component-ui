@@ -7,6 +7,7 @@
     "dev": "vite",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tests",
     "build": "tsc --noEmit && vite build",
+    "build:bindgen": "scripts/build-bindgen.sh",
     "preview": "vite preview",
     "test": "playwright test"
   },

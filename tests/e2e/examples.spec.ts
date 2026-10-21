@@ -116,8 +116,11 @@ test.describe('variants', () => {
 
 test('wasi-http: renders the handler and its resources', async ({ page }) => {
   await loadExample(page, 'wasi-http.wasm');
-  await expect(page.locator('func-card')).toHaveCount(2);
+  const methodTag = page.locator('.func-header wa-tag', { hasText: 'method' });
+  await expect(page.locator('func-card').filter({ hasNot: methodTag })).toHaveCount(2);
   await expect(funcCard(page, 'handle')).toBeVisible();
+  // Methods take the instance as `self`, picked from the live instances.
+  await expect(arg(funcCard(page, 'pathWithQuery'), 0).locator('select')).toBeDisabled();
   await expect(page.locator('.section-summary code', { hasText: 'ResponseOutparam' })).toBeVisible();
 });
 

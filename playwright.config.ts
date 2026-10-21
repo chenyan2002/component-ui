@@ -5,7 +5,6 @@ const URL = `http://localhost:${PORT}/component-ui/`;
 
 export default defineConfig({
   testDir: 'tests/e2e',
-  globalSetup: './tests/global-setup.ts',
   // Transpiling a component in the browser takes a few seconds.
   timeout: 90_000,
   expect: { timeout: 20_000 },
