@@ -1,18 +1,10 @@
 import { html, LitElement, nothing, PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import * as WIT from './wit';
-import { call, CallTarget, ExportsContext } from './calls';
+import { call, CallTarget, ExportsContext, watchContext } from './calls';
 import { Draft, initDraft, parseArgs, randomize, TextDraft } from './draft';
-import { FormContext, renderField } from './form';
+import { FormContext, renderField, typeName } from './form';
 
-const MAX_TYPE_LENGTH = 48;
-
-// Long inline types (e.g. large variants) are truncated; the full type is shown on hover.
-function typeName(type: WIT.Type) {
-  const name = type.name;
-  const short = name.length > MAX_TYPE_LENGTH ? `${name.slice(0, MAX_TYPE_LENGTH - 1)}…` : name;
-  return html`<span class="sig-type" title=${name}>${short}</span>`;
-}
 
 function renderSignature(name: string, func: WIT.FuncClass) {
   const args = func._args.map(([arg, type], i) =>
@@ -32,8 +24,9 @@ export class FuncCard extends LitElement {
 
   // Drafts are mutated in place by the form, which then calls requestUpdate().
   private drafts: Draft[] = [];
-  // Resource pickers list live instances, so re-render when they change.
-  private readonly onRegistryChange = () => this.requestUpdate();
+  // Resource pickers list live instances, and calls wait for others to finish, so re-render
+  // when either changes.
+  private readonly onContextChange = () => this.requestUpdate();
 
   protected createRenderRoot() {
     return this;
@@ -41,12 +34,12 @@ export class FuncCard extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
-    this.ctx?.registry.addEventListener('change', this.onRegistryChange);
+    watchContext(this.ctx, this.onContextChange, true);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    this.ctx?.registry.removeEventListener('change', this.onRegistryChange);
+    watchContext(this.ctx, this.onContextChange, false);
   }
 
   // Selects `id` as the `self` argument of a method.
@@ -69,14 +62,17 @@ export class FuncCard extends LitElement {
       this.drafts = this.args.map(([_, type]) => initDraft(type));
     }
     if (changed.has('ctx')) {
-      changed.get('ctx')?.registry.removeEventListener('change', this.onRegistryChange);
-      this.ctx.registry.addEventListener('change', this.onRegistryChange);
+      watchContext(changed.get('ctx'), this.onContextChange, false);
+      watchContext(this.ctx, this.onContextChange, true);
     }
   }
 
   protected render() {
     const args = this.args;
-    const form: FormContext = { update: () => this.requestUpdate(), registry: this.ctx.registry };
+    const form: FormContext = { update: () => this.requestUpdate(), registry: this.ctx.registry, mock: this.ctx.mocks };
+    // Another call is still running, e.g. waiting for an import's answer in the console.
+    const blocked = !this.busy && this.ctx.activity.pending > 0;
+    const blockedTitle = blocked ? 'Another call is still running' : undefined;
     return html`<wa-card class="func-card">
       <div slot="header" class="func-header">
         ${renderSignature(this.name, this.func)}
@@ -88,7 +84,7 @@ export class FuncCard extends LitElement {
           : args.map(([arg, type], i) => renderField(type, this.drafts[i], form, arg))}
       </div>
       <div slot="footer" class="func-actions">
-        <wa-button variant="brand" size="s" ?loading=${this.busy === 'call'} @click=${() => this.submit(false)}>
+        <wa-button variant="brand" size="s" ?loading=${this.busy === 'call'} ?disabled=${blocked} title=${blockedTitle ?? nothing} @click=${() => this.submit(false)}>
           Call
         </wa-button>
         ${args.length === 0
@@ -96,8 +92,9 @@ export class FuncCard extends LitElement {
           : html`<wa-button
               appearance="outlined"
               size="s"
-              title="Fill empty fields with random values and call"
+              title=${blockedTitle ?? 'Fill empty fields with random values and call'}
               ?loading=${this.busy === 'random'}
+              ?disabled=${blocked}
               @click=${() => this.submit(true)}
             >
               Random
@@ -113,9 +110,9 @@ export class FuncCard extends LitElement {
     const types = this.args.map(([_, type]) => type);
     const { registry } = this.ctx;
     if (random) {
-      types.forEach((type, i) => randomize(type, this.drafts[i], registry));
+      types.forEach((type, i) => randomize(type, this.drafts[i], registry, this.ctx.mocks));
     }
-    const args = parseArgs(types, this.drafts, registry);
+    const args = parseArgs(types, this.drafts, registry, this.ctx.mocks);
     this.requestUpdate();
     if (!args) {
       return;

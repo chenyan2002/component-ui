@@ -105,8 +105,24 @@ pre {
 .workspace {
   flex: 1;
   min-height: 0;
+  --min: 10rem;
+  --max: calc(100% - 8rem);
+}
+.workspace-top {
+  height: 100%;
+  min-height: 0;
+}
+.top-split {
+  height: 100%;
   --min: 24rem;
   --max: calc(100% - 18rem);
+}
+/* The resource pane is collapsed until there are resources to show. */
+.top-split.no-resources {
+  --max: 100%;
+}
+.top-split.no-resources::part(divider) {
+  display: none;
 }
 .pane {
   height: 100%;
@@ -140,6 +156,9 @@ pre {
   display: flex;
   flex-direction: column;
   gap: var(--wa-space-l);
+}
+.imports-pending {
+  align-self: center;
 }
 .imports-title {
   display: flex;
@@ -322,15 +341,9 @@ func-card.highlight {
   overflow: hidden;
   background: var(--wa-color-surface-raised);
 }
-.state-split {
-  height: 100%;
-  --min: 6rem;
-  --max: calc(100% - 8rem);
-}
 .resource-pane {
-  height: 100%;
   overflow: hidden;
-  border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+  background: var(--wa-color-surface-raised);
 }
 console-panel,
 resource-table {
@@ -416,6 +429,47 @@ resource-table {
   font-family: var(--wa-font-family-body);
   font-size: var(--wa-font-size-xs);
   color: var(--wa-color-text-quiet);
+}
+/* Imports the guest called during a call, and the form asking for a missing one's result. */
+.log-imports {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wa-space-2xs);
+  margin-top: var(--wa-space-2xs);
+  padding-left: var(--wa-space-m);
+}
+.log-import.error .log-import-output,
+.log-import.error code {
+  color: var(--wa-color-danger-on-quiet);
+}
+.log-import .log-call code {
+  flex: 0 1 auto;
+}
+.log-import-output {
+  flex-shrink: 0;
+  max-width: 50%;
+  overflow-wrap: anywhere;
+  color: var(--wa-color-text-quiet);
+}
+.log-import-output code {
+  background: none;
+  padding: 0;
+}
+.log-meta.waiting {
+  color: var(--wa-color-warning-on-quiet);
+  font-weight: var(--wa-font-weight-semibold);
+}
+.import-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wa-space-s);
+  margin: var(--wa-space-xs) 0 var(--wa-space-2xs) var(--wa-space-m);
+  padding: var(--wa-space-s) var(--wa-space-m);
+  max-width: 40rem;
+  font-family: var(--wa-font-family-body);
+  background: var(--wa-color-surface-default);
+  border: var(--wa-border-width-s) solid var(--wa-color-warning-border-normal);
+  border-radius: var(--wa-border-radius-m);
 }
 .log-output {
   display: flex;

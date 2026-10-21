@@ -2,7 +2,8 @@ import { html, LitElement, nothing, PropertyValues } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { repeat } from 'lit/directives/repeat.js';
-import { drop, ExportsContext } from './calls';
+import { drop, ExportsContext, watchContext } from './calls';
+import { MOCK } from './dialog';
 import { callable, Instance, InstanceState, Slot } from './resources';
 
 const STATE_VARIANTS: Record<InstanceState, string> = { live: 'success', moved: 'warning', dropped: 'neutral' };
@@ -40,7 +41,7 @@ function renderEarlier(slot: Slot) {
 export class ResourceTable extends LitElement {
   @property({ attribute: false }) accessor ctx!: ExportsContext;
 
-  private readonly onRegistryChange = () => this.requestUpdate();
+  private readonly onContextChange = () => this.requestUpdate();
 
   protected createRenderRoot() {
     return this;
@@ -48,18 +49,18 @@ export class ResourceTable extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
-    this.ctx?.registry.addEventListener('change', this.onRegistryChange);
+    watchContext(this.ctx, this.onContextChange, true);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    this.ctx?.registry.removeEventListener('change', this.onRegistryChange);
+    watchContext(this.ctx, this.onContextChange, false);
   }
 
   protected willUpdate(changed: PropertyValues<this>) {
     if (changed.has('ctx')) {
-      changed.get('ctx')?.registry.removeEventListener('change', this.onRegistryChange);
-      this.ctx.registry.addEventListener('change', this.onRegistryChange);
+      watchContext(changed.get('ctx'), this.onContextChange, false);
+      watchContext(this.ctx, this.onContextChange, true);
     }
   }
 
@@ -101,12 +102,21 @@ export class ResourceTable extends LitElement {
     const canDrop = isLive && callable(instance);
     return html`<tr class=${classMap({ 'resource-row': true, dead: !isLive })} data-id=${id}>
       <td class="handle">${slot.handle ?? html`<span class="muted">host</span>`}</td>
-      <td>${this.renderId(instance)}<div class="instance-type">${resource._name}</div></td>
+      <td>
+        ${this.renderId(instance)}
+        <div class="instance-type">${resource._name}${MOCK in instance.obj ? ' · mock' : ''}</div>
+      </td>
       <td><wa-tag size="s" variant=${STATE_VARIANTS[state]}>${state}</wa-tag>${renderHolders(instance)}</td>
       <td class="history">${renderHistory(instance)}${renderEarlier(slot)}</td>
       <td class="row-actions">
         ${canDrop
-          ? html`<wa-button size="s" appearance="outlined" title="Run the resource's destructor" @click=${() => drop(this.ctx, id)}>
+          ? html`<wa-button
+              size="s"
+              appearance="outlined"
+              title="Run the resource's destructor"
+              ?disabled=${this.ctx.activity.pending > 0}
+              @click=${() => drop(this.ctx, id)}
+            >
               Drop
             </wa-button>`
           : isLive

@@ -171,21 +171,23 @@ export class ResourceRegistry extends EventTarget {
     return [...new Set(instances.filter(callable).map((i) => i.resource))];
   }
 
-  // Updates instance states after a call to the guest or, `into` the host, directly to the host.
-  // `owned` are the objects passed as owned handles; on success, a host object passed to the
-  // guest now has a guest handle, and one passed to the host is gone.
-  public settle(owned: object[], fate: string, succeeded: boolean, into: 'guest' | 'host' = 'guest') {
+  // Passes the host objects among `owned`, the owned arguments of a call the UI makes, to the
+  // guest, which gets a handle as the call starts, or `into` the host, which takes them.
+  public transfer(owned: object[], fate: string, into: 'guest' | 'host') {
+    for (const obj of owned) {
+      const instance = this.byObj.get(obj);
+      if (instance?.holders && instance.state === 'live') {
+        this.hold(instance, instance.holders.guest + (into === 'guest' ? 1 : 0), false, ['moved', fate]);
+      }
+    }
+  }
+
+  // Updates the states of instances the guest implements after a call, as their handles show.
+  public settle(fate: string) {
     let changed = false;
     for (const slot of this.slots.values()) {
       const instance = slot.current;
-      if (instance.state !== 'live') {
-        continue;
-      }
-      if (instance.holders) {
-        if (succeeded && owned.includes(instance.obj)) {
-          const guest = instance.holders.guest + (into === 'guest' ? 1 : 0);
-          this.hold(instance, guest, false, ['moved', fate]);
-        }
+      if (instance.state !== 'live' || instance.holders) {
         continue;
       }
       if (hasLiveHandle(instance.obj) === false) {
@@ -343,9 +345,13 @@ function isHandle(value: unknown): value is object {
   return typeof value === 'object' && value !== null;
 }
 
-// Collects the owned handles inside a JS value of the given type.
-class OwnedHandles extends WIT.Visitor<any, void> {
+// Collects the owned handles, and optionally the borrowed ones, inside a JS value of the given type.
+class Handles extends WIT.Visitor<any, void> {
   public readonly found: Array<[WIT.ResourceClass, object]> = [];
+
+  constructor(private readonly borrows: boolean) {
+    super();
+  }
 
   public visitType<T>(_t: WIT.Type<T>, _v: any): void {}
   public visitOwned(t: WIT.OwnedClass, _ty: WIT.Type, v: any): void {
@@ -353,7 +359,11 @@ class OwnedHandles extends WIT.Visitor<any, void> {
       this.found.push([t.resource, v]);
     }
   }
-  public visitBorrow(_t: WIT.BorrowClass, _ty: WIT.Type, _v: any): void {}
+  public visitBorrow(t: WIT.BorrowClass, _ty: WIT.Type, v: any): void {
+    if (this.borrows && isHandle(v)) {
+      this.found.push([t._ty.get_type() as WIT.ResourceClass, v]);
+    }
+  }
   public visitOpt(t: WIT.OptClass, ty: WIT.Type, v: any): void {
     if (t.maybe_null()) {
       if (v?.tag === 'some') {
@@ -390,7 +400,14 @@ class OwnedHandles extends WIT.Visitor<any, void> {
 }
 
 export function ownedHandles(t: WIT.Type, value: any): Array<[WIT.ResourceClass, object]> {
-  const visitor = new OwnedHandles();
+  const visitor = new Handles(false);
   t.accept(visitor, value);
+  return visitor.found;
+}
+
+// The owned and borrowed handles in the arguments of a call.
+export function argHandles(func: WIT.FuncClass, args: any[]): Array<[WIT.ResourceClass, object]> {
+  const visitor = new Handles(true);
+  func._args.forEach(([_, type], i) => type.accept(visitor, args[i]));
   return visitor.found;
 }

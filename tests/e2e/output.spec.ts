@@ -5,6 +5,8 @@ test('stdout and stderr appear in the console', async ({ page }) => {
   await loadExample(page, 'printer.wasm');
   // Every WASI interface it imports is provided by the shim.
   await expect(page.locator('#importsCard')).toHaveCount(0);
+  // The exports don't involve resources: the resource table shows once the guest gets one.
+  await expect(page.locator('.resource-pane')).toBeHidden();
 
   const greet = funcCard(page, 'greet');
   await arg(greet, 0).locator('input').fill('Ada');
@@ -14,6 +16,7 @@ test('stdout and stderr appear in the console', async ({ page }) => {
 
   // The stream the host handed to the guest for stdout is a host resource held by the guest.
   const stdout = page.locator('resource-table tr.resource-row', { hasText: 'wasi:cli/stdout#getStdout()' });
+  await expect(page.locator('.resource-pane')).toBeVisible();
   await expect(stdout).toHaveCount(1);
   await expect(stdout.locator('.instance-type')).toHaveText('OutputStream');
   await expect(stdout.locator('td.handle')).toHaveText('host');

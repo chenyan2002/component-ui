@@ -231,7 +231,8 @@ export class RecClass extends Type<any> {
 }
 export type CallKind = 'func' | 'constructor' | 'static' | 'method';
 export class FuncClass extends Type<any> {
-    constructor(public readonly _args: Array<[string, Type]>, public readonly _ret: Type[], public readonly _kind: string = '') {
+    // `_witName` is the name in the component, e.g. `[method]request.get-method`.
+    constructor(public readonly _args: Array<[string, Type]>, public readonly _ret: Type[], public readonly _kind: string = '', public readonly _witName: string = '') {
         super();
     }
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
@@ -357,8 +358,8 @@ export function Enum(tags: Array<string>): EnumClass {
 export function Variant(fields: Record<string, Type>): VariantClass {
     return new VariantClass(fields);
 }
-export function Func(args: Array<[string, Type]>, ret: [] | [Type], kind: string): FuncClass {
-    return new FuncClass(args, ret, kind);
+export function Func(args: Array<[string, Type]>, ret: [] | [Type], kind: string, witName = ''): FuncClass {
+    return new FuncClass(args, ret, kind, witName);
 }
 export function Interface(name: string, fields: Record<string, FuncClass>, vars: Record<string, Type> = {}): InterfaceClass {
     return new InterfaceClass(name, fields, vars);

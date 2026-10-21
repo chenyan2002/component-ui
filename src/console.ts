@@ -1,5 +1,9 @@
 import { html, LitElement, nothing, PropertyValues } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
+import * as WIT from './wit';
+import { Draft, MockFactory } from './draft';
+import { renderField, typeName } from './form';
+import { ResourceRegistry } from './resources';
 
 // Marks a string produced by `describe` so it is shown unquoted.
 const RAW = '\uE000';
@@ -42,6 +46,32 @@ export interface LogEntry {
   error(err: unknown): void;
 }
 
+// The form asking the user for the return value of an import the guest called.
+export interface ImportPrompt {
+  type: WIT.Type;
+  draft: Draft;
+  registry: ResourceRegistry;
+  mock: MockFactory;
+  // Returns the value in the draft, unless it is invalid.
+  answer(): void;
+  random(): void;
+  trap(): void;
+}
+
+export interface ImportLog extends LogEntry {
+  // Shows the prompt until the import gets a result or an error.
+  ask(prompt: ImportPrompt): void;
+}
+
+// An import the guest called, under the call that made it, if any.
+interface ImportEntry {
+  kind: 'import';
+  call: string;
+  status: 'pending' | 'ok' | 'error';
+  output?: string;
+  prompt?: ImportPrompt;
+}
+
 interface CallEntry {
   kind: 'call';
   call: string;
@@ -49,6 +79,7 @@ interface CallEntry {
   status: 'pending' | 'ok' | 'error';
   output?: string;
   elapsed?: number;
+  imports: ImportEntry[];
 }
 
 // Text the component wrote to stdout or stderr.
@@ -58,7 +89,7 @@ interface StreamEntry {
   text: string;
 }
 
-type Entry = CallEntry | StreamEntry;
+type Entry = CallEntry | StreamEntry | ImportEntry;
 
 @customElement('console-panel')
 export class ConsolePanel extends LitElement {
@@ -76,7 +107,7 @@ export class ConsolePanel extends LitElement {
 
   public logCall(call: string): LogEntry {
     const started = performance.now();
-    const entry: CallEntry = { kind: 'call', call, time: new Date().toLocaleTimeString(), status: 'pending' };
+    const entry: CallEntry = { kind: 'call', call, time: new Date().toLocaleTimeString(), status: 'pending', imports: [] };
     this.entries = [...this.entries, entry];
     const finish = (status: CallEntry['status'], output: string) => {
       Object.assign(entry, { status, output, elapsed: Math.round(performance.now() - started) });
@@ -85,6 +116,30 @@ export class ConsolePanel extends LitElement {
     return {
       result: (text) => finish('ok', text),
       error: (err) => finish('error', errorText(err)),
+    };
+  }
+
+  // Logs an import the guest called, under the pending call it happened in.
+  public logImport(call: string): ImportLog {
+    const entry: ImportEntry = { kind: 'import', call, status: 'pending' };
+    const parent = [...this.entries].reverse().find((e): e is CallEntry => e.kind === 'call' && e.status === 'pending');
+    if (parent) {
+      parent.imports.push(entry);
+      this.requestUpdate();
+    } else {
+      this.entries = [...this.entries, entry];
+    }
+    const finish = (status: ImportEntry['status'], output: string) => {
+      Object.assign(entry, { status, output, prompt: undefined });
+      this.requestUpdate();
+    };
+    return {
+      result: (text) => finish('ok', text),
+      error: (err) => finish('error', errorText(err)),
+      ask: (prompt) => {
+        entry.prompt = prompt;
+        this.requestUpdate();
+      },
     };
   }
 
@@ -101,6 +156,12 @@ export class ConsolePanel extends LitElement {
 
   protected updated(_changed: PropertyValues) {
     this.list.scrollTop = this.list.scrollHeight;
+    // A new prompt takes the focus, so the answer can be typed right away.
+    const prompt = this.querySelector<HTMLElement>('.import-prompt:not([data-focused])');
+    if (prompt) {
+      prompt.dataset.focused = '';
+      prompt.querySelector<HTMLElement>('input, select')?.focus();
+    }
   }
 
   protected render() {
@@ -117,20 +178,66 @@ export class ConsolePanel extends LitElement {
     `;
   }
 
+  private renderImport(entry: ImportEntry) {
+    return html`<div class="log-import ${entry.status}">
+      <div class="log-call">
+        <span class="log-prompt">↳</span>
+        <code>${entry.call}</code>
+        ${entry.output === undefined ? nothing : html`<span class="log-import-output">= <code>${entry.output}</code></span>`}
+      </div>
+      ${entry.prompt ? this.renderPrompt(entry.prompt) : nothing}
+    </div>`;
+  }
+
+  private renderPrompt(prompt: ImportPrompt) {
+    const form = { update: () => this.requestUpdate(), registry: prompt.registry, mock: prompt.mock };
+    // Enter in a field returns the answer, as the Return button does.
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && e.target instanceof HTMLInputElement) {
+        e.preventDefault();
+        this.act(prompt.answer);
+      }
+    };
+    return html`<div class="import-prompt" @keydown=${onKeydown}>
+      <div class="muted">returns ${typeName(prompt.type)}</div>
+      ${renderField(prompt.type, prompt.draft, form)}
+      <div class="func-actions">
+        <wa-button variant="brand" size="s" @click=${() => this.act(prompt.answer)}>Return</wa-button>
+        <wa-button appearance="outlined" size="s" title="Fill empty fields with random values" @click=${() => this.act(prompt.random)}>
+          Random
+        </wa-button>
+        <wa-button appearance="plain" variant="danger" size="s" title="Fail the import, trapping the guest" @click=${() => prompt.trap()}>
+          Trap
+        </wa-button>
+      </div>
+    </div>`;
+  }
+
+  // Runs a prompt action, then re-renders to show its validation errors or random values.
+  private act(action: () => void) {
+    action();
+    this.requestUpdate();
+  }
+
   private renderEntry(entry: Entry) {
+    if (entry.kind === 'import') {
+      return html`<div class="log-entry import">${this.renderImport(entry)}</div>`;
+    }
     if (entry.kind === 'stream') {
       return html`<div class="log-entry stream ${entry.stream}">
         <span class="log-stream">${entry.stream}</span>
         <pre>${entry.text.replace(/\r?\n$/, '')}</pre>
       </div>`;
     }
-    const meta = entry.elapsed === undefined ? entry.time : `${entry.time} · ${entry.elapsed} ms`;
+    const waiting = entry.imports.some((i) => i.prompt);
+    const meta = waiting ? 'waiting for an import' : entry.elapsed === undefined ? entry.time : `${entry.time} · ${entry.elapsed} ms`;
     return html`<div class="log-entry ${entry.status}">
       <div class="log-call">
         <span class="log-prompt">›</span>
         <code>${entry.call}</code>
-        <span class="log-meta">${meta}</span>
+        <span class=${waiting ? 'log-meta waiting' : 'log-meta'}>${meta}</span>
       </div>
+      ${entry.imports.length > 0 ? html`<div class="log-imports">${entry.imports.map((i) => this.renderImport(i))}</div>` : nothing}
       ${entry.output === undefined
         ? nothing
         : html`<div class="log-output">

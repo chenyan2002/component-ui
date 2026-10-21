@@ -22,6 +22,36 @@ function unversioned(specifier: string): string {
   return specifier.replace(/@[^/]*$/, '');
 }
 
+function isWasi(pkg: string): boolean {
+  return WASI_INTERFACES.has(unversioned(pkg));
+}
+
+// JS Promise Integration lets an import return a promise that the guest waits for, e.g. while
+// the user answers the prompt of a missing import. The app requires it.
+export const JSPI_SUPPORTED = typeof (WebAssembly as any).Suspending === 'function' && typeof (WebAssembly as any).promising === 'function';
+
+// jco refers to functions as `iface#name`, or `name` at the root, e.g. `wasi:io/poll#[method]pollable.block`.
+function jcoNames(iface: WIT.InterfaceClass, include: (func: WIT.FuncClass) => boolean = () => true): string[] {
+  const resourceFuncs = iface.get_resources().flatMap((resource) => Object.values(resource._fields));
+  return [...Object.values(iface._fields), ...resourceFuncs]
+    .filter(include)
+    .map((func) => (iface.isRoot ? func._witName : `${iface._name}#${func._witName}`));
+}
+
+// Any import may wait for the user: missing ones ask for their results, and so do the methods
+// of mock host resources, which the UI can hand to exports. The exports that can call them
+// must be async too. jco emits invalid async code for resource constructors and statics, so
+// those stay synchronous.
+function asyncMode(exports: WIT.InterfaceClass[], imports: WIT.InterfaceClass[]) {
+  return {
+    tag: 'jspi' as const,
+    val: {
+      imports: imports.flatMap((iface) => jcoNames(iface)),
+      exports: exports.flatMap((iface) => jcoNames(iface, (func) => func.callKind === 'func' || func.callKind === 'method')),
+    },
+  };
+}
+
 export interface LoadedComponent {
   transpiled: Transpiled;
   interfaces: WIT.InterfaceClass[];
@@ -90,23 +120,34 @@ export async function readWasm(file: string | File): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer());
 }
 
+// jco's async (JSPI) import trampolines answer a failed import with a promise that never
+// settles, leaving the guest suspended forever; its sync ones rethrow, as these now do.
+function rethrowAsyncImportErrors(transpiled: Transpiled) {
+  const file = transpiled.files.find(([name]) => name === `${TRANSPILED_NAME}.js`)!;
+  const js = new TextDecoder().decode(file[1]);
+  const failed = /(markTrapped\(err\);\s*task\.setErrored\(err\);\s*task\.reject\(err\);\s*task\.exit\(\);\s*)return task\.completionPromise\(\);/g;
+  file[1] = new TextEncoder().encode(js.replace(failed, '$1throw err;'));
+}
+
 export async function loadComponent(component: Uint8Array): Promise<LoadedComponent> {
+  const binding = await importFromSource(generateAst(component));
+  const { exports: interfaces, imports }: Record<'exports' | 'imports', WIT.InterfaceClass[]> = binding.Factory({ IDL: WIT });
   const transpiled = await generate(component, {
     name: TRANSPILED_NAME,
     noNodejsCompat: true,
     noTypescript: true,
     base64Cutoff: 1000000,
     instantiation: { tag: 'async' },
+    asyncMode: asyncMode(interfaces, imports),
   });
-  const binding = await importFromSource(generateAst(component));
-  const { exports: interfaces, imports }: Record<'exports' | 'imports', WIT.InterfaceClass[]> = binding.Factory({ IDL: WIT });
-  const customImports = transpiled.imports.filter((pkg) => !WASI_INTERFACES.has(unversioned(pkg)));
+  rethrowAsyncImportErrors(transpiled);
+  const customImports = transpiled.imports.filter((pkg) => !isWasi(pkg));
   return { transpiled, interfaces, imports, customImports };
 }
 
 // jco checks at instantiation that every imported function exists. Stub the ones the user
 // didn't provide, so the component still instantiates and only fails if it calls them.
-function stubMissingImports(pkg: string, mod: object): object {
+export function stubMissingImports(pkg: string, mod: object): object {
   return new Proxy(mod, {
     get(target, key, receiver) {
       // `then` is excluded so the module isn't mistaken for a promise.
@@ -121,20 +162,26 @@ function stubMissingImports(pkg: string, mod: object): object {
   });
 }
 
+export interface ImportHooks {
+  // Completes the module for `pkg`: the user's, or for `wasi` the shim's.
+  complete(pkg: string, mod: object, wasi: boolean): object;
+  // Wraps the import object for `pkg`, e.g. to observe the resources it hands out.
+  wrap(pkg: string, mod: object): object;
+}
+
 export async function instantiate(
   transpiled: Transpiled,
   customImportCode: Record<string, string>,
   output: ComponentOutput,
-  // Wraps the import object for `pkg`, e.g. to observe the resources it hands out.
-  wrapImport: (pkg: string, mod: object) => object = (_pkg, mod) => mod,
+  { complete, wrap }: ImportHooks,
 ): Promise<any> {
   const wasi = wasiImports(output);
   const imports: Record<string, unknown> = {};
   for (const pkg of transpiled.imports) {
-    const mod = WASI_INTERFACES.has(unversioned(pkg))
-      ? wasi[unversioned(pkg)] as object
-      : stubMissingImports(pkg, await importFromSource(customImportCode[pkg] ?? ''));
-    imports[pkg] = wrapImport(pkg, mod);
+    const mod = isWasi(pkg)
+      ? complete(pkg, wasi[unversioned(pkg)] as object, true)
+      : complete(pkg, await importFromSource(customImportCode[pkg] ?? ''), false);
+    imports[pkg] = wrap(pkg, mod);
   }
   const mod = await importFromSource(fileBytes(transpiled, `${TRANSPILED_NAME}.js`));
   return mod.instantiate((core: string) => WebAssembly.compile(fileBytes(transpiled, core)), imports);
