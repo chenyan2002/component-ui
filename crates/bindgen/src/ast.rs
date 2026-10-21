@@ -170,7 +170,10 @@ impl<'a> Bindgen<'a> {
                 self.src.push_str(&name.to_upper_camel_case());
                 self.src.push_str(")");
             }
-            TypeDefKind::Future(_) | TypeDefKind::Stream(_) => todo!(),
+            TypeDefKind::Future(_)
+            | TypeDefKind::Stream(_)
+            | TypeDefKind::Map(..)
+            | TypeDefKind::FixedLengthList(..) => todo!(),
             TypeDefKind::Resource => unreachable!(),
             TypeDefKind::Unknown => unreachable!(),
         }
@@ -222,10 +225,7 @@ impl<'a> Bindgen<'a> {
         }
     }
     fn func(&mut self, func: &Function) {
-        let iface = if let FunctionKind::Method(ty)
-        | FunctionKind::Static(ty)
-        | FunctionKind::Constructor(ty) = func.kind
-        {
+        let iface = if let Some(ty) = func.kind.resource() {
             let ty = &self.resolve.types[ty];
             let resource = ty.name.clone().unwrap().to_upper_camel_case();
             self.resources
@@ -240,12 +240,12 @@ impl<'a> Bindgen<'a> {
             FunctionKind::Method(_) | FunctionKind::AsyncMethod(_) => 1,
             _ => 0,
         };
-        for (i, (name, ty)) in func.params[param_start..].iter().enumerate() {
+        for (i, param) in func.params[param_start..].iter().enumerate() {
             if i > 0 {
                 iface.src.push_str(", ");
             }
-            iface.src.push_str(&format!("['{name}', "));
-            iface.pp_ty(ty);
+            iface.src.push_str(&format!("['{}', ", param.name));
+            iface.pp_ty(&param.ty);
             iface.src.push_str("]");
         }
         iface.src.push_str("], [");
@@ -263,6 +263,12 @@ impl<'a> Bindgen<'a> {
             FunctionKind::AsyncFreestanding => "'async'",
             FunctionKind::AsyncMethod(_) => "'async method'",
             FunctionKind::AsyncStatic(_) => "'async static'",
+            FunctionKind::Getter
+            | FunctionKind::Setter
+            | FunctionKind::MethodGetter(_)
+            | FunctionKind::MethodSetter(_)
+            | FunctionKind::StaticGetter(_)
+            | FunctionKind::StaticSetter(_) => todo!(),
         };
         iface.src.push_str(kind);
         iface.src.push_str("),\n");
@@ -379,7 +385,7 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
                 bindgen.local_names = iface.local_names;
             }
             WorldItem::Function(f) => funcs.push(f),
-            WorldItem::Type(_) => unimplemented!(),
+            WorldItem::Type { .. } => unimplemented!(),
         }
     }
     bindgen.exported_funcs(&funcs);
