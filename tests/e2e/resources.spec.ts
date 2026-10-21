@@ -3,6 +3,11 @@ import { arg, call, callEntries, expectCall, fate, funcCard, loadExample, resour
 
 test.beforeEach(async ({ page }) => {
   await loadExample(page, 'resource.wasm', { instantiate: true });
+  // Resource sections start collapsed.
+  for (const section of await page.locator('wa-details.resource').all()) {
+    await expect(section).not.toHaveAttribute('open');
+    await section.locator('.section-summary').click();
+  }
 });
 
 function worldFunc(page: Page, name: string) {
@@ -98,10 +103,13 @@ test('a freed index is reused by any resource, and Clear freed removes freed row
   await expect(row(page, 'z_1').locator('td.handle')).toHaveText('1');
   await expect(row(page, 'z_1').locator('.earlier li')).toHaveText(/^x_1 · new X\(5\)\s*→ dropped$/);
 
-  // The id opens the instance's methods; picking one selects it as `self`.
+  // The id opens the instance's methods; picking one selects it as `self`, expanding its section.
+  await resource(page, 'Z').locator('.section-summary').click();
+  await expect(resource(page, 'Z')).not.toHaveAttribute('open');
   await row(page, 'z_1').locator('button.instance-id').click();
   await page.locator('wa-dropdown-item', { hasText: 'getA' }).click();
   const getA = funcCard(resource(page, 'Z'), 'getA');
+  await expect(getA).toBeInViewport();
   await expect(arg(getA, 0).locator('select')).toHaveValue('z_1');
   await call(getA);
   await expectCall(page, 'z_1.getA()', 'ok', '2');

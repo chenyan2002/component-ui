@@ -132,6 +132,20 @@ pre {
 .card-title .muted {
   font-weight: var(--wa-font-weight-normal);
 }
+.imports-card {
+  flex-shrink: 0;
+  background: var(--wa-color-surface-default);
+}
+.imports-card::part(content) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wa-space-l);
+}
+.imports-title {
+  display: flex;
+  align-items: center;
+  gap: var(--wa-space-s);
+}
 .imports {
   display: flex;
   flex-direction: column;

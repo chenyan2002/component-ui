@@ -24,7 +24,8 @@ function summary(kind: string, name: string, count: number, unit: string) {
 function renderResource(ctx: ExportsContext, iface: WIT.InterfaceClass, resource: WIT.ResourceClass) {
   const statics = resource.get_static_funcs();
   const methods = resource.get_method_funcs();
-  return html`<wa-details open class="resource">
+  // Collapsed by default; resource sections can be long.
+  return html`<wa-details class="resource">
     ${summary('resource', resource._name, statics.length + methods.length, 'function')}
     ${funcCards(ctx, statics, (func) => ({ type: func.callKind as 'constructor' | 'static', iface, resource }))}
     ${funcCards(ctx, methods, () => ({ type: 'method', resource }))}
@@ -36,7 +37,7 @@ function renderOtherResources(ctx: ExportsContext, interfaces: WIT.InterfaceClas
   const exported = new Set(interfaces.flatMap((iface) => iface.get_resources()));
   return ctx.registry.resources().filter((r) => !exported.has(r)).map((resource) => {
     const methods = resource.get_method_funcs();
-    return html`<wa-details open class="interface resource">
+    return html`<wa-details class="interface resource">
       ${summary('resource', resource._name, methods.length, 'method')}
       ${funcCards(ctx, methods, () => ({ type: 'method', resource }))}
     </wa-details>`;

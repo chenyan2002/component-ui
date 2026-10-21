@@ -18,6 +18,7 @@ const EXAMPLES: Array<[file: string, label: string]> = [
   ['resource.wasm', 'Resource'],
   ['wasi-http.wasm', 'WASI HTTP'],
   ['printer.wasm', 'Printer'],
+  ['kv-store.wasm', 'KV Store'],
 ];
 
 // Prefilled implementations for the imports of the bundled examples.
@@ -66,6 +67,7 @@ export class ComponentApp extends LitElement {
   @state() accessor example = '';
   @query('console-panel') accessor consolePanel!: ConsolePanel | null;
   @query('#wasmFileInput') accessor fileInput!: HTMLInputElement;
+  @query('.component-pane') accessor componentPane!: HTMLElement | null;
 
   // Guards against a slow load finishing after a newer one has started.
   private loadCounter = 0;
@@ -167,10 +169,16 @@ export class ComponentApp extends LitElement {
     </wa-split-panel>`;
   }
 
+  // Collapsed once instantiated; expand it to change the stubs and instantiate again.
   private renderImports(s: Session) {
-    return html`<wa-card id="importsCard" class="imports-card">
-      <div slot="header" class="card-title">
-        <span>Imports</span>
+    const count = s.component.customImports.length;
+    return html`<wa-details id="importsCard" class="imports-card" .open=${s.status !== 'ready'}>
+      <div slot="summary" class="card-title">
+        <span class="imports-title">
+          Imports
+          <wa-badge variant="neutral" appearance="filled" pill>${count} interface${count === 1 ? '' : 's'}</wa-badge>
+          ${s.status === 'ready' ? html`<wa-tag size="s" variant="success">instantiated</wa-tag>` : nothing}
+        </span>
         <span class="muted">Provide a JavaScript implementation for each non-WASI import.</span>
       </div>
       <div class="imports">
@@ -184,7 +192,7 @@ export class ComponentApp extends LitElement {
           @input=${(e: Event) => (s.importCode[pkg] = (e.target as HTMLTextAreaElement).value)}
         ></wa-textarea>`)}
       </div>
-      <div slot="footer" class="func-actions">
+      <div class="func-actions">
         <wa-button
           id="instantiateButton"
           variant="brand"
@@ -195,7 +203,7 @@ export class ComponentApp extends LitElement {
           Instantiate
         </wa-button>
       </div>
-    </wa-card>`;
+    </wa-details>`;
   }
 
   private renderExportsArea(s: Session) {
@@ -271,6 +279,11 @@ export class ComponentApp extends LitElement {
       s.error = err;
     }
     this.requestUpdate();
+    if (s.status === 'ready') {
+      // The imports collapse; show the beginning of the exports.
+      await this.updateComplete;
+      this.componentPane?.scrollTo({ top: 0 });
+    }
   }
 
   private loadFile(file: File) {

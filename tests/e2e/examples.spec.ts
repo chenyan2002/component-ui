@@ -28,12 +28,36 @@ test('calculator: instantiates with the prefilled import stub', async ({ page })
   await expect(stub).toHaveJSProperty('value', 'export function add(a, b) { return a + b }');
 
   await page.locator('#instantiateButton').click();
+  // Once instantiated, the imports collapse; expanding them shows the stubs again.
+  const imports = page.locator('#importsCard');
+  await expect(imports).not.toHaveAttribute('open');
+  await expect(stub).toBeHidden();
+  await imports.locator('.card-title').click();
+  await expect(stub).toBeVisible();
   const card = funcCard(page, 'evalExpression');
   await arg(card, 0).locator('select').selectOption('add');
   await arg(card, 1).locator('input').fill('2');
   await arg(card, 2).locator('input').fill('3');
   await call(card);
   await expectCall(page, 'evalExpression("add", 2, 3)', 'ok', '5');
+});
+
+test('kv-store: instantiates with stubbed Fastly imports', async ({ page }) => {
+  await page.goto('./');
+  await page.locator('#preselectedWasmFile').selectOption('kv-store.wasm');
+  await expect(page.locator('#importsCard wa-textarea').first()).toHaveAttribute('label', 'fastly:compute/async-io');
+  await page.locator('#instantiateButton').click();
+  await expect(page.locator('#importsCard')).not.toHaveAttribute('open');
+  // The 21 stubs pushed Instantiate out of view; the pane scrolls back up to the exports.
+  await expect.poll(() => page.locator('.component-pane').evaluate((pane) => pane.scrollTop)).toBe(0);
+  await expect(funcCard(page, 'run')).toBeInViewport();
+  await expect(page.locator('wa-details.resource', { hasText: 'Request' })).not.toHaveAttribute('open');
+  await expect(page.locator('.section-summary code', { hasText: 'fastly:compute/http-incoming@0.1.0' })).toBeVisible();
+  // `body` is `pollable` renamed by a `use` in http-body, then used again by http-incoming.
+  await expect(arg(funcCard(page, 'handle'), 1).locator('.field-type')).toHaveText('own<Pollable>');
+  // Every card renders its signature; a type that failed to resolve leaves one blank.
+  const cards = page.locator('func-card');
+  await expect(cards.locator('.sig-name')).toHaveCount(await cards.count());
 });
 
 test('adder: rejects invalid numbers without calling', async ({ page }) => {

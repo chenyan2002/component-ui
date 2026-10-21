@@ -129,14 +129,23 @@ export class ResourceTable extends LitElement {
     </wa-dropdown>`;
   }
 
-  // Scrolls to the method's card with the instance selected as `self`.
-  private useMethod(instance: Instance, name: string) {
+  // Scrolls to the method's card with the instance selected as `self`, expanding its sections.
+  private async useMethod(instance: Instance, name: string) {
     const card = [...document.querySelectorAll('func-card')].find(({ target, name: n }) =>
       target.type === 'method' && target.resource === instance.resource && n === name);
     if (!card) {
       return;
     }
     card.selectSelf(instance.id);
+    for (let section = card.closest('wa-details'); section; section = section.parentElement?.closest('wa-details') ?? null) {
+      if (!section.open) {
+        // Scroll once the section has finished expanding, so the card has its final position.
+        const collapsed = section;
+        const shown = new Promise((resolve) => collapsed.addEventListener('wa-after-show', resolve, { once: true }));
+        collapsed.open = true;
+        await shown;
+      }
+    }
     card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     card.classList.add('highlight');
     card.addEventListener('animationend', () => card.classList.remove('highlight'), { once: true });

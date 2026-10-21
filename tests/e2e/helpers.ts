@@ -19,7 +19,8 @@ export async function loadExample(page: Page, file: string, { instantiate = fals
   if (instantiate) {
     await page.locator('#instantiateButton').click();
   }
-  await expect(page.locator('func-card').first()).toBeVisible();
+  // Cards in resource sections start collapsed, so wait for any visible one.
+  await expect(page.locator('func-card').filter({ visible: true }).first()).toBeVisible();
 }
 
 // The card of the exported function `name`, e.g. `add` or `constructor`.

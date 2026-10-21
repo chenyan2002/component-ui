@@ -5,7 +5,7 @@ use heck::{ToLowerCamelCase, ToUpperCamelCase};
 use std::collections::BTreeMap;
 use wit_component::DecodedWasm;
 use wit_parser::{
-    Function, FunctionKind, Handle, InterfaceId, Resolve, Type, TypeDefKind, TypeId, TypeOwner,
+    Function, FunctionKind, Handle, InterfaceId, Resolve, Type, TypeDefKind, TypeOwner,
     WorldItem, WorldKey,
 };
 
@@ -41,45 +41,32 @@ impl<'a> Bindgen<'a> {
             None => self.src.push_str("IDL.Null"),
         }
     }
-    fn pp_ty_kind(&mut self, id: TypeId, kind: &TypeDefKind, parent_id: Option<InterfaceId>) {
+    fn pp_ty_kind(&mut self, kind: &TypeDefKind, parent_id: Option<InterfaceId>) {
         match kind {
             TypeDefKind::Type(t) => {
-                let owner_not_parent = match t {
-                    Type::Id(type_def_id) => {
-                        let ty = &self.resolve.types[*type_def_id];
-                        match ty.owner {
-                            TypeOwner::Interface(i) => {
-                                if let Some(parent_id) = parent_id {
-                                    if parent_id == i {
-                                        None
-                                    } else {
-                                        Some(self.resolve.id_of(i).unwrap())
-                                    }
-                                } else {
-                                    Some(self.resolve.id_of(i).unwrap())
-                                }
+                // A type `use`d from another interface is referenced by that interface's own
+                // name for it, which may itself be a renamed `use`, e.g. `pollable as body`.
+                let foreign = match t {
+                    Type::Id(target) => {
+                        let target = &self.resolve.types[*target];
+                        match (target.owner, &target.name) {
+                            (TypeOwner::Interface(i), Some(name)) if parent_id != Some(i) => {
+                                Some((self.resolve.id_of(i).unwrap(), name.to_upper_camel_case()))
                             }
                             _ => None,
                         }
                     }
                     _ => None,
                 };
-                match owner_not_parent {
-                    Some(owned_interface_id) => {
-                        let orig_id = dealias(self.resolve, id);
-                        let orig_name = self.resolve.types[orig_id]
-                            .name
-                            .as_ref()
-                            .unwrap()
-                            .to_upper_camel_case();
+                match foreign {
+                    Some((owned_interface_id, name)) => {
                         let owned_iface_name = interface_type_name(&owned_interface_id);
                         let owned_iface_name = self
                             .local_names
                             .get_or_create(&owned_interface_id, &owned_iface_name)
                             .0
                             .to_string();
-                        self.src
-                            .push_str(&format!("{owned_iface_name}.{orig_name}"));
+                        self.src.push_str(&format!("{owned_iface_name}.{name}"));
                     }
                     None => self.pp_ty(t),
                 }
@@ -199,7 +186,7 @@ impl<'a> Bindgen<'a> {
                 if let Some(name) = &ty.name {
                     return self.src.push_str(&name.to_upper_camel_case());
                 }
-                self.pp_ty_kind(*id, &ty.kind, None);
+                self.pp_ty_kind(&ty.kind, None);
             }
         }
     }
@@ -217,7 +204,7 @@ impl<'a> Bindgen<'a> {
                 kind => {
                     let name = name.to_upper_camel_case();
                     self.src.push_str(&format!("const {name} = "));
-                    self.pp_ty_kind(*id, kind, Some(iface_id));
+                    self.pp_ty_kind(kind, Some(iface_id));
                     self.src.push_str(";\n");
                     self.defs.push(name);
                 }
@@ -401,12 +388,4 @@ fn interface_type_name(iface_name: &str) -> String {
     iface_name_sans_version
         .replace(['/', ':'], "-")
         .to_upper_camel_case()
-}
-fn dealias(resolve: &Resolve, mut id: TypeId) -> TypeId {
-    loop {
-        match &resolve.types[id].kind {
-            TypeDefKind::Type(Type::Id(that_id)) => id = *that_id,
-            _ => break id,
-        }
-    }
 }
