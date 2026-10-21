@@ -132,6 +132,20 @@ pre {
 .card-title .muted {
   font-weight: var(--wa-font-weight-normal);
 }
+.imports-card {
+  flex-shrink: 0;
+  background: var(--wa-color-surface-default);
+}
+.imports-card::part(content) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wa-space-l);
+}
+.imports-title {
+  display: flex;
+  align-items: center;
+  gap: var(--wa-space-s);
+}
 .imports {
   display: flex;
   flex-direction: column;
@@ -170,7 +184,7 @@ pre {
 .section-summary code,
 .signature,
 .log-call code,
-.instance-title code {
+.resource-table code {
   background: none;
   padding: 0;
 }
@@ -186,43 +200,22 @@ pre {
   align-items: start;
   gap: var(--wa-space-m);
 }
-.subheading {
-  margin: 0;
-  font-size: var(--wa-font-size-s);
-  color: var(--wa-color-text-quiet);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.instances {
-  display: flex;
-  flex-direction: column;
-  gap: var(--wa-space-m);
-}
-.instance-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--wa-space-s);
-}
-.instance-title {
-  display: flex;
-  align-items: center;
-  gap: var(--wa-space-xs);
-  min-width: 0;
-}
-.instance-origin {
-  font-family: var(--wa-font-family-code);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.instance-card.dead {
-  opacity: 0.6;
-}
-
 /* Function cards */
 .func-card {
   --spacing: var(--wa-space-m);
+}
+/* A method card picked from the resource table. */
+func-card.highlight {
+  border-radius: var(--wa-border-radius-m);
+  animation: card-highlight 1.5s ease-out;
+}
+@keyframes card-highlight {
+  from {
+    box-shadow: 0 0 0 3px var(--wa-color-brand-border-loud);
+  }
+  to {
+    box-shadow: 0 0 0 3px transparent;
+  }
 }
 .func-header {
   display: flex;
@@ -324,24 +317,36 @@ pre {
   color: var(--wa-color-danger-on-quiet);
 }
 
-/* Console */
+/* Resource table and console */
 .console-pane {
   overflow: hidden;
   background: var(--wa-color-surface-raised);
 }
-console-panel {
+.state-split {
+  height: 100%;
+  --min: 6rem;
+  --max: calc(100% - 8rem);
+}
+.resource-pane {
+  height: 100%;
+  overflow: hidden;
+  border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+}
+console-panel,
+resource-table {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
 }
-.console-header {
+.panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: var(--wa-space-xs) var(--wa-space-m);
   border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
 }
-.console-title {
+.panel-title {
   display: flex;
   align-items: center;
   gap: var(--wa-space-xs);
@@ -437,6 +442,108 @@ console-panel {
 .log-copy {
   flex-shrink: 0;
   font-size: var(--wa-font-size-s);
+}
+
+/* One row per handle index; a changed row is re-created and highlighted. */
+.resource-scroll {
+  flex: 1;
+  overflow: auto;
+}
+.resource-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--wa-font-size-s);
+}
+.resource-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--wa-space-2xs) var(--wa-space-xs);
+  text-align: left;
+  font-size: var(--wa-font-size-xs);
+  font-weight: var(--wa-font-weight-semibold);
+  color: var(--wa-color-text-quiet);
+  background: var(--wa-color-surface-raised);
+  border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+}
+.resource-table td {
+  padding: var(--wa-space-xs);
+  vertical-align: top;
+  white-space: nowrap;
+  border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+}
+.resource-table td.handle {
+  font-family: var(--wa-font-family-code);
+  text-align: right;
+  color: var(--wa-color-text-quiet);
+}
+.resource-row {
+  animation: row-highlight 1.5s ease-out;
+}
+.resource-row.dead > td:not(.row-actions) {
+  opacity: 0.6;
+}
+@keyframes row-highlight {
+  from {
+    background: var(--wa-color-brand-fill-quiet);
+  }
+  to {
+    background: transparent;
+  }
+}
+button.instance-id {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--wa-color-brand-on-quiet);
+  font: inherit;
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+.resource-table :is(th, td):first-child {
+  padding-left: var(--wa-space-m);
+}
+.resource-table td.history {
+  width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.instance-type,
+.instance-holders {
+  margin-top: var(--wa-space-2xs);
+  font-size: var(--wa-font-size-xs);
+  color: var(--wa-color-text-quiet);
+}
+.instance-fate {
+  color: var(--wa-color-text-quiet);
+  font-family: var(--wa-font-family-code);
+}
+.earlier {
+  margin-top: var(--wa-space-2xs);
+  padding: 0;
+  font-size: var(--wa-font-size-xs);
+  color: var(--wa-color-text-quiet);
+  background: none;
+  border: none;
+}
+.earlier summary {
+  display: inline-flex;
+  flex-direction: row-reverse;
+  gap: var(--wa-space-2xs);
+  margin: 0;
+  padding: 0;
+}
+.earlier summary::after {
+  width: 0.625rem;
+  height: 0.625rem;
+}
+.earlier ul {
+  margin: var(--wa-space-2xs) 0 0;
+  padding-left: var(--wa-space-s);
+  list-style: none;
+}
+.row-actions {
+  text-align: right;
 }
 
 /* Drag and drop */

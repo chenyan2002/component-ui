@@ -3,79 +3,195 @@ import * as WIT from './wit';
 export type InstanceState = 'live' | 'moved' | 'dropped';
 
 export interface Instance {
+  // `{resource}_{handle}`, e.g. `x_1`, or `{resource}_host{n}` when there is no handle index.
   id: string;
+  // The handle index in the component instance's table.
+  handle?: number;
   resource: WIT.ResourceClass;
   obj: object;
   state: InstanceState;
   // The call that produced the instance, e.g. `new X(5)`.
   origin: string;
-  // What happened to it once it is no longer live, e.g. `moved into consume(x_0)`.
+  // What happened to it once it is no longer live, e.g. `moved into consume(x_1)`.
   fate?: string;
+  // Who holds a host-implemented instance, whose handle index isn't observable: the number of
+  // handles the guest has on the object, and whether an export returned it to the UI.
+  holders?: { guest: number; ui: boolean };
 }
 
-// jco keeps the handle of a component-owned resource under a private `Symbol('handle')`
-// and clears it when ownership moves. Returns undefined for objects without one
-// (e.g. host-implemented resources), where liveness can't be observed.
+// A row of the resource table: one handle index and the instances that held it.
+export interface Slot {
+  key: string;
+  handle?: number;
+  current: Instance;
+  // Earlier occupants of a reused index, oldest first. They are all dead.
+  earlier: Instance[];
+  // Bumped whenever `current` changes, so the table can highlight the row.
+  version: number;
+}
+
+function ownSymbol(obj: object, description: string): symbol | undefined {
+  return Object.getOwnPropertySymbols(obj).find((s) => s.description === description);
+}
+
+// jco keeps the handle of a resource under a private `Symbol('handle')` and clears it
+// when ownership moves. Returns undefined for objects without one (e.g. host-implemented
+// resources), where liveness can't be observed.
 function hasLiveHandle(obj: object): boolean | undefined {
-  const symbol = Object.getOwnPropertySymbols(obj).find((s) => s.description === 'handle');
+  const symbol = ownSymbol(obj, 'handle');
   return symbol === undefined ? undefined : (obj as any)[symbol] !== undefined;
 }
 
-const dispose: symbol = (Symbol as any).dispose ?? Symbol.for('dispose');
+// The handle index of a resource the component owns. Host-implemented resources lifted out
+// of the component carry `Symbol.for('cabiRep')`; their handle was already freed.
+function handleIndex(obj: object): number | undefined {
+  const symbol = ownSymbol(obj, 'handle');
+  if (symbol === undefined || Object.prototype.hasOwnProperty.call(obj, Symbol.for('cabiRep'))) {
+    return undefined;
+  }
+  const handle = (obj as any)[symbol];
+  return typeof handle === 'number' ? handle : undefined;
+}
 
-// Tracks the resource instances of one component instance. Emits `change` events.
+export const dispose: symbol = (Symbol as any).dispose ?? Symbol.for('dispose');
+
+// Whether the UI can call the instance's methods: it isn't a host object only the guest holds.
+export function callable(instance: Instance): boolean {
+  return !instance.holders || instance.holders.ui;
+}
+
+// Tracks the resource instances of one component instance, by handle index. Indices are
+// shared by all resource types of the component instance and reused once freed, so an
+// id refers to the latest instance that held the index. Host-implemented instances have no
+// index; they are tracked by who holds them. Emits `change` events.
 export class ResourceRegistry extends EventTarget {
+  // Called for each new host-implemented instance, to observe what the guest does with it.
+  public onHostInstance?: (instance: Instance) => void;
+
+  private readonly slots = new Map<string, Slot>();
   private readonly byId = new Map<string, Instance>();
   private readonly byObj = new Map<object, Instance>();
-  private readonly counters = new Map<string, number>();
+  private hostCount = 0;
+  // The object whose destructor `drop` is running, which isn't the guest dropping it.
+  private dropping?: object;
 
-  public add(resource: WIT.ResourceClass, obj: object, origin: string): Instance {
+  // Registers an instance returned to the UI, by an export or, when `fromGuest` is false, by
+  // the host directly.
+  public add(resource: WIT.ResourceClass, obj: object, origin: string, fromGuest = true): Instance {
     const existing = this.byObj.get(obj);
+    if (existing?.holders) {
+      // An export returning a host object takes it from the guest.
+      this.hold(existing, existing.holders.guest - (fromGuest ? 1 : 0), true);
+    }
     if (existing) {
       return existing;
     }
+    const handle = handleIndex(obj);
+    return this.create(resource, obj, origin, handle, handle === undefined ? { guest: 0, ui: true } : undefined);
+  }
+
+  // Registers a host object handed to the guest, e.g. the stream returned by `get-stdout`.
+  public acquire(resource: WIT.ResourceClass, obj: object, origin: string): Instance {
+    const existing = this.byObj.get(obj);
+    if (existing?.holders) {
+      this.hold(existing, existing.holders.guest + 1, existing.holders.ui);
+    }
+    return existing ?? this.create(resource, obj, origin, undefined, { guest: 1, ui: false });
+  }
+
+  // The guest gave up a handle on a host object, by dropping it or moving it into an import.
+  public release(obj: object, state: 'moved' | 'dropped', fate: string) {
+    const instance = this.byObj.get(obj);
+    if (instance?.holders && obj !== this.dropping) {
+      this.hold(instance, instance.holders.guest - 1, instance.holders.ui, [state, fate]);
+    }
+  }
+
+  private create(
+    resource: WIT.ResourceClass, obj: object, origin: string, handle?: number, holders?: Instance['holders'],
+  ): Instance {
     const prefix = resource._name.toLowerCase();
-    const n = this.counters.get(prefix) ?? 0;
-    this.counters.set(prefix, n + 1);
-    const instance: Instance = { id: `${prefix}_${n}`, resource, obj, state: 'live', origin };
+    const key = handle === undefined ? `host${this.hostCount++}` : `${handle}`;
+    const instance: Instance = { id: `${prefix}_${key}`, handle, resource, obj, state: 'live', origin, holders };
+    const slot = this.slots.get(key);
+    if (slot) {
+      slot.earlier.push(slot.current);
+      slot.current = instance;
+      slot.version++;
+    } else {
+      this.slots.set(key, { key, handle, current: instance, earlier: [], version: 0 });
+    }
     this.byId.set(instance.id, instance);
     this.byObj.set(obj, instance);
+    if (holders) {
+      this.onHostInstance?.(instance);
+    }
     this.changed();
     return instance;
+  }
+
+  // Updates who holds a host-implemented instance; it is live while anyone does.
+  private hold(instance: Instance, guest: number, ui: boolean, ending?: [InstanceState, string]) {
+    instance.holders = { guest: Math.max(0, guest), ui };
+    if (instance.holders.guest > 0 || ui) {
+      instance.state = 'live';
+      instance.fate = undefined;
+    } else if (ending) {
+      [instance.state, instance.fate] = ending;
+    }
+    this.touch(instance);
   }
 
   public get(id: string): Instance | undefined {
     return this.byId.get(id);
   }
 
-  public idOf(obj: unknown): string | undefined {
-    return typeof obj === 'object' && obj !== null ? this.byObj.get(obj)?.id : undefined;
+  public instanceOf(obj: unknown): Instance | undefined {
+    return typeof obj === 'object' && obj !== null ? this.byObj.get(obj) : undefined;
   }
 
-  public instances(resource: WIT.ResourceClass): Instance[] {
-    return [...this.byId.values()].filter((i) => i.resource === resource);
+  public idOf(obj: unknown): string | undefined {
+    return this.instanceOf(obj)?.id;
+  }
+
+  // Table rows by handle index; instances without one come last, in creation order.
+  public rows(): Slot[] {
+    const position = (slot: Slot) => slot.handle ?? Infinity;
+    return [...this.slots.values()].sort((a, b) => position(a) - position(b));
   }
 
   public live(resource: WIT.ResourceClass): Instance[] {
-    return this.instances(resource).filter((i) => i.state === 'live');
+    return this.rows().map((slot) => slot.current).filter((i) => i.resource === resource && i.state === 'live');
   }
 
+  // Resources the UI has held instances of, whose methods it can call. Host resources only
+  // the guest holds are just observed.
   public resources(): WIT.ResourceClass[] {
-    return [...new Set([...this.byId.values()].map((i) => i.resource))];
+    const instances = [...this.slots.values()].flatMap((slot) => [...slot.earlier, slot.current]);
+    return [...new Set(instances.filter(callable).map((i) => i.resource))];
   }
 
-  // Updates instance states after a call. `owned` are the objects passed as owned
-  // handles; they are assumed moved on success when their handle can't be observed.
-  public settle(owned: object[], fate: string, succeeded: boolean) {
+  // Updates instance states after a call to the guest or, `into` the host, directly to the host.
+  // `owned` are the objects passed as owned handles; on success, a host object passed to the
+  // guest now has a guest handle, and one passed to the host is gone.
+  public settle(owned: object[], fate: string, succeeded: boolean, into: 'guest' | 'host' = 'guest') {
     let changed = false;
-    for (const instance of this.byId.values()) {
+    for (const slot of this.slots.values()) {
+      const instance = slot.current;
       if (instance.state !== 'live') {
         continue;
       }
-      const alive = hasLiveHandle(instance.obj);
-      if (alive === false || (alive === undefined && succeeded && owned.includes(instance.obj))) {
+      if (instance.holders) {
+        if (succeeded && owned.includes(instance.obj)) {
+          const guest = instance.holders.guest + (into === 'guest' ? 1 : 0);
+          this.hold(instance, guest, false, ['moved', fate]);
+        }
+        continue;
+      }
+      if (hasLiveHandle(instance.obj) === false) {
         instance.state = 'moved';
         instance.fate = fate;
+        slot.version++;
         changed = true;
       }
     }
@@ -84,32 +200,143 @@ export class ResourceRegistry extends EventTarget {
     }
   }
 
-  // Drops the instance, running the resource's destructor in the component.
+  // Drops the instance, running the resource's destructor.
   public drop(id: string) {
     const instance = this.byId.get(id)!;
     const destructor = (instance.obj as any)[dispose];
     if (typeof destructor !== 'function') {
       throw new Error(`${id} can't be dropped`);
     }
-    destructor.call(instance.obj);
+    this.dropping = instance.obj;
+    try {
+      destructor.call(instance.obj);
+    } finally {
+      this.dropping = undefined;
+    }
+    if (instance.holders) {
+      instance.holders.ui = false;
+    }
     instance.state = 'dropped';
     instance.fate = 'dropped';
-    this.changed();
+    this.touch(instance);
   }
 
-  // Forgets an instance that is no longer live.
+  // Forgets the row of an instance that is no longer live, including earlier occupants.
   public dismiss(id: string) {
     const instance = this.byId.get(id);
-    if (instance && instance.state !== 'live') {
-      this.byId.delete(id);
-      this.byObj.delete(instance.obj);
+    const slot = instance && this.slotOf(instance);
+    if (slot && instance.state !== 'live') {
+      this.remove(slot);
       this.changed();
     }
+  }
+
+  // Forgets every row whose instance is no longer live.
+  public dismissFreed() {
+    const freed = [...this.slots.values()].filter((slot) => slot.current.state !== 'live');
+    freed.forEach((slot) => this.remove(slot));
+    if (freed.length > 0) {
+      this.changed();
+    }
+  }
+
+  // The row an instance currently occupies; earlier occupants have none.
+  private slotOf(instance: Instance): Slot | undefined {
+    return [...this.slots.values()].find((slot) => slot.current === instance);
+  }
+
+  private touch(instance: Instance) {
+    const slot = this.slotOf(instance);
+    if (slot) {
+      slot.version++;
+      this.changed();
+    }
+  }
+
+  private remove(slot: Slot) {
+    for (const instance of [...slot.earlier, slot.current]) {
+      if (this.byId.get(instance.id) === instance) {
+        this.byId.delete(instance.id);
+      }
+      this.byObj.delete(instance.obj);
+    }
+    this.slots.delete(slot.key);
   }
 
   private changed() {
     this.dispatchEvent(new Event('change'));
   }
+}
+
+// Whether a value of the type can contain resource handles.
+class HasResource extends WIT.Visitor<Set<WIT.RecClass>, boolean> {
+  public visitType<T>(_t: WIT.Type<T>, _seen: Set<WIT.RecClass>): boolean {
+    return false;
+  }
+  public visitResource(_t: WIT.ResourceClass, _seen: Set<WIT.RecClass>): boolean {
+    return true;
+  }
+  public visitOpt(_t: WIT.OptClass, ty: WIT.Type, seen: Set<WIT.RecClass>): boolean {
+    return ty.accept(this, seen);
+  }
+  public visitVec(_t: WIT.VecClass, ty: WIT.Type, seen: Set<WIT.RecClass>): boolean {
+    return ty.accept(this, seen);
+  }
+  public visitRecord(_t: WIT.RecordClass, fields: Record<string, WIT.Type>, seen: Set<WIT.RecClass>): boolean {
+    return Object.values(fields).some((ty) => ty.accept(this, seen));
+  }
+  public visitTuple(_t: WIT.TupleClass, components: WIT.Type[], seen: Set<WIT.RecClass>): boolean {
+    return components.some((ty) => ty.accept(this, seen));
+  }
+  public visitVariant(_t: WIT.VariantClass, fields: Record<string, WIT.Type>, seen: Set<WIT.RecClass>): boolean {
+    return Object.values(fields).some((ty) => ty.accept(this, seen));
+  }
+  public visitRec(t: WIT.RecClass, ty: WIT.Type, seen: Set<WIT.RecClass>): boolean {
+    if (seen.has(t)) {
+      return false;
+    }
+    seen.add(t);
+    return ty.accept(this, seen);
+  }
+}
+
+const hasResource = new HasResource();
+
+// Whether calling the function can pass resource handles either way.
+export function involvesResources(func: WIT.FuncClass): boolean {
+  return func.callKind === 'constructor'
+    || [...func._args.map(([_, ty]) => ty), ...func._ret].some((ty) => ty.accept(hasResource, new Set()));
+}
+
+// Whether the interfaces involve resource instances.
+export function usesResources(interfaces: WIT.InterfaceClass[]): boolean {
+  return interfaces.some((iface) => iface.get_resources().length > 0
+    || Object.values(iface._fields).some(involvesResources));
+}
+
+// The `ok` and `err` types of a function returning a `result`; jco returns the `ok` payload
+// and throws on `err`. The bindgen encodes results as `variant { ok, err }`.
+function resultTypes(func: WIT.FuncClass): { ok?: WIT.Type; err?: WIT.Type } | undefined {
+  const [ret] = func._ret;
+  const inner = ret instanceof WIT.RecClass ? ret.get_type() : ret;
+  if (inner instanceof WIT.VariantClass) {
+    const cases = Object.keys(inner._fields);
+    if (cases.length === 2 && cases[0] === 'ok' && cases[1] === 'err') {
+      return inner._fields;
+    }
+  }
+  return undefined;
+}
+
+// The type of the JS value a call returns.
+export function returnedType(func: WIT.FuncClass): WIT.Type | undefined {
+  const result = resultTypes(func);
+  return result ? result.ok : func._ret[0];
+}
+
+// The type of the error payload a call throws, if it returns a `result`.
+export function thrownType(func: WIT.FuncClass): WIT.Type | undefined {
+  return resultTypes(func)?.err;
 }
 
 function isHandle(value: unknown): value is object {

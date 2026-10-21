@@ -1,18 +1,21 @@
 import * as WIT from './wit';
 import { customStringify, LogEntry } from './console';
-import { ownedHandles, ResourceRegistry } from './resources';
+import { HostResources } from './host-resources';
+import { ownedHandles, ResourceRegistry, returnedType } from './resources';
 
 export interface ExportsContext {
   // Exports of the instantiated component, as returned by jco's `instantiate`.
   exports: any;
   log(call: string): LogEntry;
   registry: ResourceRegistry;
+  host: HostResources;
 }
 
 export type CallTarget =
   | { type: 'func'; iface: WIT.InterfaceClass }
   | { type: 'constructor' | 'static'; iface: WIT.InterfaceClass; resource: WIT.ResourceClass }
-  | { type: 'method'; resource: WIT.ResourceClass; instance: string };
+  // Methods take the instance (`self`) as their first argument.
+  | { type: 'method'; resource: WIT.ResourceClass };
 
 interface Call {
   label: string;
@@ -21,6 +24,31 @@ interface Call {
 
 function exportsOf(ctx: ExportsContext, iface: WIT.InterfaceClass): any {
   return iface.isRoot ? ctx.exports : ctx.exports[iface._name];
+}
+
+// The class of a resource: the component's export, or the host's class for an imported one.
+function resourceClass(ctx: ExportsContext, iface: WIT.InterfaceClass, resource: WIT.ResourceClass): any {
+  if (!ctx.host.isImported(resource)) {
+    return exportsOf(ctx, iface)[resource._name];
+  }
+  const cls = ctx.host.hostClass(resource);
+  if (!cls) {
+    throw new Error(`The host doesn't implement ${resource._name}`);
+  }
+  return cls;
+}
+
+// Whether the call goes to the host rather than the guest: it is on an imported resource.
+function callsHost(ctx: ExportsContext, target: CallTarget, args: any[]): boolean {
+  switch (target.type) {
+    case 'func':
+      return false;
+    case 'constructor':
+    case 'static':
+      return ctx.host.isImported(target.resource);
+    case 'method':
+      return !!ctx.registry.instanceOf(args[0])?.holders;
+  }
 }
 
 // Formats a value for the console, showing resource handles by their instance id.
@@ -36,32 +64,22 @@ function resolveCall(ctx: ExportsContext, target: CallTarget, name: string, args
       return { label: `${name}(${argList})`, invoke: () => mod[name](...args) };
     }
     case 'constructor': {
-      const cls = exportsOf(ctx, target.iface)[target.resource._name];
+      const cls = resourceClass(ctx, target.iface, target.resource);
       return { label: `new ${target.resource._name}(${argList})`, invoke: () => new cls(...args) };
     }
     case 'static': {
-      const cls = exportsOf(ctx, target.iface)[target.resource._name];
+      const cls = resourceClass(ctx, target.iface, target.resource);
+      if (typeof cls[name] !== 'function') {
+        throw new Error(`${target.resource._name}.${name} is not implemented`);
+      }
       return { label: `${target.resource._name}.${name}(${argList})`, invoke: () => cls[name](...args) };
     }
     case 'method': {
-      const obj: any = ctx.registry.get(target.instance)!.obj;
-      return { label: `${target.instance}.${name}(${argList})`, invoke: () => obj[name](...args) };
+      const [self, ...rest] = args;
+      const restList = rest.map((arg) => format(ctx, arg)).join(', ');
+      return { label: `${format(ctx, self)}.${name}(${restList})`, invoke: () => self[name](...rest) };
     }
   }
-}
-
-// The type of the JS value a call returns. jco returns the `ok` payload of a top-level
-// `result` and throws on `err`. The bindgen encodes results as `variant { ok, err }`.
-function returnedType(func: WIT.FuncClass): WIT.Type | undefined {
-  const [ret] = func._ret;
-  const inner = ret instanceof WIT.RecClass ? ret.get_type() : ret;
-  if (inner instanceof WIT.VariantClass) {
-    const cases = Object.keys(inner._fields);
-    if (cases.length === 2 && cases[0] === 'ok' && cases[1] === 'err') {
-      return inner._fields.ok;
-    }
-  }
-  return ret;
 }
 
 export async function call(ctx: ExportsContext, target: CallTarget, name: string, func: WIT.FuncClass, args: any[]) {
@@ -73,27 +91,32 @@ export async function call(ctx: ExportsContext, target: CallTarget, name: string
     return;
   }
   const { registry } = ctx;
-  const owned = func._args.flatMap(([_, type], i) => ownedHandles(type, args[i]).map(([_, obj]) => obj));
+  const funcArgs = target.type === 'method' ? args.slice(1) : args;
+  const owned = func._args.flatMap(([_, type], i) => ownedHandles(type, funcArgs[i]).map(([_, obj]) => obj));
+  const fate = `moved into ${resolved.label}`;
+  const toHost = callsHost(ctx, target, args);
+  const into = toHost ? 'host' : 'guest';
   const entry = ctx.log(resolved.label);
-  let succeeded = false;
+  let result: any;
   try {
-    const result = await resolved.invoke();
-    succeeded = true;
-    if (target.type === 'constructor') {
-      registry.add(target.resource, result, resolved.label);
-    } else {
-      const type = returnedType(func);
-      for (const [resource, obj] of type ? ownedHandles(type, result) : []) {
-        registry.add(resource, obj, resolved.label);
-      }
-    }
-    entry.result(format(ctx, result));
+    result = await (toHost ? ctx.host.callDirect(resolved.invoke) : resolved.invoke());
   } catch (err) {
+    registry.settle(owned, fate, false, into);
     entry.error(err);
     console.error(err);
-  } finally {
-    registry.settle(owned, `moved into ${resolved.label}`, succeeded);
+    return;
   }
+  // Settle moved arguments first: returned resources may reuse their handle indices.
+  registry.settle(owned, fate, true, into);
+  if (target.type === 'constructor') {
+    registry.add(target.resource, result, resolved.label, !toHost);
+  } else {
+    const type = returnedType(func);
+    for (const [resource, obj] of type ? ownedHandles(type, result) : []) {
+      registry.add(resource, obj, resolved.label, !toHost);
+    }
+  }
+  entry.result(format(ctx, result));
 }
 
 export function drop(ctx: ExportsContext, instance: string) {

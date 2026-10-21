@@ -7,7 +7,9 @@ import { instantiate, loadComponent, LoadedComponent, readWasm } from './loader'
 import { ExportsContext } from './calls';
 import { ConsolePanel } from './console';
 import { renderExports } from './exports-view';
-import { ResourceRegistry } from './resources';
+import { HostResources } from './host-resources';
+import { ResourceRegistry, usesResources } from './resources';
+import './resource-table';
 
 const EXAMPLES: Array<[file: string, label: string]> = [
   ['calculator.wasm', 'Calculator'],
@@ -15,11 +17,22 @@ const EXAMPLES: Array<[file: string, label: string]> = [
   ['variants.wasm', 'Variants'],
   ['resource.wasm', 'Resource'],
   ['wasi-http.wasm', 'WASI HTTP'],
+  ['printer.wasm', 'Printer'],
+  ['kv-store.wasm', 'KV Store'],
 ];
 
 // Prefilled implementations for the imports of the bundled examples.
 const DEFAULT_IMPORT_STUBS: Record<string, string> = {
   'docs:adder/add': 'export function add(a, b) { return a + b }',
+  // The host resource `Y` of the resource example.
+  'imports': [
+    'export class Y {',
+    '  constructor(a) { this.a = a }',
+    '  getA() { return this.a }',
+    '  setA(a) { this.a = a }',
+    '  static add(y, a) { return new Y(y.a + a) }',
+    '}',
+  ].join('\n'),
 };
 
 interface Session {
@@ -28,6 +41,8 @@ interface Session {
   component: LoadedComponent;
   // JS source for each non-WASI import, keyed by package.
   importCode: Record<string, string>;
+  // Whether the exports or imports involve resources, which shows the resource table.
+  hasResources: boolean;
   status: 'idle' | 'instantiating' | 'ready' | 'failed';
   // Bumped on each instantiation so the export cards start fresh.
   generation: number;
@@ -52,6 +67,7 @@ export class ComponentApp extends LitElement {
   @state() accessor example = '';
   @query('console-panel') accessor consolePanel!: ConsolePanel | null;
   @query('#wasmFileInput') accessor fileInput!: HTMLInputElement;
+  @query('.component-pane') accessor componentPane!: HTMLElement | null;
 
   // Guards against a slow load finishing after a newer one has started.
   private loadCounter = 0;
@@ -139,15 +155,30 @@ export class ComponentApp extends LitElement {
         `)}
       </section>
       <aside slot="end" class="pane console-pane">
-        <console-panel></console-panel>
+        ${s.hasResources
+          ? html`<wa-split-panel orientation="vertical" position="40" class="state-split">
+              <div slot="start" class="resource-pane">
+                ${s.status === 'ready'
+                  ? html`<resource-table .ctx=${s.ctx!}></resource-table>`
+                  : html`<div class="muted placeholder">Resource instances appear here once the component is instantiated.</div>`}
+              </div>
+              <console-panel slot="end"></console-panel>
+            </wa-split-panel>`
+          : html`<console-panel></console-panel>`}
       </aside>
     </wa-split-panel>`;
   }
 
+  // Collapsed once instantiated; expand it to change the stubs and instantiate again.
   private renderImports(s: Session) {
-    return html`<wa-card id="importsCard" class="imports-card">
-      <div slot="header" class="card-title">
-        <span>Imports</span>
+    const count = s.component.customImports.length;
+    return html`<wa-details id="importsCard" class="imports-card" .open=${s.status !== 'ready'}>
+      <div slot="summary" class="card-title">
+        <span class="imports-title">
+          Imports
+          <wa-badge variant="neutral" appearance="filled" pill>${count} interface${count === 1 ? '' : 's'}</wa-badge>
+          ${s.status === 'ready' ? html`<wa-tag size="s" variant="success">instantiated</wa-tag>` : nothing}
+        </span>
         <span class="muted">Provide a JavaScript implementation for each non-WASI import.</span>
       </div>
       <div class="imports">
@@ -161,7 +192,7 @@ export class ComponentApp extends LitElement {
           @input=${(e: Event) => (s.importCode[pkg] = (e.target as HTMLTextAreaElement).value)}
         ></wa-textarea>`)}
       </div>
-      <div slot="footer" class="func-actions">
+      <div class="func-actions">
         <wa-button
           id="instantiateButton"
           variant="brand"
@@ -172,7 +203,7 @@ export class ComponentApp extends LitElement {
           Instantiate
         </wa-button>
       </div>
-    </wa-card>`;
+    </wa-details>`;
   }
 
   private renderExportsArea(s: Session) {
@@ -202,7 +233,9 @@ export class ComponentApp extends LitElement {
       this.consolePanel?.clear();
       const importCode = Object.fromEntries(
         component.customImports.map((pkg) => [pkg, DEFAULT_IMPORT_STUBS[pkg] ?? '']));
-      const session: Session = { id, name, component, importCode, status: 'idle', generation: 0 };
+      const session: Session = {
+        id, name, component, importCode, hasResources: usesResources([...component.interfaces, ...component.imports]), status: 'idle', generation: 0,
+      };
       this.session = session;
       if (component.customImports.length === 0) {
         this.instantiate(session);
@@ -225,17 +258,19 @@ export class ComponentApp extends LitElement {
     s.status = 'instantiating';
     this.requestUpdate();
     try {
+      // Each component instance has its own resource instances, including those its imports
+      // hand out while it instantiates.
+      const registry = new ResourceRegistry();
+      const host = new HostResources(registry, s.component.imports);
       const exports = await instantiate(s.component.transpiled, s.importCode, {
         stdout: (text) => this.consolePanel?.print('stdout', text),
         stderr: (text) => this.consolePanel?.print('stderr', text),
-      });
+      }, (pkg, mod) => host.wrap(pkg, mod));
       if (s !== this.session) {
         return;
       }
-      // Each component instance has its own resource instances.
-      const registry = new ResourceRegistry();
       registry.addEventListener('change', () => this.requestUpdate());
-      s.ctx = { exports, log: (call) => this.consolePanel!.logCall(call), registry };
+      s.ctx = { exports, log: (call) => this.consolePanel!.logCall(call), registry, host };
       s.status = 'ready';
       s.generation++;
     } catch (err) {
@@ -244,6 +279,11 @@ export class ComponentApp extends LitElement {
       s.error = err;
     }
     this.requestUpdate();
+    if (s.status === 'ready') {
+      // The imports collapse; show the beginning of the exports.
+      await this.updateComplete;
+      this.componentPane?.scrollTo({ top: 0 });
+    }
   }
 
   private loadFile(file: File) {

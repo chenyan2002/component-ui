@@ -105,8 +105,8 @@ export class ConsolePanel extends LitElement {
 
   protected render() {
     return html`
-      <div class="console-header">
-        <span class="console-title"><wa-icon name="terminal"></wa-icon> Console</span>
+      <div class="panel-header">
+        <span class="panel-title"><wa-icon name="terminal"></wa-icon> Console</span>
         <wa-button size="s" appearance="plain" @click=${() => this.clear()}>Clear</wa-button>
       </div>
       <div class="console">

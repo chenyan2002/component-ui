@@ -5,7 +5,7 @@ use heck::{ToLowerCamelCase, ToUpperCamelCase};
 use std::collections::BTreeMap;
 use wit_component::DecodedWasm;
 use wit_parser::{
-    Function, FunctionKind, Handle, InterfaceId, Resolve, Type, TypeDefKind, TypeId, TypeOwner,
+    Function, FunctionKind, Handle, InterfaceId, Resolve, Type, TypeDefKind, TypeOwner,
     WorldItem, WorldKey,
 };
 
@@ -14,6 +14,7 @@ struct Bindgen<'a> {
     resolve: &'a Resolve,
     defs: Vec<String>,
     export_interfaces: Vec<String>,
+    import_interfaces: Vec<String>,
     resources: BTreeMap<String, Bindgen<'a>>,
     local_names: LocalNames,
 }
@@ -24,6 +25,7 @@ impl<'a> Bindgen<'a> {
             resolve,
             defs: Vec::new(),
             export_interfaces: Vec::new(),
+            import_interfaces: Vec::new(),
             resources: Default::default(),
             local_names: LocalNames::default(),
         }
@@ -39,45 +41,32 @@ impl<'a> Bindgen<'a> {
             None => self.src.push_str("IDL.Null"),
         }
     }
-    fn pp_ty_kind(&mut self, id: TypeId, kind: &TypeDefKind, parent_id: Option<InterfaceId>) {
+    fn pp_ty_kind(&mut self, kind: &TypeDefKind, parent_id: Option<InterfaceId>) {
         match kind {
             TypeDefKind::Type(t) => {
-                let owner_not_parent = match t {
-                    Type::Id(type_def_id) => {
-                        let ty = &self.resolve.types[*type_def_id];
-                        match ty.owner {
-                            TypeOwner::Interface(i) => {
-                                if let Some(parent_id) = parent_id {
-                                    if parent_id == i {
-                                        None
-                                    } else {
-                                        Some(self.resolve.id_of(i).unwrap())
-                                    }
-                                } else {
-                                    Some(self.resolve.id_of(i).unwrap())
-                                }
+                // A type `use`d from another interface is referenced by that interface's own
+                // name for it, which may itself be a renamed `use`, e.g. `pollable as body`.
+                let foreign = match t {
+                    Type::Id(target) => {
+                        let target = &self.resolve.types[*target];
+                        match (target.owner, &target.name) {
+                            (TypeOwner::Interface(i), Some(name)) if parent_id != Some(i) => {
+                                Some((self.resolve.id_of(i).unwrap(), name.to_upper_camel_case()))
                             }
                             _ => None,
                         }
                     }
                     _ => None,
                 };
-                match owner_not_parent {
-                    Some(owned_interface_id) => {
-                        let orig_id = dealias(self.resolve, id);
-                        let orig_name = self.resolve.types[orig_id]
-                            .name
-                            .as_ref()
-                            .unwrap()
-                            .to_upper_camel_case();
+                match foreign {
+                    Some((owned_interface_id, name)) => {
                         let owned_iface_name = interface_type_name(&owned_interface_id);
                         let owned_iface_name = self
                             .local_names
                             .get_or_create(&owned_interface_id, &owned_iface_name)
                             .0
                             .to_string();
-                        self.src
-                            .push_str(&format!("{owned_iface_name}.{orig_name}"));
+                        self.src.push_str(&format!("{owned_iface_name}.{name}"));
                     }
                     None => self.pp_ty(t),
                 }
@@ -168,7 +157,10 @@ impl<'a> Bindgen<'a> {
                 self.src.push_str(&name.to_upper_camel_case());
                 self.src.push_str(")");
             }
-            TypeDefKind::Future(_) | TypeDefKind::Stream(_) => todo!(),
+            TypeDefKind::Future(_)
+            | TypeDefKind::Stream(_)
+            | TypeDefKind::Map(..)
+            | TypeDefKind::FixedLengthList(..) => todo!(),
             TypeDefKind::Resource => unreachable!(),
             TypeDefKind::Unknown => unreachable!(),
         }
@@ -194,7 +186,7 @@ impl<'a> Bindgen<'a> {
                 if let Some(name) = &ty.name {
                     return self.src.push_str(&name.to_upper_camel_case());
                 }
-                self.pp_ty_kind(*id, &ty.kind, None);
+                self.pp_ty_kind(&ty.kind, None);
             }
         }
     }
@@ -212,7 +204,7 @@ impl<'a> Bindgen<'a> {
                 kind => {
                     let name = name.to_upper_camel_case();
                     self.src.push_str(&format!("const {name} = "));
-                    self.pp_ty_kind(*id, kind, Some(iface_id));
+                    self.pp_ty_kind(kind, Some(iface_id));
                     self.src.push_str(";\n");
                     self.defs.push(name);
                 }
@@ -220,10 +212,7 @@ impl<'a> Bindgen<'a> {
         }
     }
     fn func(&mut self, func: &Function) {
-        let iface = if let FunctionKind::Method(ty)
-        | FunctionKind::Static(ty)
-        | FunctionKind::Constructor(ty) = func.kind
-        {
+        let iface = if let Some(ty) = func.kind.resource() {
             let ty = &self.resolve.types[ty];
             let resource = ty.name.clone().unwrap().to_upper_camel_case();
             self.resources
@@ -238,12 +227,12 @@ impl<'a> Bindgen<'a> {
             FunctionKind::Method(_) | FunctionKind::AsyncMethod(_) => 1,
             _ => 0,
         };
-        for (i, (name, ty)) in func.params[param_start..].iter().enumerate() {
+        for (i, param) in func.params[param_start..].iter().enumerate() {
             if i > 0 {
                 iface.src.push_str(", ");
             }
-            iface.src.push_str(&format!("['{name}', "));
-            iface.pp_ty(ty);
+            iface.src.push_str(&format!("['{}', ", param.name));
+            iface.pp_ty(&param.ty);
             iface.src.push_str("]");
         }
         iface.src.push_str("], [");
@@ -261,6 +250,12 @@ impl<'a> Bindgen<'a> {
             FunctionKind::AsyncFreestanding => "'async'",
             FunctionKind::AsyncMethod(_) => "'async method'",
             FunctionKind::AsyncStatic(_) => "'async static'",
+            FunctionKind::Getter
+            | FunctionKind::Setter
+            | FunctionKind::MethodGetter(_)
+            | FunctionKind::MethodSetter(_)
+            | FunctionKind::StaticGetter(_)
+            | FunctionKind::StaticSetter(_) => todo!(),
         };
         iface.src.push_str(kind);
         iface.src.push_str("),\n");
@@ -282,6 +277,12 @@ impl<'a> Bindgen<'a> {
         let iface = &self.resolve.interfaces[id];
         for (_, func) in &iface.functions {
             self.func(func);
+        }
+        // Resources without functions in this world are only known from the type defs.
+        for resource in std::mem::take(&mut defs.resources).into_keys() {
+            self.resources
+                .entry(resource)
+                .or_insert_with(|| Bindgen::new(self.resolve));
         }
         // insert resources after type defs
         defs.emit_resources(&self.resources);
@@ -321,9 +322,11 @@ impl<'a> Bindgen<'a> {
         }
     }
     fn module_return(&mut self) {
-        self.src.push_str("return [");
+        self.src.push_str("return { exports: [");
         self.src.push_str(&self.export_interfaces.join(", "));
-        self.src.push_str("];\n}\n");
+        self.src.push_str("], imports: [");
+        self.src.push_str(&self.import_interfaces.join(", "));
+        self.src.push_str("] };\n}\n");
     }
 }
 
@@ -346,8 +349,9 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
                     WorldKey::Interface(interface) => &resolve.id_of(*interface).unwrap(),
                 };
                 let mut iface = bindgen.fork();
-                iface.interface(name, *id);
+                let id = iface.interface(name, *id);
                 bindgen.src.push_str(&iface.src);
+                bindgen.import_interfaces.push(id);
                 bindgen.local_names = iface.local_names;
             }
             _ => (),
@@ -368,7 +372,7 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
                 bindgen.local_names = iface.local_names;
             }
             WorldItem::Function(f) => funcs.push(f),
-            WorldItem::Type(_) => unimplemented!(),
+            WorldItem::Type { .. } => unimplemented!(),
         }
     }
     bindgen.exported_funcs(&funcs);
@@ -384,12 +388,4 @@ fn interface_type_name(iface_name: &str) -> String {
     iface_name_sans_version
         .replace(['/', ':'], "-")
         .to_upper_camel_case()
-}
-fn dealias(resolve: &Resolve, mut id: TypeId) -> TypeId {
-    loop {
-        match &resolve.types[id].kind {
-            TypeDefKind::Type(Type::Id(that_id)) => id = *that_id,
-            _ => break id,
-        }
-    }
 }

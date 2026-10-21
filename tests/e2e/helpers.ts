@@ -19,7 +19,8 @@ export async function loadExample(page: Page, file: string, { instantiate = fals
   if (instantiate) {
     await page.locator('#instantiateButton').click();
   }
-  await expect(page.locator('func-card').first()).toBeVisible();
+  // Cards in resource sections start collapsed, so wait for any visible one.
+  await expect(page.locator('func-card').filter({ visible: true }).first()).toBeVisible();
 }
 
 // The card of the exported function `name`, e.g. `add` or `constructor`.
@@ -36,14 +37,19 @@ export async function call(card: Locator, button: 'Call' | 'Random' = 'Call') {
   await card.locator('wa-button', { hasText: button }).click();
 }
 
-// The resource section for `name` and one of its instance cards.
+// The resource section for `name`, with its function cards.
 export function resource(page: Page, name: string): Locator {
   return page.locator('wa-details.resource').filter({ has: page.locator('.section-summary code', { hasText: exactly(name) }) });
 }
 
-export function instance(page: Page, resourceName: string, id: string): Locator {
-  return resource(page, resourceName).locator('.instance-card')
-    .filter({ has: page.locator('.instance-title code', { hasText: exactly(id) }) });
+// The resource table row whose current instance is `id`, e.g. `x_1`.
+export function row(page: Page, id: string): Locator {
+  return page.locator(`resource-table tr.resource-row[data-id="${id}"]`);
+}
+
+// What happened to the current instance of a row, e.g. `→ moved into consume(x_1)`.
+export function fate(row: Locator): Locator {
+  return row.locator(':scope > td.history > .instance-fate');
 }
 
 // Console entries for calls, or the one whose call label is exactly `label`.

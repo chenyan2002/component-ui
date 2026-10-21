@@ -25,6 +25,8 @@ function unversioned(specifier: string): string {
 export interface LoadedComponent {
   transpiled: Transpiled;
   interfaces: WIT.InterfaceClass[];
+  // The imported interfaces, named like jco's import specifiers, possibly with a version.
+  imports: WIT.InterfaceClass[];
   // Imports the WASI shim doesn't provide; the user supplies them as JS source.
   customImports: string[];
 }
@@ -97,9 +99,9 @@ export async function loadComponent(component: Uint8Array): Promise<LoadedCompon
     instantiation: { tag: 'async' },
   });
   const binding = await importFromSource(generateAst(component));
-  const interfaces: WIT.InterfaceClass[] = binding.Factory({ IDL: WIT });
+  const { exports: interfaces, imports }: Record<'exports' | 'imports', WIT.InterfaceClass[]> = binding.Factory({ IDL: WIT });
   const customImports = transpiled.imports.filter((pkg) => !WASI_INTERFACES.has(unversioned(pkg)));
-  return { transpiled, interfaces, customImports };
+  return { transpiled, interfaces, imports, customImports };
 }
 
 // jco checks at instantiation that every imported function exists. Stub the ones the user
@@ -123,13 +125,16 @@ export async function instantiate(
   transpiled: Transpiled,
   customImportCode: Record<string, string>,
   output: ComponentOutput,
+  // Wraps the import object for `pkg`, e.g. to observe the resources it hands out.
+  wrapImport: (pkg: string, mod: object) => object = (_pkg, mod) => mod,
 ): Promise<any> {
   const wasi = wasiImports(output);
   const imports: Record<string, unknown> = {};
   for (const pkg of transpiled.imports) {
-    imports[pkg] = WASI_INTERFACES.has(unversioned(pkg))
-      ? wasi[unversioned(pkg)]
+    const mod = WASI_INTERFACES.has(unversioned(pkg))
+      ? wasi[unversioned(pkg)] as object
       : stubMissingImports(pkg, await importFromSource(customImportCode[pkg] ?? ''));
+    imports[pkg] = wrapImport(pkg, mod);
   }
   const mod = await importFromSource(fileBytes(transpiled, `${TRANSPILED_NAME}.js`));
   return mod.instantiate((core: string) => WebAssembly.compile(fileBytes(transpiled, core)), imports);
