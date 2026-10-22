@@ -211,7 +211,7 @@ export class ImportDialogs implements MockFactory {
         registry: this.registry,
         mock: this,
         answer: () => {
-          const value = parseDraft(type, draft, this.registry, this);
+          const value = parseDraft(type, draft, this.registry, this, 'host');
           if (value === INVALID) {
             return;
           }
@@ -223,7 +223,7 @@ export class ImportDialogs implements MockFactory {
           // After the host wrapper registers returned resources, so they show by id.
           queueMicrotask(() => line.result(this.format([value])));
         },
-        random: () => randomize(type, draft, this.registry, this),
+        random: () => randomize(type, draft, this.registry, this, 'host'),
         trap: () => {
           // jco treats a runtime error as a trap of the component instance.
           const err = new WebAssembly.RuntimeError(`Trapped at ${call}`);

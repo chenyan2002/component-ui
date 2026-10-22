@@ -2,7 +2,7 @@ import { html, LitElement, nothing, PropertyValues } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import * as WIT from './wit';
 import { Draft, MockFactory } from './draft';
-import { renderField, typeName } from './form';
+import { FormContext, renderField, typeName } from './form';
 import { ResourceRegistry } from './resources';
 
 // Marks a string shown unquoted: a name from `describe`, or a `bigint` (e.g. a `u64`).
@@ -201,7 +201,8 @@ export class ConsolePanel extends LitElement {
   }
 
   private renderPrompt(prompt: ImportPrompt) {
-    const form = { update: () => this.requestUpdate(), registry: prompt.registry, mock: prompt.mock };
+    // The host returns the result to the guest.
+    const form: FormContext = { update: () => this.requestUpdate(), registry: prompt.registry, mock: prompt.mock, giver: 'host' };
     // Enter in a field returns the answer, as the Return button does.
     const onKeydown = (e: KeyboardEvent) => {
       if (e.key === 'Enter' && e.target instanceof HTMLInputElement) {

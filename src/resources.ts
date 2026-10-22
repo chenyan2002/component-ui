@@ -90,11 +90,12 @@ export class ResourceRegistry extends EventTarget {
     return this.create(resource, obj, origin, handle, handle === undefined ? { guest: 0, ui: true } : undefined);
   }
 
-  // Registers a host object handed to the guest, e.g. the stream returned by `get-stdout`.
+  // Registers a host object handed to the guest, e.g. the stream returned by `get-stdout`. One
+  // the UI held is the guest's now.
   public acquire(resource: WIT.ResourceClass, obj: object, origin: string): Instance {
     const existing = this.byObj.get(obj);
     if (existing?.holders) {
-      this.hold(existing, existing.holders.guest + 1, existing.holders.ui);
+      this.hold(existing, existing.holders.guest + 1, false);
     }
     return existing ?? this.create(resource, obj, origin, undefined, { guest: 1, ui: false });
   }
@@ -160,8 +161,18 @@ export class ResourceRegistry extends EventTarget {
     return [...this.slots.values()].sort((a, b) => position(a) - position(b));
   }
 
-  public live(resource: WIT.ResourceClass): Instance[] {
-    return this.rows().map((slot) => slot.current).filter((i) => i.resource === resource && i.state === 'live');
+  // Live instances the UI holds, which it can pass to calls. Not host objects only the guest
+  // holds, which aren't the UI's to give, even if the UI passed them to the guest before.
+  public uiOwned(resource: WIT.ResourceClass): Instance[] {
+    return this.rows().map((slot) => slot.current)
+      .filter((i) => i.resource === resource && i.state === 'live' && callable(i));
+  }
+
+  // Host objects the host owns, which it can return to the guest from an import: those the UI
+  // holds, and those moved into the host. Not those the guest holds, which aren't the host's.
+  public hostOwned(resource: WIT.ResourceClass): Instance[] {
+    return this.rows().map((slot) => slot.current)
+      .filter((i) => i.resource === resource && i.holders?.guest === 0 && i.state !== 'dropped');
   }
 
   // Resources the UI has held instances of, whose methods it can call. Host resources only
