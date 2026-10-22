@@ -10,17 +10,28 @@ function pageOf(scope: Page | Locator): Page {
   return 'page' in scope && typeof scope.page === 'function' ? scope.page() : (scope as Page);
 }
 
-// Opens the app and loads a bundled example, clicking Instantiate if it has custom imports.
-export async function loadExample(page: Page, file: string, { instantiate = false } = {}) {
+// Opens the app and loads a bundled example, which instantiates right away.
+export async function loadExample(page: Page, file: string) {
   if (!page.url().includes('/component-ui/')) {
     await page.goto('./');
   }
   await page.locator('#preselectedWasmFile').selectOption(file);
-  if (instantiate) {
-    await page.locator('#instantiateButton').click();
-  }
   // Cards in resource sections start collapsed, so wait for any visible one.
   await expect(page.locator('func-card').filter({ visible: true }).first()).toBeVisible();
+}
+
+// Implements imports in JavaScript, keyed by package, and restarts the component with them.
+export async function applyImports(page: Page, code: Record<string, string>) {
+  const card = page.locator('#importsCard');
+  if ((await card.getAttribute('open')) === null) {
+    await card.locator('.card-title').click();
+  }
+  for (const [pkg, source] of Object.entries(code)) {
+    await card.locator(`wa-textarea[label="${pkg}"] textarea`).fill(source);
+  }
+  await card.locator('#applyImportsButton').click();
+  // The card collapses once the new instance is ready.
+  await expect(card).not.toHaveAttribute('open');
 }
 
 // The card of the exported function `name`, e.g. `add` or `constructor`.
@@ -65,7 +76,30 @@ export function callEntry(page: Page, label: string): Locator {
 export async function expectCall(page: Page, label: string, status: 'ok' | 'error', output: string | RegExp) {
   const entry = callEntry(page, label).last();
   await expect(entry).toHaveClass(new RegExp(`\\b${status}\\b`));
-  await expect(entry.locator('.log-output pre')).toHaveText(output);
+  // The call's own output, not that of the imports it made.
+  await expect(entry.locator(':scope > .log-output pre')).toHaveText(output);
+}
+
+// The prompt of a missing import the guest called; at most one waits at a time.
+export function importPrompt(page: Page): Locator {
+  return page.locator('.import-prompt');
+}
+
+// Answers the pending import prompt, which must be for `call`, after filling it with `fill`.
+export async function answerImport(
+  page: Page,
+  call: string,
+  fill: (prompt: Locator) => Promise<void> = async () => {},
+  button: 'Return' | 'Trap' = 'Return',
+) {
+  await expect(importPrompt(page)).toBeVisible();
+  // The guest waits for the answer, so the prompt is on the latest import line.
+  const lines = page.locator('.log-import');
+  const index = (await lines.count()) - 1;
+  await expect(lines.nth(index).locator('.log-call code').first()).toHaveText(exactly(call));
+  await fill(importPrompt(page));
+  await importPrompt(page).locator('wa-button', { hasText: button }).click();
+  await expect(lines.nth(index).locator('.import-prompt')).toHaveCount(0);
 }
 
 // The text of each stdout or stderr entry in the console.

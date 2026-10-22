@@ -1,8 +1,9 @@
 import { expect, Page, test } from '@playwright/test';
-import { arg, call, callEntries, expectCall, fate, funcCard, loadExample, resource, row } from './helpers';
+import { applyImports, arg, call, callEntries, expectCall, fate, funcCard, loadExample, resource, row } from './helpers';
 
 test.beforeEach(async ({ page }) => {
-  await loadExample(page, 'resource.wasm', { instantiate: true });
+  await loadExample(page, 'resource.wasm');
+  await expect(page.locator('.resource-pane')).toBeVisible();
   // Resource sections start collapsed.
   for (const section of await page.locator('wa-details.resource').all()) {
     await expect(section).not.toHaveAttribute('open');
@@ -123,6 +124,16 @@ test('a freed index is reused by any resource, and Clear freed removes freed row
 });
 
 test('resources the host hands to the guest are tracked until the guest drops or moves them', async ({ page }) => {
+  await applyImports(page, {
+    imports: [
+      'export class Y {',
+      '  constructor(a) { this.a = a }',
+      '  getA() { return this.a }',
+      '  setA(a) { this.a = a }',
+      '  static add(y, a) { return new Y(y.a + a) }',
+      '}',
+    ].join('\n'),
+  });
   await call(worldFunc(page, 'testImports'));
   await expectCall(page, 'testImports()', 'ok', 'undefined');
   const rows = page.locator('resource-table tr.resource-row');

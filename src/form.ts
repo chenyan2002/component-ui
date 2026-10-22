@@ -3,8 +3,8 @@ import { classMap } from 'lit/directives/class-map.js';
 import { live } from 'lit/directives/live.js';
 import * as IDL from './wit';
 import {
-  BoolDraft, CaseDraft, Draft, FieldsDraft, ListDraft, OptDraft, TextDraft,
-  parseDraft, resizeList, selectCase, setSome,
+  BoolDraft, CaseDraft, Draft, FieldsDraft, ListDraft, MockFactory, NEW_MOCK, OptDraft, TextDraft,
+  parseDraft, resizeList, selectCase, selectedInstance, setSome,
 } from './draft';
 import { ResourceRegistry } from './resources';
 
@@ -14,6 +14,8 @@ export interface FormContext {
   // Drafts are mutated in place; call this afterwards to re-render the form.
   update(): void;
   registry: ResourceRegistry;
+  // For an import's result, resource pickers also offer a new mock instance.
+  mock?: MockFactory;
 }
 
 interface RenderData {
@@ -51,7 +53,7 @@ class Render extends IDL.Visitor<RenderData, Rendered> {
       }}
       @blur=${() => {
         if (text.text !== '') {
-          parseDraft(t, d, ctx.registry);
+          parseDraft(t, d, ctx.registry, ctx.mock);
           ctx.update();
         }
       }}
@@ -75,10 +77,12 @@ class Render extends IDL.Visitor<RenderData, Rendered> {
   public visitResource(t: IDL.ResourceClass, { d, ctx }: RenderData): Rendered {
     const text = d as TextDraft;
     const instances = ctx.registry.live(t);
-    const selected = instances.some((i) => i.id === text.text);
+    const mock = !!ctx.mock?.canMock(t);
+    const id = selectedInstance(t, text, ctx.registry, ctx.mock);
+    const selected = instances.some((i) => i.id === id) || (mock && id === NEW_MOCK);
     return html`<select
       class=${controlClass(d)}
-      ?disabled=${instances.length === 0}
+      ?disabled=${instances.length === 0 && !mock}
       @change=${(e: Event) => {
         text.text = (e.target as HTMLSelectElement).value;
         text.auto = false;
@@ -87,9 +91,10 @@ class Render extends IDL.Visitor<RenderData, Rendered> {
       }}
     >
       <option value="" disabled .selected=${live(!selected)}>
-        ${instances.length > 0 ? 'Select an instance…' : `No live ${t._name} instances`}
+        ${instances.length > 0 || mock ? 'Select an instance…' : `No live ${t._name} instances`}
       </option>
-      ${instances.map((i) => html`<option value=${i.id} .selected=${live(i.id === text.text)}>${i.id}</option>`)}
+      ${mock ? html`<option value=${NEW_MOCK} .selected=${live(id === NEW_MOCK)}>New mock ${t._name}</option>` : nothing}
+      ${instances.map((i) => html`<option value=${i.id} .selected=${live(i.id === id)}>${i.id}</option>`)}
     </select>`;
   }
   public visitOpt(_t: IDL.OptClass, ty: IDL.Type, { d, ctx }: RenderData): Rendered {
@@ -176,6 +181,15 @@ function renderSelect(d: CaseDraft, cases: string[], onSelect: (index: number) =
 }
 
 const render = new Render();
+
+const MAX_TYPE_LENGTH = 48;
+
+// Long inline types (e.g. large variants) are truncated; the full type is shown on hover.
+export function typeName(type: IDL.Type) {
+  const name = type.name;
+  const short = name.length > MAX_TYPE_LENGTH ? `${name.slice(0, MAX_TYPE_LENGTH - 1)}…` : name;
+  return html`<span class="sig-type" title=${name}>${short}</span>`;
+}
 
 // Renders a labeled input for a value of type `t`, backed by the draft `d`.
 export function renderField(t: IDL.Type, d: Draft, ctx: FormContext, label?: string): Rendered {

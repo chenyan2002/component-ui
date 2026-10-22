@@ -1,6 +1,9 @@
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { arg, call, callEntries, callEntry, expectCall, funcCard, loadExample, resource, row, streamEntries } from './helpers';
+import {
+  answerImport, applyImports, arg, call, callEntries, callEntry, expectCall, funcCard, importPrompt, loadExample, resource, row,
+  streamEntries,
+} from './helpers';
 
 const PUBLIC_DIR = path.join(import.meta.dirname, '..', '..', 'public');
 
@@ -19,37 +22,51 @@ test.describe('dark mode', () => {
   });
 });
 
-test('calculator: instantiates with the prefilled import stub', async ({ page }) => {
+test('a browser without JSPI gets a message instead of the app', async ({ page }) => {
+  await page.addInitScript(() => {
+    delete (WebAssembly as any).Suspending;
+  });
   await page.goto('./');
-  await page.locator('#preselectedWasmFile').selectOption('calculator.wasm');
-  const stub = page.locator('#importsCard wa-textarea');
-  await expect(stub).toHaveCount(1);
-  await expect(stub).toHaveAttribute('label', 'docs:adder/add');
-  await expect(stub).toHaveJSProperty('value', 'export function add(a, b) { return a + b }');
-
-  await page.locator('#instantiateButton').click();
-  // Once instantiated, the imports collapse; expanding them shows the stubs again.
-  const imports = page.locator('#importsCard');
-  await expect(imports).not.toHaveAttribute('open');
-  await expect(stub).toBeHidden();
-  await imports.locator('.card-title').click();
-  await expect(stub).toBeVisible();
-  const card = funcCard(page, 'evalExpression');
-  await arg(card, 0).locator('select').selectOption('add');
-  await arg(card, 1).locator('input').fill('2');
-  await arg(card, 2).locator('input').fill('3');
-  await call(card);
-  await expectCall(page, 'evalExpression("add", 2, 3)', 'ok', '5');
+  await expect(page.locator('#unsupported')).toContainText("This browser isn't supported");
+  await expect(page.locator('#preselectedWasmFile')).toHaveCount(0);
 });
 
-test('kv-store: instantiates with stubbed Fastly imports', async ({ page }) => {
-  await page.goto('./');
-  await page.locator('#preselectedWasmFile').selectOption('kv-store.wasm');
-  await expect(page.locator('#importsCard wa-textarea').first()).toHaveAttribute('label', 'fastly:compute/async-io');
-  await page.locator('#instantiateButton').click();
-  await expect(page.locator('#importsCard')).not.toHaveAttribute('open');
-  // The 21 stubs pushed Instantiate out of view; the pane scrolls back up to the exports.
-  await expect.poll(() => page.locator('.component-pane').evaluate((pane) => pane.scrollTop)).toBe(0);
+test('calculator: imports are answered in the console, or implemented in JavaScript', async ({ page }) => {
+  // It instantiates right away; the imports card is collapsed.
+  await loadExample(page, 'calculator.wasm');
+  const imports = page.locator('#importsCard');
+  await expect(imports).not.toHaveAttribute('open');
+  await expect(imports.locator('.imports-title wa-tag')).toHaveCount(0);
+  const add = async () => {
+    const card = funcCard(page, 'evalExpression');
+    await arg(card, 0).locator('select').selectOption('add');
+    await arg(card, 1).locator('input').fill('2');
+    await arg(card, 2).locator('input').fill('3');
+    await call(card);
+  };
+  await add();
+  await answerImport(page, 'docs:adder/add#add(2, 3)', (prompt) => prompt.locator('input').fill('5'));
+  await expectCall(page, 'evalExpression("add", 2, 3)', 'ok', '5');
+
+  // Expanding the card shows example code, which takes effect once applied.
+  await imports.locator('.card-title').click();
+  const stub = imports.locator('wa-textarea[label="docs:adder/add"]');
+  await expect(stub).toHaveJSProperty('value', 'export function add(a, b) { return a + b }');
+  await expect(imports.locator('.imports-pending')).toHaveText('Not applied yet');
+  await imports.locator('#applyImportsButton').click();
+  await expect(imports).not.toHaveAttribute('open');
+  await expect(imports.locator('.imports-title wa-tag')).toHaveText('1 in JavaScript');
+  await expect(imports.locator('.imports-pending')).toHaveCount(0);
+  await add();
+  await expect(callEntries(page).last().locator('.log-import')).toHaveCount(0);
+  await expectCall(page, 'evalExpression("add", 2, 3)', 'ok', '5');
+  // Nothing involves resources, so the resource table stays collapsed.
+  await expect(page.locator('.resource-pane')).toBeHidden();
+});
+
+test('kv-store: instantiates with its Fastly imports answered in the console', async ({ page }) => {
+  await loadExample(page, 'kv-store.wasm');
+  await expect(page.locator('#importsCard .imports-title wa-badge')).toHaveText('21 interfaces');
   await expect(funcCard(page, 'run')).toBeInViewport();
   await expect(page.locator('wa-details.resource', { hasText: 'Request' })).not.toHaveAttribute('open');
   await expect(page.locator('.section-summary code', { hasText: 'fastly:compute/http-incoming@0.1.0' })).toBeVisible();
@@ -61,19 +78,18 @@ test('kv-store: instantiates with stubbed Fastly imports', async ({ page }) => {
 });
 
 test('kv-store: host resources created in the UI are passed to handle', async ({ page }) => {
-  await page.goto('./');
-  await page.locator('#preselectedWasmFile').selectOption('kv-store.wasm');
-  const stub = (pkg: string) => page.locator(`#importsCard wa-textarea[label="${pkg}"] textarea`);
-  await stub('fastly:compute/http-req').fill([
-    'export class Request {',
-    "  #method = 'GET';",
-    '  static new() { return new Request() }',
-    '  getMethod() { return this.#method }',
-    '  setMethod(method) { this.#method = method }',
-    '}',
-  ].join('\n'));
-  await stub('fastly:compute/async-io').fill('export class Pollable { static newReady() { return new Pollable() } }');
-  await page.locator('#instantiateButton').click();
+  await loadExample(page, 'kv-store.wasm');
+  await applyImports(page, {
+    'fastly:compute/http-req': [
+      'export class Request {',
+      "  #method = 'GET';",
+      '  static new() { return new Request() }',
+      '  getMethod() { return this.#method }',
+      '  setMethod(method) { this.#method = method }',
+      '}',
+    ].join('\n'),
+    'fastly:compute/async-io': 'export class Pollable { static newReady() { return new Pollable() } }',
+  });
 
   // `Request` and `Pollable` (as `body`) are imported, so their functions run on the stubs.
   const request = resource(page, 'Request');
@@ -96,22 +112,31 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   await arg(getMethod, 0).locator('select').selectOption('request_host0');
   await arg(getMethod, 1).locator('input').fill('10');
   await call(getMethod);
-  await expectCall(page, 'request_host0.getMethod("10")', 'ok', '"POST"');
+  // A `u64` is a `bigint`, shown as a number.
+  await expectCall(page, 'request_host0.getMethod(10)', 'ok', '"POST"');
 
-  // The guest accepts them and runs until it needs an import the stubs don't provide.
+  // The guest accepts them; imports the stubs leave out ask for their results.
   const handle = funcCard(page, 'handle');
   await arg(handle, 0).locator('select').selectOption('request_host0');
   await arg(handle, 1).locator('select').selectOption('pollable_host1');
   await call(handle);
-  await expectCall(page, 'handle(request_host0, pollable_host1)', 'error',
-    'Import fastly:private/privileged-kv-store-service#get is not implemented. Provide it in the Imports card.');
+  await answerImport(page, 'fastly:private/privileged-kv-store-service#get()', async (prompt) => {
+    await prompt.locator('select').first().selectOption('ok');
+    await prompt.locator('select').nth(1).selectOption({ label: 'New mock Service' });
+  });
+  await expect(row(page, 'service_host2').locator('.instance-type')).toHaveText('Service · mock');
+  // The guest goes on to the next import; failing it fails the call.
+  await expect(importPrompt(page)).toBeVisible();
+  await importPrompt(page).locator('wa-button', { hasText: 'Trap' }).click();
+  await expectCall(page, 'handle(request_host0, pollable_host1)', 'error', /^Trapped at /);
 });
 
-test('adder: rejects invalid numbers without calling', async ({ page }) => {
-  await loadExample(page, 'adder.wasm');
-  const card = funcCard(page, 'add');
-  await arg(card, 0).locator('input').fill('abc');
-  await arg(card, 1).locator('input').fill('4294967296');
+test('calculator: rejects invalid numbers without calling', async ({ page }) => {
+  await loadExample(page, 'calculator.wasm');
+  const card = funcCard(page, 'evalExpression');
+  await arg(card, 0).locator('select').selectOption('add');
+  await arg(card, 1).locator('input').fill('abc');
+  await arg(card, 2).locator('input').fill('4294967296');
   await call(card);
   await expect(card.locator('.field-error')).toHaveText([
     'Expected an integer, got "abc"',
@@ -119,28 +144,33 @@ test('adder: rejects invalid numbers without calling', async ({ page }) => {
   ]);
   await expect(callEntries(page)).toHaveCount(0);
 
-  await arg(card, 0).locator('input').fill('40');
-  await arg(card, 1).locator('input').fill('2');
+  await arg(card, 1).locator('input').fill('40');
+  await arg(card, 2).locator('input').fill('2');
   await call(card);
-  await expectCall(page, 'add(40, 2)', 'ok', '42');
+  await answerImport(page, 'docs:adder/add#add(40, 2)', (prompt) => prompt.locator('input').fill('42'));
+  await expectCall(page, 'evalExpression("add", 40, 2)', 'ok', '42');
 });
 
-test('adder: Random fills empty fields and keeps typed ones', async ({ page }) => {
-  await loadExample(page, 'adder.wasm');
-  const card = funcCard(page, 'add');
-  await arg(card, 0).locator('input').fill('5');
-  await call(card, 'Random');
-  await call(card, 'Random');
+test('calculator: Random fills empty fields and keeps typed ones', async ({ page }) => {
+  await loadExample(page, 'calculator.wasm');
+  const card = funcCard(page, 'evalExpression');
+  await arg(card, 1).locator('input').fill('5');
+  for (let i = 0; i < 2; i++) {
+    await call(card, 'Random');
+    await answerImport(page, (await page.locator('.log-import').last().locator('.log-call code').first().textContent())!,
+      (prompt) => prompt.locator('wa-button', { hasText: 'Random' }).click());
+  }
   await expect(callEntries(page)).toHaveCount(2);
-  await expect(callEntries(page).locator('.log-call code')).toHaveText([/^add\(5, \d+\)$/, /^add\(5, \d+\)$/]);
-  // The generated value is shown in the form, marked as generated.
-  await expect(arg(card, 1).locator('input')).toHaveClass(/\bauto\b/);
-  await expect(arg(card, 1).locator('input')).not.toHaveValue('');
+  await expect(callEntries(page).locator(':scope > .log-call code'))
+    .toHaveText([/^evalExpression\("add", 5, \d+\)$/, /^evalExpression\("add", 5, \d+\)$/]);
+  // The generated values are shown in the form, marked as generated.
+  await expect(arg(card, 2).locator('input')).toHaveClass(/\bauto\b/);
+  await expect(arg(card, 2).locator('input')).not.toHaveValue('');
 });
 
 test.describe('variants', () => {
   test.beforeEach(async ({ page }) => {
-    await loadExample(page, 'variants.wasm', { instantiate: true });
+    await loadExample(page, 'variants.wasm');
   });
 
   test('requires selecting a case', async ({ page }) => {
@@ -165,10 +195,13 @@ test.describe('variants', () => {
     }
   });
 
-  test('an unimplemented import fails only when called', async ({ page }) => {
+  test('an unimplemented import asks for its result only when called', async ({ page }) => {
     await call(funcCard(page, 'testImports'));
-    await expectCall(page, 'testImports()', 'error',
-      /^Import test:variants\/test#\w+ is not implemented\. Provide it in the Imports card\.$/);
+    const entry = callEntry(page, 'testImports()');
+    await expect(entry.locator('.log-meta')).toHaveText('waiting for an import');
+    await expect(entry.locator('.log-import').last().locator('.log-call code').first()).toHaveText(/^test:variants\/test#\w+\(/);
+    await importPrompt(page).locator('wa-button', { hasText: 'Trap' }).click();
+    await expectCall(page, 'testImports()', 'error', /^Trapped at test:variants\/test#\w+\(/);
   });
 
   test('a trap shows the stderr output and disables the instance', async ({ page }) => {
@@ -190,16 +223,16 @@ test('wasi-http: renders the handler and its resources', async ({ page }) => {
   const methodTag = page.locator('.func-header wa-tag', { hasText: 'method' });
   await expect(page.locator('func-card').filter({ hasNot: methodTag })).toHaveCount(2);
   await expect(funcCard(page, 'handle')).toBeVisible();
-  // Methods take the instance as `self`, picked from the live instances.
-  await expect(arg(funcCard(page, 'pathWithQuery'), 0).locator('select')).toBeDisabled();
+  // Methods take the instance as `self`: a live one, or a new mock of the host resource.
+  await expect(arg(funcCard(page, 'pathWithQuery'), 0).locator('option:not([disabled])')).toHaveText(['New mock IncomingRequest']);
   await expect(page.locator('.section-summary code', { hasText: 'ResponseOutparam' })).toBeVisible();
 });
 
 test('loading: upload, switching components and rejecting other files', async ({ page }) => {
   await page.goto('./');
-  await page.locator('#wasmFileInput').setInputFiles(path.join(PUBLIC_DIR, 'adder.wasm'));
-  await expect(page.locator('#componentName')).toHaveText('adder.wasm');
-  await call(funcCard(page, 'add'), 'Random');
+  await page.locator('#wasmFileInput').setInputFiles(path.join(PUBLIC_DIR, 'printer.wasm'));
+  await expect(page.locator('#componentName')).toHaveText('printer.wasm');
+  await call(funcCard(page, 'greet'), 'Random');
   await expect(callEntries(page)).toHaveCount(1);
 
   // Switching components replaces the workspace and clears the console.

@@ -1,7 +1,9 @@
 import * as WIT from './wit';
 import { customStringify, LogEntry } from './console';
+import { MOCK } from './dialog';
+import { MockFactory } from './draft';
 import { HostResources } from './host-resources';
-import { ownedHandles, ResourceRegistry, returnedType } from './resources';
+import { argHandles, ownedHandles, ResourceRegistry, returnedType } from './resources';
 
 export interface ExportsContext {
   // Exports of the instantiated component, as returned by jco's `instantiate`.
@@ -9,6 +11,40 @@ export interface ExportsContext {
   log(call: string): LogEntry;
   registry: ResourceRegistry;
   host: HostResources;
+  activity: CallActivity;
+  // Mock instances of host resources, whose methods ask in the console.
+  mocks: MockFactory;
+}
+
+// Counts calls that haven't returned. While one waits, e.g. on an import prompt, the component
+// instance can't be entered again, so the UI doesn't start others. Emits `change` events.
+export class CallActivity extends EventTarget {
+  public pending = 0;
+
+  public async track<T>(call: () => Promise<T>): Promise<T> {
+    this.set(this.pending + 1);
+    try {
+      return await call();
+    } finally {
+      this.set(this.pending - 1);
+    }
+  }
+
+  private set(pending: number) {
+    this.pending = pending;
+    this.dispatchEvent(new Event('change'));
+  }
+}
+
+// (Un)subscribes `listener` to changes of the context's instances and running calls.
+export function watchContext(ctx: ExportsContext | undefined, listener: () => void, on: boolean) {
+  for (const target of [ctx?.registry, ctx?.activity]) {
+    if (on) {
+      target?.addEventListener('change', listener);
+    } else {
+      target?.removeEventListener('change', listener);
+    }
+  }
 }
 
 export type CallTarget =
@@ -82,7 +118,24 @@ function resolveCall(ctx: ExportsContext, target: CallTarget, name: string, args
   }
 }
 
-export async function call(ctx: ExportsContext, target: CallTarget, name: string, func: WIT.FuncClass, args: any[]) {
+export function call(ctx: ExportsContext, target: CallTarget, name: string, func: WIT.FuncClass, args: any[]) {
+  return ctx.activity.track(() => run(ctx, target, name, func, args));
+}
+
+async function run(ctx: ExportsContext, target: CallTarget, name: string, func: WIT.FuncClass, args: any[]) {
+  const { registry } = ctx;
+  const funcArgs = target.type === 'method' ? args.slice(1) : args;
+  // Mocks the user picked for arguments are theirs until the call takes them; registered
+  // first, so that the call shows them by id.
+  const handles = argHandles(func, funcArgs);
+  if (target.type === 'method') {
+    handles.push([target.resource, args[0]]);
+  }
+  for (const [resource, obj] of handles) {
+    if (MOCK in obj && !registry.instanceOf(obj)) {
+      registry.add(resource, obj, 'new mock', false);
+    }
+  }
   let resolved: Call;
   try {
     resolved = resolveCall(ctx, target, name, args);
@@ -90,24 +143,23 @@ export async function call(ctx: ExportsContext, target: CallTarget, name: string
     ctx.log(name).error(err);
     return;
   }
-  const { registry } = ctx;
-  const funcArgs = target.type === 'method' ? args.slice(1) : args;
   const owned = func._args.flatMap(([_, type], i) => ownedHandles(type, funcArgs[i]).map(([_, obj]) => obj));
   const fate = `moved into ${resolved.label}`;
   const toHost = callsHost(ctx, target, args);
-  const into = toHost ? 'host' : 'guest';
   const entry = ctx.log(resolved.label);
+  // Owned host objects change hands as the call starts, before the guest can use them.
+  registry.transfer(owned, fate, toHost ? 'host' : 'guest');
   let result: any;
   try {
     result = await (toHost ? ctx.host.callDirect(resolved.invoke) : resolved.invoke());
   } catch (err) {
-    registry.settle(owned, fate, false, into);
+    registry.settle(fate);
     entry.error(err);
     console.error(err);
     return;
   }
   // Settle moved arguments first: returned resources may reuse their handle indices.
-  registry.settle(owned, fate, true, into);
+  registry.settle(fate);
   if (target.type === 'constructor') {
     registry.add(target.resource, result, resolved.label, !toHost);
   } else {

@@ -31,16 +31,33 @@ function ownFunc(fields: Record<string, WIT.FuncClass>, key: string): WIT.FuncCl
   return Object.prototype.hasOwnProperty.call(fields, key) ? fields[key] : undefined;
 }
 
+// Formats call arguments for the console, showing resource handles by their instance id.
+export function formatArgs(registry: ResourceRegistry, args: any[]): string {
+  return args.map((arg) => customStringify(arg, (v) => registry.idOf(v))).join(', ');
+}
+
 // `wasi:cli/stdout@0.2.0` → `wasi:cli/stdout`.
-function unversioned(pkg: string): string {
+export function unversioned(pkg: string): string {
   return pkg.replace(/@[^/]*$/, '');
+}
+
+// Imported interfaces by unversioned name, as jco keys imports: it gives all versions of an
+// interface one import object. The bindgen already merges semver-compatible versions, e.g.
+// `wasi:io/streams@0.2.0` into `@0.2.3`, so a name only has several for incompatible ones.
+export function byImportName(interfaces: WIT.InterfaceClass[]): Map<string, WIT.InterfaceClass[]> {
+  const grouped = new Map<string, WIT.InterfaceClass[]>();
+  for (const iface of interfaces) {
+    const name = unversioned(iface._name);
+    grouped.set(name, [...(grouped.get(name) ?? []), iface]);
+  }
+  return grouped;
 }
 
 // Observes the imports of a component instance: resources the host hands to the guest are
 // registered, and the guest's handles on them are counted as it moves and drops them. The UI
 // can also call the host's imported resources directly, e.g. to create arguments for exports.
 export class HostResources {
-  private readonly interfaces: Map<string, WIT.InterfaceClass>;
+  private readonly interfaces: Map<string, WIT.InterfaceClass[]>;
   private readonly imported: Set<WIT.ResourceClass>;
   // The host's class for each imported resource, from the import jco takes it from.
   private readonly classes = new Map<WIT.ResourceClass, Function>();
@@ -49,7 +66,7 @@ export class HostResources {
 
   constructor(private readonly registry: ResourceRegistry, interfaces: WIT.InterfaceClass[]) {
     // jco may key imports without their version.
-    this.interfaces = new Map(interfaces.map((iface) => [unversioned(iface._name), iface]));
+    this.interfaces = byImportName(interfaces);
     this.imported = new Set(interfaces.flatMap((iface) => iface.get_resources()));
     registry.onHostInstance = (instance) => this.hook(instance);
   }
@@ -76,11 +93,10 @@ export class HostResources {
   // Wraps the import object for `pkg`, e.g. `wasi:cli/stdout`.
   public wrap(pkg: string, mod: any): any {
     const name = unversioned(pkg);
-    const iface = this.interfaces.get(name);
-    if (!iface) {
+    const ifaces = this.interfaces.get(name);
+    if (!ifaces) {
       return mod;
     }
-    const resources = new Map(iface.get_resources().map((r) => [r._name, r]));
     const wrapped = new Map<string, unknown>();
     // An empty target, so wrapped values don't break the invariants of a frozen import object.
     return new Proxy(Object.create(null), {
@@ -90,15 +106,16 @@ export class HostResources {
           return value;
         }
         if (!wrapped.has(key)) {
-          const func = ownFunc(iface._fields, key);
-          const resource = resources.get(key);
-          if (resource && !func) {
+          const func = ifaces.map((iface) => ownFunc(iface._fields, key)).find((f) => f !== undefined);
+          // One resource per version of the interface.
+          const resources = ifaces.flatMap((iface) => iface.get_resources()).filter((r) => r._name === key);
+          if (!func) {
             // jco takes a resource class from the import that defines it.
-            this.classes.set(resource, value);
+            resources.forEach((resource) => this.classes.set(resource, value));
           }
           wrapped.set(key, func
             ? this.wrapFunc(func, value, (args) => `${name}#${key}(${this.format(args)})`)
-            : resource ? this.wrapClass(resource, value) : value);
+            : resources.length > 0 ? this.wrapClass(resources[0], value) : value);
         }
         return wrapped.get(key);
       },
@@ -210,6 +227,6 @@ export class HostResources {
   }
 
   private format(args: any[]): string {
-    return args.map((arg) => customStringify(arg, (v) => this.registry.idOf(v))).join(', ');
+    return formatArgs(this.registry, args);
   }
 }

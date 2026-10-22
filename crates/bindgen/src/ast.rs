@@ -258,6 +258,8 @@ impl<'a> Bindgen<'a> {
             | FunctionKind::StaticSetter(_) => todo!(),
         };
         iface.src.push_str(kind);
+        // The WIT name, e.g. `[method]request.get-method`, which jco's options refer to.
+        iface.src.push_str(&format!(", '{}'", func.name));
         iface.src.push_str("),\n");
     }
     fn interface(&mut self, name: &str, id: InterfaceId) -> String {
@@ -332,10 +334,13 @@ impl<'a> Bindgen<'a> {
 
 pub fn generate_ast(component: &[u8]) -> Result<String> {
     let decoded = wit_component::decode(component)?;
-    let (resolve, id) = match decoded {
+    let (mut resolve, id) = match decoded {
         DecodedWasm::Component(resolve, world_id) => (resolve, world_id),
         _ => unimplemented!(),
     };
+    // Import each semver track of an interface once, e.g. `wasi:io/streams@0.2.0` and `@0.2.3` as
+    // 0.2.3, so that both share its types; 0.3.0 stays separate.
+    resolve.merge_world_imports_based_on_semver(id)?;
     let world = &resolve.worlds[id];
     let mut bindgen = Bindgen::new(&resolve);
     bindgen
