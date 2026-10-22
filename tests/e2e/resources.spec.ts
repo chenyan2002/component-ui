@@ -1,5 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
-import { applyImports, arg, call, callEntries, expectCall, fate, funcCard, loadExample, resource, row } from './helpers';
+import {
+  applyImports, arg, call, callEntries, choices, choose, expectCall, fate, funcCard, loadExample, picker, resource, row,
+} from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await loadExample(page, 'resource.wasm');
@@ -28,9 +30,9 @@ test('owned arguments are moved and returned resources take their handle index',
 
   // The picker lists live instances only.
   const add = funcCard(resource(page, 'X'), 'add');
-  const picker = arg(add, 0).locator('select');
-  await expect(picker.locator('option:not([disabled])')).toHaveText(['#x-1']);
-  await picker.selectOption('x-1');
+  const instances = picker(arg(add, 0));
+  await expect(choices(instances)).toHaveText(['#x-1']);
+  await choose(instances, 'x-1');
   await arg(add, 1).locator('input').fill('1');
   await call(add);
 
@@ -44,12 +46,12 @@ test('owned arguments are moved and returned resources take their handle index',
 
   // Methods take the instance as `self`.
   const getA = funcCard(resource(page, 'X'), 'getA');
-  await arg(getA, 0).locator('select').selectOption('x-1');
+  await choose(picker(arg(getA, 0)), 'x-1');
   await call(getA);
   await expectCall(page, '#borrowed-x-1.getA()', 'ok', '6');
 
   const consume = worldFunc(page, 'consume');
-  await arg(consume, 0).locator('select').selectOption('x-1');
+  await choose(picker(arg(consume, 0)), 'x-1');
   await call(consume);
   await expectCall(page, 'consume(#x-1)', 'ok', '');
   await expect(row(page, 'x-1')).toHaveClass(/\bdead\b/);
@@ -69,14 +71,14 @@ test('borrowed arguments stay live, and Drop runs the destructor', async ({ page
   await expect(page.locator('resource-table tr.resource-row')).toHaveCount(2);
 
   const add = worldFunc(page, 'add');
-  await arg(add, 0).locator('select').selectOption('z-1');
-  await arg(add, 1).locator('select').selectOption('z-2');
+  await choose(picker(arg(add, 0)), 'z-1');
+  await choose(picker(arg(add, 1)), 'z-2');
   await call(add);
   await expectCall(page, 'add(#borrowed-z-1, #borrowed-z-2)', 'ok', '#z-3');
   await expect(row(page, 'z-1')).not.toHaveClass(/\bdead\b/);
   await expect(row(page, 'z-2')).not.toHaveClass(/\bdead\b/);
   const getA = funcCard(resource(page, 'Z'), 'getA');
-  await arg(getA, 0).locator('select').selectOption('z-3');
+  await choose(picker(arg(getA, 0)), 'z-3');
   await call(getA);
   await expectCall(page, '#borrowed-z-3.getA()', 'ok', '5');
 
@@ -111,7 +113,7 @@ test('a freed index is reused by any resource, and Clear freed removes freed row
   await page.locator('wa-dropdown-item', { hasText: 'getA' }).click();
   const getA = funcCard(resource(page, 'Z'), 'getA');
   await expect(getA).toBeInViewport();
-  await expect(arg(getA, 0).locator('select')).toHaveValue('z-1');
+  await expect(picker(arg(getA, 0))).toHaveJSProperty('value', 'z-1');
   await call(getA);
   await expectCall(page, '#borrowed-z-1.getA()', 'ok', '2');
 

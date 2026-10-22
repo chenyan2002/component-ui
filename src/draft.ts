@@ -17,7 +17,10 @@ export interface ListDraft extends DraftBase { kind: 'list'; length: string; ite
 export interface FieldsDraft extends DraftBase { kind: 'fields'; fields: Draft[] }
 // Variants and enums; `index` is -1 until a case is selected.
 export interface CaseDraft extends DraftBase { kind: 'case'; index: number; payload?: Draft }
-export type Draft = NullDraft | TextDraft | BoolDraft | OptDraft | ListDraft | FieldsDraft | CaseDraft;
+// A `list<u8>`, edited as text encoded as UTF-8, or as hex.
+export type ByteEncoding = 'text' | 'hex';
+export interface BytesDraft extends DraftBase { kind: 'bytes'; text: string; encoding: ByteEncoding }
+export type Draft = NullDraft | TextDraft | BoolDraft | OptDraft | ListDraft | FieldsDraft | CaseDraft | BytesDraft;
 
 export const INVALID = Symbol('invalid');
 
@@ -47,7 +50,44 @@ export function selectedInstance(
   return d.text === '' && instanceChoices(t, registry, giver).length === 0 && mock?.canMock(t) ? NEW_MOCK : d.text;
 }
 
-const MAX_LIST_LENGTH = 100;
+export const MAX_LIST_LENGTH = 100;
+
+export function isBytes(ty: IDL.Type): boolean {
+  return ty instanceof IDL.FixedNatClass && ty._bits === 8;
+}
+
+export function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join(' ');
+}
+
+// Hex bytes, optionally separated by spaces or commas and prefixed with `0x`, e.g. `48 69`.
+function parseHex(text: string): Uint8Array {
+  const digits = text.replace(/0x/gi, '').replace(/[\s,]/g, '');
+  if (!/^[0-9a-f]*$/i.test(digits) || digits.length % 2 !== 0) {
+    throw new Error('Expected hex bytes, e.g. "48 69"');
+  }
+  return Uint8Array.from(digits.match(/../g) ?? [], (b) => parseInt(b, 16));
+}
+
+// The bytes of a draft; throws if they are invalid hex.
+export function bytesOf(d: BytesDraft): Uint8Array {
+  return d.encoding === 'text' ? new TextEncoder().encode(d.text) : parseHex(d.text);
+}
+
+// Converts the text to the other encoding, keeping the bytes. Bytes that aren't UTF-8 stay hex.
+export function setEncoding(d: BytesDraft, encoding: ByteEncoding) {
+  if (encoding === d.encoding) {
+    return;
+  }
+  try {
+    const bytes = bytesOf(d);
+    d.text = encoding === 'hex' ? toHex(bytes) : new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    d.encoding = encoding;
+    d.error = undefined;
+  } catch (err) {
+    d.error = err instanceof TypeError ? 'These bytes aren\'t valid UTF-8 text' : (err as Error).message;
+  }
+}
 
 class Init extends IDL.Visitor<null, Draft> {
   public visitType<T>(_t: IDL.Type<T>, _d: null): Draft {
@@ -63,8 +103,8 @@ class Init extends IDL.Visitor<null, Draft> {
   public visitOpt(_t: IDL.OptClass, _ty: IDL.Type, _d: null): Draft {
     return { kind: 'opt', some: false };
   }
-  public visitVec(_t: IDL.VecClass, _ty: IDL.Type, _d: null): Draft {
-    return { kind: 'list', length: '', items: [] };
+  public visitVec(_t: IDL.VecClass, ty: IDL.Type, _d: null): Draft {
+    return isBytes(ty) ? { kind: 'bytes', text: '', encoding: 'text' } : { kind: 'list', length: '', items: [] };
   }
   public visitRecord(_t: IDL.RecordClass, fields: Record<string, IDL.Type>, _d: null): Draft {
     return { kind: 'fields', fields: Object.values(fields).map(initDraft) };
@@ -101,6 +141,17 @@ export function resizeList(d: ListDraft, ty: IDL.Type, length: string) {
   d.items = Array.from({ length: n }, (_, i) => d.items[i] ?? initDraft(ty));
 }
 
+export function removeItem(d: ListDraft, index: number) {
+  d.items.splice(index, 1);
+  d.length = `${d.items.length}`;
+}
+
+// Replaces the items of a list edited as tags, e.g. a list of numbers.
+export function setTextItems(d: ListDraft, texts: string[]) {
+  d.items = texts.slice(0, MAX_LIST_LENGTH).map((text) => ({ kind: 'text', text }));
+  d.length = `${d.items.length}`;
+}
+
 // `ty` is the payload type of the selected case; enums have none.
 export function selectCase(d: CaseDraft, index: number, ty?: IDL.Type) {
   d.index = index;
@@ -110,6 +161,10 @@ export function selectCase(d: CaseDraft, index: number, ty?: IDL.Type) {
 
 function randomInt(max: number): number {
   return Math.floor(Math.random() * max);
+}
+
+function randomString(): string {
+  return Math.random().toString(36).substring(6);
 }
 
 function randomNumber(signed: boolean): number {
@@ -124,7 +179,7 @@ class Randomize extends IDL.Visitor<Draft, void> {
   }
   public visitType<T>(_t: IDL.Type<T>, _d: Draft): void {}
   public visitString(_t: IDL.StringClass, d: Draft): void {
-    this.fillText(d as TextDraft, () => Math.random().toString(36).substring(6));
+    this.fillText(d as TextDraft, randomString);
   }
   public visitChar(_t: IDL.CharClass, d: Draft): void {
     this.fillText(d as TextDraft, () => String.fromCharCode(97 + randomInt(26)));
@@ -163,6 +218,12 @@ class Randomize extends IDL.Visitor<Draft, void> {
     }
   }
   public visitVec(_t: IDL.VecClass, ty: IDL.Type, d: Draft): void {
+    if (d.kind === 'bytes') {
+      this.fillText(d, () => d.encoding === 'text'
+        ? randomString()
+        : toHex(Uint8Array.from({ length: 1 + randomInt(8) }, () => randomInt(256))));
+      return;
+    }
     const list = d as ListDraft;
     if (list.length === '' || list.auto) {
       resizeList(list, ty, `${randomInt(4)}`);
@@ -196,7 +257,7 @@ class Randomize extends IDL.Visitor<Draft, void> {
   public visitRec(_t: IDL.RecClass, ty: IDL.Type, d: Draft): void {
     ty.accept(this, d);
   }
-  private fillText(d: TextDraft, generate: () => string) {
+  private fillText(d: TextDraft | BytesDraft, generate: () => string) {
     if (d.text === '' || d.auto) {
       d.text = generate();
       d.auto = true;
@@ -303,6 +364,10 @@ class Parse extends IDL.Visitor<Draft, any> {
     return tagged ? { tag: 'some', val } : val;
   }
   public visitVec(_t: IDL.VecClass, ty: IDL.Type, d: Draft): any {
+    if (d.kind === 'bytes') {
+      // As jco represents a `list<u8>`.
+      return this.leaf(d, () => bytesOf(d));
+    }
     return this.all((d as ListDraft).items.map((item) => ty.accept(this, item)));
   }
   public visitRecord(_t: IDL.RecordClass, fields: Record<string, IDL.Type>, d: Draft): any {

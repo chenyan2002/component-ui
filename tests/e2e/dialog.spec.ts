@@ -1,5 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
-import { answerImport, applyImports, arg, call, callEntry, expectCall, funcCard, importPrompt, loadExample, row } from './helpers';
+import {
+  answerImport, applyImports, arg, call, callEntry, choices, choose, chosen, expectCall, funcCard, importPrompt, loadExample, picker, row,
+} from './helpers';
 
 // Loads the resource example with `stub` as the implementation of its `imports` interface,
 // which defines the host resource `Y`.
@@ -15,8 +17,8 @@ const s32 = (value: string) => async (prompt: ReturnType<typeof importPrompt>) =
   await prompt.locator('input').fill(value);
 };
 const newMock = async (prompt: ReturnType<typeof importPrompt>) => {
-  await expect(prompt.locator('.sig-type').first()).toHaveText('own<Y>');
-  await prompt.locator('select').selectOption({ label: 'New mock Y' });
+  await expect(prompt.locator('.sig-type').first()).toHaveText('Y');
+  await choose(picker(prompt), { label: 'New mock Y' });
 };
 
 test('a missing host resource is mocked, and its calls ask for their results', async ({ page }) => {
@@ -54,9 +56,9 @@ test('a missing host resource is mocked, and its calls ask for their results', a
 test('an import returns instances the host owns, not those the guest holds', async ({ page }) => {
   await loadResource(page);
   await call(funcCard(page, 'testImports'));
-  const returns = (choices: string[], pick: string) => async (prompt: ReturnType<typeof importPrompt>) => {
-    await expect(prompt.locator('select option:not([disabled])')).toHaveText(choices);
-    await prompt.locator('select').selectOption({ label: pick });
+  const returns = (offered: string[], pick: string) => async (prompt: ReturnType<typeof importPrompt>) => {
+    await expect(choices(picker(prompt))).toHaveText(offered);
+    await choose(picker(prompt), { label: pick });
   };
   await answerImport(page, '#borrowed-host-y-1.getA()', s32('10'));
   await answerImport(page, '#borrowed-host-y-1.getA()', s32('20'));
@@ -110,28 +112,48 @@ test('mock host resources stand in for the arguments a host would create', async
   // WASI HTTP has no constructors for these; the host creates them for each request. With no
   // live instances, a new mock is the only choice, so it is selected.
   const handle = funcCard(page, 'handle');
-  await expect(arg(handle, 0).locator('select')).toHaveValue('+mock');
-  await expect(arg(handle, 1).locator('select option:checked')).toHaveText('New mock ResponseOutparam');
+  await expect(picker(arg(handle, 0))).toHaveJSProperty('value', '+mock');
+  await expect(chosen(picker(arg(handle, 1)))).toHaveText('New mock ResponseOutparam');
   await call(handle);
 
   // Their methods ask, as do the mocks they return.
   const selectMock = (resource: string) => async (prompt: ReturnType<typeof importPrompt>) => {
-    await prompt.locator('select').first().selectOption('ok');
-    await prompt.locator('select').nth(1).selectOption({ label: `New mock ${resource}` });
+    await choose(picker(prompt), 'ok');
+    await choose(picker(prompt, 1), { label: `New mock ${resource}` });
   };
   await answerImport(page, '#borrowed-host-incomingrequest-1.headers()', async (prompt) => {
-    await expect(prompt.locator('select option:checked')).toHaveText('New mock Fields');
+    await expect(chosen(picker(prompt))).toHaveText('New mock Fields');
   });
+  // Items are added and removed one by one. A `list<u8>` is typed as text, sent as UTF-8, or as hex.
   await answerImport(page, '#borrowed-host-fields-3.entries()', async (prompt) => {
-    await prompt.locator('input.length').fill('0');
-    await prompt.locator('input.length').press('Tab');
+    const add = prompt.locator('wa-button', { hasText: 'Add item' });
+    await add.click();
+    await add.click();
+    await prompt.locator('.remove-item').nth(1).click();
+    await expect(prompt.locator('.remove-item')).toHaveCount(1);
+    await prompt.locator('wa-input input').fill('x-id');
+    const bytes = prompt.locator('wa-textarea textarea');
+    await bytes.fill('hé');
+    await expect(prompt.locator('.bytes-mode')).toContainText('3 bytes');
+    await choose(picker(prompt), 'hex');
+    await expect(bytes).toHaveValue('68 c3 a9');
+    await bytes.fill('68 c3 zz');
+    await bytes.blur();
+    await expect(prompt.locator('.field-error')).toHaveText('Expected hex bytes, e.g. "48 69"');
+    // Bytes that aren't UTF-8 can't be shown as text, so they stay hex.
+    await bytes.fill('68 69 ff');
+    await choose(picker(prompt), 'text');
+    await expect(prompt.locator('.field-error')).toHaveText("These bytes aren't valid UTF-8 text");
+    await expect(chosen(picker(prompt))).toHaveText('hex');
+    await bytes.fill('0x68,0x69');
   });
-  await answerImport(page, '#borrowed-host-incomingrequest-1.method()', (prompt) => prompt.locator('select').selectOption('get').then(() => {}));
+  await expect(page.locator('.log-import').filter({ hasText: 'entries()' }).locator('.log-import-output code')).toHaveText('[("x-id", [104, 105])]');
+  await answerImport(page, '#borrowed-host-incomingrequest-1.method()', (prompt) => choose(picker(prompt), 'get'));
   await answerImport(page, '#borrowed-host-incomingrequest-1.scheme()');
   await answerImport(page, '#borrowed-host-incomingrequest-1.authority()');
   await answerImport(page, '#borrowed-host-incomingrequest-1.pathWithQuery()', async (prompt) => {
-    await prompt.locator('input[type=checkbox]').check();
-    await prompt.locator('input:not([type=checkbox])').fill('/');
+    await choose(picker(prompt), 'some');
+    await prompt.locator('wa-input input').fill('/');
   });
   await answerImport(page, '#borrowed-host-incomingrequest-1.consume()', selectMock('IncomingBody'));
   await answerImport(page, '#borrowed-host-incomingbody-4.stream()', selectMock('InputStream'));

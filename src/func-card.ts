@@ -78,7 +78,7 @@ export class FuncCard extends LitElement {
         ${renderSignature(this.name, this.func)}
         ${this.target.type === 'func' ? nothing : html`<wa-tag size="s" variant="neutral">${this.target.type}</wa-tag>`}
       </div>
-      <div class="func-args">
+      <div class="func-args flow">
         ${args.length === 0
           ? html`<span class="muted">No arguments</span>`
           : args.map(([arg, type], i) => renderField(type, this.drafts[i], form, arg))}

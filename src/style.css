@@ -149,21 +149,41 @@ pre {
   font-weight: var(--wa-font-weight-normal);
 }
 .imports-card {
-  flex-shrink: 0;
-  background: var(--wa-color-surface-default);
-}
-.imports-card::part(content) {
   display: flex;
-  flex-direction: column;
-  gap: var(--wa-space-l);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wa-space-m);
+  flex-shrink: 0;
+  padding: var(--wa-space-m) var(--wa-space-l);
+  background: var(--wa-color-surface-default);
+  border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+  border-radius: var(--wa-border-radius-l);
 }
-.imports-pending {
-  align-self: center;
+.imports-card wa-button {
+  flex-shrink: 0;
 }
 .imports-title {
   display: flex;
   align-items: center;
   gap: var(--wa-space-s);
+}
+/* It shows in the top layer; out of the flow, the pane doesn't make room for it. */
+.imports-dialog {
+  position: absolute;
+  --width: min(56rem, 90vw);
+}
+.imports-dialog::part(body) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wa-space-m);
+}
+.imports-help {
+  margin: 0;
+}
+.imports-dialog .func-actions {
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--wa-space-m);
 }
 .imports {
   display: flex;
@@ -296,28 +316,90 @@ func-card.highlight {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.field input:not([type='checkbox']),
-.field select {
-  --wa-form-control-height: 2.25rem;
-  font-size: var(--wa-font-size-s);
-}
-.field input[type='checkbox'] {
+/* Controls that don't fill the width keep their natural size. */
+.field :is(wa-switch, wa-radio-group, wa-checkbox-group, .add-item) {
   align-self: flex-start;
 }
-.field input.length {
-  width: 8rem;
+.field wa-input.char {
+  width: 6rem;
 }
-.checkbox-label {
-  display: inline-flex;
+/* Wide enough for the longest label, and the expand icon. */
+.field wa-select {
+  align-self: flex-start;
+  width: calc(var(--chars) * 1ch + 3.5rem);
+  max-width: 100%;
+}
+/* Wide enough for the largest value of the type. */
+.field wa-number-input {
+  width: calc(var(--digits) * 1ch + 2rem);
+  max-width: 100%;
+}
+/* Aligned like text inputs: the empty start and end slots pad it, but mustn't grow. */
+.field wa-number-input::part(input) {
+  padding-inline: 0;
+  text-align: start;
+}
+.field wa-number-input::part(start),
+.field wa-number-input::part(end) {
+  flex: none;
+}
+.field wa-switch.bool {
+  font-family: var(--wa-font-family-code);
+  font-size: var(--wa-font-size-s);
+}
+.field wa-checkbox-group.flags {
+  --gap: var(--wa-space-xs) var(--wa-space-m);
+}
+.field wa-checkbox-group.flags::part(form-control-input) {
+  flex-wrap: wrap;
+}
+/* The selected case of a `result` takes the color of success or failure. */
+wa-radio-group.result wa-radio[value='ok']:state(checked) {
+  border-color: var(--wa-color-success-border-loud);
+  background-color: var(--wa-color-success-fill-quiet);
+}
+wa-radio-group.result wa-radio[value='err']:state(checked) {
+  border-color: var(--wa-color-danger-border-loud);
+  background-color: var(--wa-color-danger-fill-quiet);
+}
+.bytes-mode {
+  display: flex;
+  align-items: center;
+  gap: var(--wa-space-s);
+}
+.field wa-textarea.hex::part(textarea) {
+  font-family: var(--wa-font-family-code);
+}
+.field-heading {
+  display: flex;
   align-items: center;
   gap: var(--wa-space-xs);
-  font-size: var(--wa-font-size-s);
+  min-width: 0;
+}
+.field-heading .field-label {
+  flex: 1;
+}
+.remove-item {
+  flex-shrink: 0;
   color: var(--wa-color-text-quiet);
 }
 .subform {
   display: flex;
   flex-direction: column;
   gap: var(--wa-space-s);
+}
+/* Short fields flow side by side, e.g. in records and argument lists; the others take a row of their own. */
+.flow {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  column-gap: var(--wa-space-m);
+}
+.flow > .field {
+  max-width: 100%;
+}
+.flow > .field:not(.short) {
+  flex-basis: 100%;
 }
 .subform.nested {
   margin-top: var(--wa-space-2xs);
@@ -329,7 +411,7 @@ func-card.highlight {
   font-style: italic;
 }
 .reject {
-  border-color: var(--wa-color-danger-border-loud) !important;
+  --wa-form-control-border-color: var(--wa-color-danger-border-loud);
 }
 .field-error {
   font-size: var(--wa-font-size-xs);
