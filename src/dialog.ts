@@ -1,9 +1,10 @@
 import * as WIT from './wit';
 import { ImportLog } from './console';
 import { initDraft, INVALID, MockFactory, parseDraft, randomize } from './draft';
-import { byImportName, formatArgs, HostResources, unversioned } from './host-resources';
+import { byImportName, HostResources, ownFunc, unversioned } from './host-resources';
 import { stubMissingImports } from './loader';
 import { argHandles, dispose, involvesResources, ResourceRegistry, thrownType } from './resources';
+import { formatArgs, formatHandle, formatValue } from './wave';
 import { sentResponse } from './wasi-http';
 
 // Marks mock instances, which have no host implementation behind them.
@@ -61,7 +62,7 @@ export class ImportDialogs implements MockFactory {
     // jco gives all versions of an interface one import object; the first one's types stand for all.
     const funcs = new Map(ifaces.flatMap((iface) => Object.entries(iface._fields)).reverse());
     for (const [key, func] of funcs) {
-      const label = (_self: unknown, args: any[]) => `${name}#${key}(${this.format(args)})`;
+      const label = (_self: unknown, args: any[]) => `${name}#${key}(${this.format(func, args)})`;
       completed[key] = typeof mod[key] === 'function'
         ? this.routing(`${name}#${func._witName}`, func, mod[key], label)
         : this.prompting(func, label);
@@ -105,7 +106,7 @@ export class ImportDialogs implements MockFactory {
       // Dropping a mock frees nothing; the host's destructor would expect its own state.
       define(cls.prototype, dispose, () => {});
       for (const [key, func] of resource.get_method_funcs()) {
-        define(cls.prototype, key, this.prompting(func, (self, args) => this.methodLabel(resource, key, self, args)));
+        define(cls.prototype, key, this.prompting(func, (self, args) => this.methodLabel(resource, key, func, self, args)));
       }
       this.mockSubclasses.set(resource, cls);
     }
@@ -133,14 +134,14 @@ export class ImportDialogs implements MockFactory {
     const statics = new Map(resource.get_static_funcs()
       .filter(([key, func]) => func.callKind === 'static' && typeof (cls as any)[key] === 'function')
       .map(([key, func]) => [key, this.routing(`${name}#${func._witName}`, func, (cls as any)[key].bind(cls), (_self, args) =>
-        `${resource._name}.${key}(${this.format(args)})`)]));
+        `${resource._name}.${key}(${this.format(func, args)})`)]));
     return statics.size === 0 ? cls : new Proxy(cls, {
       get: (target, key, receiver) => (typeof key === 'string' && statics.get(key)) || Reflect.get(target, key, receiver),
     });
   }
 
-  private methodLabel(resource: WIT.ResourceClass, key: string, self: unknown, args: any[]): string {
-    return `${this.registry.idOf(self) ?? resource._name}.${key}(${this.format(args)})`;
+  private methodLabel(resource: WIT.ResourceClass, key: string, func: WIT.FuncClass, self: unknown, args: any[]): string {
+    return `${formatHandle(this.registry, self, resource, true)}.${key}(${this.format(func, args)})`;
   }
 
   private mockClass(resource: WIT.ResourceClass): Function {
@@ -150,7 +151,8 @@ export class ImportDialogs implements MockFactory {
       cls = class extends MockResource {
         constructor(...args: any[]) {
           super();
-          dialogs.constructed(this, `new ${resource._name}(${dialogs.format(args)})`);
+          const ctor = ownFunc(resource._fields, 'constructor');
+          dialogs.constructed(this, resource, `new ${resource._name}(${dialogs.format(ctor, args)})`);
         }
       };
       define(cls, 'name', resource._name);
@@ -163,12 +165,12 @@ export class ImportDialogs implements MockFactory {
   private fill(resource: WIT.ResourceClass, cls: Function): Function {
     for (const [key, func] of resource.get_method_funcs()) {
       if (typeof cls.prototype[key] !== 'function') {
-        define(cls.prototype, key, this.prompting(func, (self, args) => this.methodLabel(resource, key, self, args)));
+        define(cls.prototype, key, this.prompting(func, (self, args) => this.methodLabel(resource, key, func, self, args)));
       }
     }
     for (const [key, func] of resource.get_static_funcs()) {
       if (func.callKind === 'static' && typeof (cls as any)[key] !== 'function') {
-        define(cls, key, this.prompting(func, (_self, args) => `${resource._name}.${key}(${this.format(args)})`));
+        define(cls, key, this.prompting(func, (_self, args) => `${resource._name}.${key}(${this.format(func, args)})`));
       }
     }
     return cls;
@@ -176,9 +178,9 @@ export class ImportDialogs implements MockFactory {
 
   // Logs the guest constructing a mock, which needs no answer. The host wrapper registers the
   // instance once the constructor returns, so its id is known a microtask later.
-  private constructed(obj: object, call: string) {
+  private constructed(obj: object, resource: WIT.ResourceClass, call: string) {
     const line = this.log(call);
-    queueMicrotask(() => line.result(this.registry.idOf(obj) ?? 'mock'));
+    queueMicrotask(() => line.result(formatHandle(this.registry, obj, resource)));
   }
 
   private prompting(func: WIT.FuncClass, label: (self: unknown, args: any[]) => string): Function {
@@ -197,7 +199,7 @@ export class ImportDialogs implements MockFactory {
       if (effect) {
         effect().then((text) => line.detail(text), (err) => line.error(err));
       } else {
-        line.result('undefined');
+        line.result('');
       }
       return undefined;
     }
@@ -216,12 +218,12 @@ export class ImportDialogs implements MockFactory {
             return;
           }
           if (isResult && value.tag === 'err') {
-            reject(Object.assign(new Error(`err(${this.format([value.val])})`), { payload: value.val }));
+            reject(Object.assign(new Error(formatValue(this.registry, type, value)), { payload: value.val }));
           } else {
             resolve(isResult ? value.val : value);
           }
           // After the host wrapper registers returned resources, so they show by id.
-          queueMicrotask(() => line.result(this.format([value])));
+          queueMicrotask(() => line.result(formatValue(this.registry, type, value)));
         },
         random: () => randomize(type, draft, this.registry, this, 'host'),
         trap: () => {
@@ -234,7 +236,7 @@ export class ImportDialogs implements MockFactory {
     });
   }
 
-  private format(args: any[]): string {
-    return formatArgs(this.registry, args);
+  private format(func: WIT.FuncClass | undefined, args: any[]): string {
+    return formatArgs(this.registry, func, args);
   }
 }

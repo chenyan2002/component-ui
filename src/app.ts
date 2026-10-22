@@ -7,6 +7,7 @@ import { instantiate, JSPI_SUPPORTED, loadComponent, LoadedComponent, readWasm }
 import { CallActivity, ExportsContext } from './calls';
 import { ImportDialogs } from './dialog';
 import { ConsolePanel } from './console';
+import './console';
 import { renderExports } from './exports-view';
 import { HostResources } from './host-resources';
 import { ResourceRegistry, usesResources } from './resources';

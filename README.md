@@ -87,6 +87,8 @@ npm run build:bindgen
 - jco's async imports hang on failure; the loader patches jco's output to rethrow, which may need updating when jco changes.
 - While a call is waiting on an import, other calls are disabled, since the component instance
   can't be re-entered.
+- jco doesn't expose the handle index of a host-implemented resource, so the resource table shows
+  host instances as `host` and numbers them in creation order (e.g. `#host-y-1`) rather than by handle.
 
 ## Acknowledgement
 

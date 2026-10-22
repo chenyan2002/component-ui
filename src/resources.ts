@@ -3,7 +3,10 @@ import * as WIT from './wit';
 export type InstanceState = 'live' | 'moved' | 'dropped';
 
 export interface Instance {
-  // `{resource}_{handle}`, e.g. `x_1`, or `{resource}_host{n}` when there is no handle index.
+  // `{resource}-{handle}`, e.g. `x-1`. Host-implemented instances have no handle index, as jco
+  // doesn't expose the host side's handles, so they are numbered in creation order instead, as
+  // `host-{resource}-{n}`, e.g. `host-y-1`; the prefix keeps them apart from guest instances.
+  // The console shows it as `#x-1`.
   id: string;
   // The handle index in the component instance's table.
   handle?: number;
@@ -12,7 +15,7 @@ export interface Instance {
   state: InstanceState;
   // The call that produced the instance, e.g. `new X(5)`.
   origin: string;
-  // What happened to it once it is no longer live, e.g. `moved into consume(x_1)`.
+  // What happened to it once it is no longer live, e.g. `moved into consume(#x-1)`.
   fate?: string;
   // Who holds a host-implemented instance, whose handle index isn't observable: the number of
   // handles the guest has on the object, and whether an export returned it to the UI.
@@ -71,7 +74,8 @@ export class ResourceRegistry extends EventTarget {
   private readonly slots = new Map<string, Slot>();
   private readonly byId = new Map<string, Instance>();
   private readonly byObj = new Map<object, Instance>();
-  private hostCount = 0;
+  // Numbers host instances from 1, like handle indices.
+  private hostCount = 1;
   // The object whose destructor `drop` is running, which isn't the guest dropping it.
   private dropping?: object;
 
@@ -112,8 +116,10 @@ export class ResourceRegistry extends EventTarget {
     resource: WIT.ResourceClass, obj: object, origin: string, handle?: number, holders?: Instance['holders'],
   ): Instance {
     const prefix = resource._name.toLowerCase();
-    const key = handle === undefined ? `host${this.hostCount++}` : `${handle}`;
-    const instance: Instance = { id: `${prefix}_${key}`, handle, resource, obj, state: 'live', origin, holders };
+    const number = handle ?? this.hostCount++;
+    // Host instances get slots apart from those of handle indices.
+    const key = handle === undefined ? `host${number}` : `${number}`;
+    const instance: Instance = { id: `${handle === undefined ? 'host-' : ''}${prefix}-${number}`, handle, resource, obj, state: 'live', origin, holders };
     const slot = this.slots.get(key);
     if (slot) {
       slot.earlier.push(slot.current);

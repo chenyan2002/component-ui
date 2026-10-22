@@ -126,6 +126,9 @@ class Randomize extends IDL.Visitor<Draft, void> {
   public visitString(_t: IDL.StringClass, d: Draft): void {
     this.fillText(d as TextDraft, () => Math.random().toString(36).substring(6));
   }
+  public visitChar(_t: IDL.CharClass, d: Draft): void {
+    this.fillText(d as TextDraft, () => String.fromCharCode(97 + randomInt(26)));
+  }
   public visitFixedNat(_t: IDL.FixedNatClass, d: Draft): void {
     this.fillText(d as TextDraft, () => `${randomNumber(false)}`);
   }
@@ -244,6 +247,15 @@ class Parse extends IDL.Visitor<Draft, any> {
   public visitString(_t: IDL.StringClass, d: Draft): any {
     return (d as TextDraft).text;
   }
+  public visitChar(_t: IDL.CharClass, d: Draft): any {
+    return this.leaf(d, () => {
+      const text = (d as TextDraft).text;
+      if ([...text].length !== 1) {
+        throw new Error(`Expected a single character, got "${text}"`);
+      }
+      return text;
+    });
+  }
   public visitFixedNat(t: IDL.FixedNatClass, d: Draft): any {
     return this.leaf(d, () => parseInteger(t._bits, false, (d as TextDraft).text));
   }
@@ -272,7 +284,7 @@ class Parse extends IDL.Visitor<Draft, any> {
         throw new Error(choices.length > 0 ? 'Select an instance' : `No ${t._name} instances yet`);
       }
       if (!choices.includes(instance)) {
-        throw new Error(instance.state === 'live' ? `${id} is held by the guest` : `${id} was ${instance.fate}`);
+        throw new Error(instance.state === 'live' ? `#${id} is held by the guest` : `#${id} was ${instance.fate}`);
       }
       return instance.obj;
     });
