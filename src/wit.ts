@@ -11,6 +11,9 @@ export abstract class Visitor<D, R> {
     public visitString(t: StringClass, data: D): R {
         return this.visitType(t, data);
     }
+    public visitChar(t: CharClass, data: D): R {
+        return this.visitType(t, data);
+    }
     public visitNumber<T>(t: Type<T>, data: D): R {
         return this.visitType(t, data);
     }
@@ -31,6 +34,10 @@ export abstract class Visitor<D, R> {
     }
     public visitRecord(t: RecordClass, _fields: Record<string, Type>, data: D): R {
         return this.visitType(t, data);
+    }
+    // Flags default to visiting them as a record of bools.
+    public visitFlags(t: FlagsClass, fields: Record<string, Type>, data: D): R {
+        return this.visitRecord(t, fields, data);
     }
     public visitTuple(t: TupleClass, _components: Array<Type>, data: D): R {
         return this.visitType(t, data);
@@ -96,6 +103,14 @@ export class StringClass extends Type<string> {
     }
     get name(): string {
         return 'string';
+    }
+}
+export class CharClass extends Type<string> {
+    public accept<D, R>(v: Visitor<D, R>, d: D): R {
+        return v.visitChar(this, d);
+    }
+    get name(): string {
+        return 'char';
     }
 }
 export class FixedNatClass extends Type<number> {
@@ -169,6 +184,18 @@ export class RecordClass extends Type<Record<string, any>> {
     }
     get name(): string {    
         return `record { ${Object.entries(this._fields).map(([k, v]) => `${k}: ${v.name}`).join(', ')} }`;
+    }
+}
+// jco represents flags as an object of bools, keyed like record fields.
+export class FlagsClass extends RecordClass {
+    constructor(public readonly _flags: Array<string>) {
+        super(Object.fromEntries(_flags.map((f) => [f, Bool])));
+    }
+    public accept<D, R>(v: Visitor<D, R>, d: D): R {
+        return v.visitFlags(this, this._fields, d);
+    }
+    get name(): string {
+        return `flags { ${this._flags.join(', ')} }`;
     }
 }
 export class TupleClass extends Type<Array<any>> {
@@ -327,6 +354,7 @@ export class InterfaceClass extends Type<any> {
 export const Null = new NullClass();
 export const Bool = new BoolClass();
 export const String = new StringClass();
+export const Char = new CharClass();
 export const U8 = new FixedNatClass(8);
 export const U16 = new FixedNatClass(16);
 export const U32 = new FixedNatClass(32);
@@ -346,8 +374,8 @@ export function Vec(ty: Type): VecClass {
 export function Record(fields: Record<string, Type>): RecordClass {
     return new RecordClass(fields);
 }
-export function Flags(flags: Array<string>): RecordClass {
-    return new RecordClass(Object.fromEntries(flags.map((f) => [f, Bool])));
+export function Flags(flags: Array<string>): FlagsClass {
+    return new FlagsClass(flags);
 }
 export function Tuple(components: Array<Type>): TupleClass {
     return new TupleClass(components);

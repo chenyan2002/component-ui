@@ -1,9 +1,10 @@
 import * as WIT from './wit';
-import { customStringify, LogEntry } from './console';
+import { LogEntry } from './console';
 import { MOCK } from './dialog';
 import { MockFactory } from './draft';
 import { HostResources } from './host-resources';
-import { argHandles, ownedHandles, ResourceRegistry, returnedType } from './resources';
+import { argHandles, ownedHandles, ResourceRegistry, returnedType, thrownType } from './resources';
+import { formatArgs, formatHandle, formatResult, formatThrown } from './wave';
 
 export interface ExportsContext {
   // Exports of the instantiated component, as returned by jco's `instantiate`.
@@ -87,13 +88,16 @@ function callsHost(ctx: ExportsContext, target: CallTarget, args: any[]): boolea
   }
 }
 
-// Formats a value for the console, showing resource handles by their instance id.
-function format(ctx: ExportsContext, value: any): string {
-  return customStringify(value, (v) => ctx.registry.idOf(v));
+// jco throws a `ComponentError` carrying the `err` payload of a function returning a `result`.
+function errorText(ctx: ExportsContext, func: WIT.FuncClass, err: unknown): unknown {
+  if (thrownType(func) !== undefined && err instanceof Error && 'payload' in err) {
+    return formatThrown(ctx.registry, func, err.payload);
+  }
+  return err;
 }
 
-function resolveCall(ctx: ExportsContext, target: CallTarget, name: string, args: any[]): Call {
-  const argList = args.map((arg) => format(ctx, arg)).join(', ');
+function resolveCall(ctx: ExportsContext, target: CallTarget, name: string, func: WIT.FuncClass, args: any[]): Call {
+  const argList = formatArgs(ctx.registry, func, target.type === 'method' ? args.slice(1) : args);
   switch (target.type) {
     case 'func': {
       const mod = exportsOf(ctx, target.iface);
@@ -112,8 +116,7 @@ function resolveCall(ctx: ExportsContext, target: CallTarget, name: string, args
     }
     case 'method': {
       const [self, ...rest] = args;
-      const restList = rest.map((arg) => format(ctx, arg)).join(', ');
-      return { label: `${format(ctx, self)}.${name}(${restList})`, invoke: () => self[name](...rest) };
+      return { label: `${formatHandle(ctx.registry, self, target.resource, true)}.${name}(${argList})`, invoke: () => self[name](...rest) };
     }
   }
 }
@@ -138,7 +141,7 @@ async function run(ctx: ExportsContext, target: CallTarget, name: string, func: 
   }
   let resolved: Call;
   try {
-    resolved = resolveCall(ctx, target, name, args);
+    resolved = resolveCall(ctx, target, name, func, args);
   } catch (err) {
     ctx.log(name).error(err);
     return;
@@ -154,7 +157,7 @@ async function run(ctx: ExportsContext, target: CallTarget, name: string, func: 
     result = await (toHost ? ctx.host.callDirect(resolved.invoke) : resolved.invoke());
   } catch (err) {
     registry.settle(fate);
-    entry.error(err);
+    entry.error(errorText(ctx, func, err));
     console.error(err);
     return;
   }
@@ -168,11 +171,11 @@ async function run(ctx: ExportsContext, target: CallTarget, name: string, func: 
       registry.add(resource, obj, resolved.label, !toHost);
     }
   }
-  entry.result(format(ctx, result));
+  entry.result(target.type === 'constructor' ? formatHandle(registry, result, target.resource) : formatResult(registry, func, result));
 }
 
 export function drop(ctx: ExportsContext, instance: string) {
-  const entry = ctx.log(`drop ${instance}`);
+  const entry = ctx.log(`drop #${instance}`);
   try {
     ctx.registry.drop(instance);
     entry.result('dropped');

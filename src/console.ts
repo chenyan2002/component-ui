@@ -5,47 +5,14 @@ import { Draft, MockFactory } from './draft';
 import { FormContext, renderField, typeName } from './form';
 import { ResourceRegistry } from './resources';
 
-// Marks a string shown unquoted: a name from `describe`, or a `bigint` (e.g. a `u64`).
-const RAW = '\uE000';
-
-// Pretty-prints a value; `describe` can replace objects (e.g. resource handles) by a name.
-export function customStringify(obj: any, describe?: (value: any) => string | undefined): string {
-  if (obj === undefined) {
-    return 'undefined';
-  }
-  const json = JSON.stringify(obj, (_key, value) => {
-    const name = describe?.(value);
-    if (name !== undefined) {
-      return RAW + name;
-    }
-    if (typeof value === 'bigint') {
-      return RAW + value.toString();
-    }
-    if (typeof value === 'function' || typeof value === 'symbol') {
-      return value.toString();
-    }
-    if (value instanceof Uint8Array) {
-      return Array.from(value);
-    }
-    return value;
-  }, 2);
-  if (json === '{}' && obj?.constructor?.name) {
-    return `[object ${obj.constructor.name}]`;
-  }
-  return json.replace(new RegExp(`"${RAW}([^"]*)"`, 'g'), '$1');
-}
-
 function errorText(err: unknown): string {
-  // jco throws a `ComponentError` carrying the payload of a WIT `result` error.
-  if (err instanceof Error && 'payload' in err) {
-    return `err(${customStringify(err.payload)})`;
-  }
   return err instanceof Error ? err.message : String(err);
 }
 
 export interface LogEntry {
-  // `text` is the formatted result.
+  // `text` is the formatted result, in WAVE; empty for a function without one.
   result(text: string): void;
+  // A string is a formatted error, e.g. the `err` of a `result`.
   error(err: unknown): void;
 }
 
@@ -193,7 +160,7 @@ export class ConsolePanel extends LitElement {
       <div class="log-call">
         <span class="log-prompt">↳</span>
         <code>${entry.call}</code>
-        ${entry.output === undefined ? nothing : html`<span class="log-import-output">= <code>${entry.output}</code></span>`}
+        ${!entry.output ? nothing : html`<span class="log-import-output">= <code>${entry.output}</code></span>`}
       </div>
       ${entry.detail === undefined ? nothing : html`<div class="log-output"><pre>${entry.detail}</pre></div>`}
       ${entry.prompt ? this.renderPrompt(entry.prompt) : nothing}
@@ -250,7 +217,7 @@ export class ConsolePanel extends LitElement {
         <span class=${waiting ? 'log-meta waiting' : 'log-meta'}>${meta}</span>
       </div>
       ${entry.imports.length > 0 ? html`<div class="log-imports">${entry.imports.map((i) => this.renderImport(i))}</div>` : nothing}
-      ${entry.output === undefined
+      ${!entry.output
         ? nothing
         : html`<div class="log-output">
             <pre>${entry.output}</pre>

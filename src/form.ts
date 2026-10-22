@@ -97,7 +97,7 @@ class Render extends IDL.Visitor<RenderData, Rendered> {
         ${instances.length > 0 || mock ? 'Select an instance…' : `No live ${t._name} instances`}
       </option>
       ${mock ? html`<option value=${NEW_MOCK} .selected=${live(id === NEW_MOCK)}>New mock ${t._name}</option>` : nothing}
-      ${instances.map((i) => html`<option value=${i.id} .selected=${live(i.id === id)}>${i.id}</option>`)}
+      ${instances.map((i) => html`<option value=${i.id} .selected=${live(i.id === id)}>#${i.id}</option>`)}
     </select>`;
   }
   public visitOpt(_t: IDL.OptClass, ty: IDL.Type, { d, ctx }: RenderData): Rendered {

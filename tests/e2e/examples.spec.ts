@@ -46,7 +46,7 @@ test('calculator: imports are answered in the console, or implemented in JavaScr
   };
   await add();
   await answerImport(page, 'docs:adder/add#add(2, 3)', (prompt) => prompt.locator('input').fill('5'));
-  await expectCall(page, 'evalExpression("add", 2, 3)', 'ok', '5');
+  await expectCall(page, 'evalExpression(add, 2, 3)', 'ok', '5');
 
   // Expanding the card shows example code, which takes effect once applied.
   await imports.locator('.card-title').click();
@@ -59,7 +59,7 @@ test('calculator: imports are answered in the console, or implemented in JavaScr
   await expect(imports.locator('.imports-pending')).toHaveCount(0);
   await add();
   await expect(callEntries(page).last().locator('.log-import')).toHaveCount(0);
-  await expectCall(page, 'evalExpression("add", 2, 3)', 'ok', '5');
+  await expectCall(page, 'evalExpression(add, 2, 3)', 'ok', '5');
   // Nothing involves resources, so the resource table stays collapsed.
   await expect(page.locator('.resource-pane')).toBeHidden();
 });
@@ -96,39 +96,39 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   await expect(request.locator('.section-summary wa-tag')).toHaveText('host resource');
   await request.locator('.section-summary').click();
   await call(funcCard(request, 'new'));
-  await expectCall(page, 'Request.new()', 'ok', 'request_host0');
-  await expect(row(page, 'request_host0').locator('td.handle')).toHaveText('host');
-  await expect(row(page, 'request_host0').locator('.instance-holders')).toHaveText('held by you');
+  await expectCall(page, 'Request.new()', 'ok', 'ok(#host-request-1)');
+  await expect(row(page, 'host-request-1').locator('td.handle')).toHaveText('host');
+  await expect(row(page, 'host-request-1').locator('.instance-holders')).toHaveText('held by you');
   const pollable = resource(page, 'Pollable');
   await pollable.locator('.section-summary').click();
   await call(funcCard(pollable, 'newReady'));
-  await expectCall(page, 'Pollable.newReady()', 'ok', 'pollable_host1');
+  await expectCall(page, 'Pollable.newReady()', 'ok', '#host-pollable-2');
 
   const setMethod = funcCard(request, 'setMethod');
-  await arg(setMethod, 0).locator('select').selectOption('request_host0');
+  await arg(setMethod, 0).locator('select').selectOption('host-request-1');
   await arg(setMethod, 1).locator('input').fill('POST');
   await call(setMethod);
   const getMethod = funcCard(request, 'getMethod');
-  await arg(getMethod, 0).locator('select').selectOption('request_host0');
+  await arg(getMethod, 0).locator('select').selectOption('host-request-1');
   await arg(getMethod, 1).locator('input').fill('10');
   await call(getMethod);
   // A `u64` is a `bigint`, shown as a number.
-  await expectCall(page, 'request_host0.getMethod(10)', 'ok', '"POST"');
+  await expectCall(page, '#borrowed-host-request-1.getMethod(10)', 'ok', 'ok("POST")');
 
   // The guest accepts them; imports the stubs leave out ask for their results.
   const handle = funcCard(page, 'handle');
-  await arg(handle, 0).locator('select').selectOption('request_host0');
-  await arg(handle, 1).locator('select').selectOption('pollable_host1');
+  await arg(handle, 0).locator('select').selectOption('host-request-1');
+  await arg(handle, 1).locator('select').selectOption('host-pollable-2');
   await call(handle);
   await answerImport(page, 'fastly:private/privileged-kv-store-service#get()', async (prompt) => {
     await prompt.locator('select').first().selectOption('ok');
     await prompt.locator('select').nth(1).selectOption({ label: 'New mock Service' });
   });
-  await expect(row(page, 'service_host2').locator('.instance-type')).toHaveText('Service · mock');
+  await expect(row(page, 'host-service-3').locator('.instance-type')).toHaveText('Service · mock');
   // The guest goes on to the next import; failing it fails the call.
   await expect(importPrompt(page)).toBeVisible();
   await importPrompt(page).locator('wa-button', { hasText: 'Trap' }).click();
-  await expectCall(page, 'handle(request_host0, pollable_host1)', 'error', /^Trapped at /);
+  await expectCall(page, 'handle(#host-request-1, #host-pollable-2)', 'error', /^Trapped at /);
 });
 
 test('calculator: rejects invalid numbers without calling', async ({ page }) => {
@@ -148,7 +148,7 @@ test('calculator: rejects invalid numbers without calling', async ({ page }) => 
   await arg(card, 2).locator('input').fill('2');
   await call(card);
   await answerImport(page, 'docs:adder/add#add(40, 2)', (prompt) => prompt.locator('input').fill('42'));
-  await expectCall(page, 'evalExpression("add", 40, 2)', 'ok', '42');
+  await expectCall(page, 'evalExpression(add, 40, 2)', 'ok', '42');
 });
 
 test('calculator: Random fills empty fields and keeps typed ones', async ({ page }) => {
@@ -162,7 +162,7 @@ test('calculator: Random fills empty fields and keeps typed ones', async ({ page
   }
   await expect(callEntries(page)).toHaveCount(2);
   await expect(callEntries(page).locator(':scope > .log-call code'))
-    .toHaveText([/^evalExpression\("add", 5, \d+\)$/, /^evalExpression\("add", 5, \d+\)$/]);
+    .toHaveText([/^evalExpression\(add, 5, \d+\)$/, /^evalExpression\(add, 5, \d+\)$/]);
   // The generated values are shown in the form, marked as generated.
   await expect(arg(card, 2).locator('input')).toHaveClass(/\bauto\b/);
   await expect(arg(card, 2).locator('input')).not.toHaveValue('');
@@ -181,7 +181,7 @@ test.describe('variants', () => {
 
     await arg(card, 0).locator('select').selectOption('b');
     await call(card);
-    await expectCall(page, 'roundtripEnum("b")', 'ok', '"b"');
+    await expectCall(page, 'roundtripEnum(b)', 'ok', 'b');
   });
 
   test('Random builds valid nested values', async ({ page }) => {
@@ -210,7 +210,7 @@ test.describe('variants', () => {
     await arg(card, 1).locator('select').selectOption('ok');
     await arg(card, 2).locator('select').selectOption('a');
     await call(card);
-    await expectCall(page, 'variantEnums(false, { "tag": "ok", "val": null }, "a")', 'error', /^wasm trap/);
+    await expectCall(page, 'variantEnums(false, ok, a)', 'error', /^wasm trap/);
     await expect(streamEntries(page, 'stderr').last()).toContainText('Assertion failed');
 
     await call(funcCard(page, 'invertBool'));

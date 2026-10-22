@@ -1,6 +1,6 @@
 import * as WIT from './wit';
-import { customStringify } from './console';
 import { dispose, Instance, involvesResources, ownedHandles, ResourceRegistry, returnedType, thrownType } from './resources';
+import { formatArgs, formatHandle } from './wave';
 
 // Hooks are installed on a host object once; they report to the component instance that
 // last received it, in case the host shares an object between instances.
@@ -27,13 +27,8 @@ function define(obj: object, key: PropertyKey, value: unknown) {
 }
 
 // A function of an interface or resource; field names like `constructor` aren't inherited.
-function ownFunc(fields: Record<string, WIT.FuncClass>, key: string): WIT.FuncClass | undefined {
+export function ownFunc(fields: Record<string, WIT.FuncClass>, key: string): WIT.FuncClass | undefined {
   return Object.prototype.hasOwnProperty.call(fields, key) ? fields[key] : undefined;
-}
-
-// Formats call arguments for the console, showing resource handles by their instance id.
-export function formatArgs(registry: ResourceRegistry, args: any[]): string {
-  return args.map((arg) => customStringify(arg, (v) => registry.idOf(v))).join(', ');
 }
 
 // `wasi:cli/stdout@0.2.0` → `wasi:cli/stdout`.
@@ -114,7 +109,7 @@ export class HostResources {
             resources.forEach((resource) => this.classes.set(resource, value));
           }
           wrapped.set(key, func
-            ? this.wrapFunc(func, value, (args) => `${name}#${key}(${this.format(args)})`)
+            ? this.wrapFunc(func, value, (args) => `${name}#${key}(${this.format(func, args)})`)
             : resources.length > 0 ? this.wrapClass(resources[0], value) : value);
         }
         return wrapped.get(key);
@@ -141,7 +136,7 @@ export class HostResources {
         const ctor = ownFunc(fields, 'constructor');
         const construct = () => Reflect.construct(target, args, newTarget);
         return ctor
-          ? this.observe(ctor, args, construct, () => `new ${resource._name}(${this.format(args)})`, resource)
+          ? this.observe(ctor, args, construct, () => `new ${resource._name}(${this.format(ctor, args)})`, resource)
           : construct();
       },
       get: (target, key, receiver) => {
@@ -151,7 +146,7 @@ export class HostResources {
           return value;
         }
         if (!statics.has(key)) {
-          statics.set(key, this.wrapFunc(func, value.bind(target), (args) => `${resource._name}.${key}(${this.format(args)})`));
+          statics.set(key, this.wrapFunc(func, value.bind(target), (args) => `${resource._name}.${key}(${this.format(func, args)})`));
         }
         return statics.get(key);
       },
@@ -180,7 +175,7 @@ export class HostResources {
         const host = observers.get(obj);
         const call = () => method.apply(this, args);
         return host
-          ? host.observe(func, args, call, () => `${host.registry.idOf(obj)}.${name}(${host.format(args)})`)
+          ? host.observe(func, args, call, () => `${formatHandle(host.registry, obj, instance.resource, true)}.${name}(${host.format(func, args)})`)
           : call();
       });
     }
@@ -226,7 +221,7 @@ export class HostResources {
     return result;
   }
 
-  private format(args: any[]): string {
-    return formatArgs(this.registry, args);
+  private format(func: WIT.FuncClass, args: any[]): string {
+    return formatArgs(this.registry, func, args);
   }
 }
