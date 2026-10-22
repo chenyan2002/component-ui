@@ -287,7 +287,7 @@ impl<'a> Bindgen<'a> {
                 .or_insert_with(|| Bindgen::new(self.resolve));
         }
         // insert resources after type defs
-        defs.emit_resources(&self.resources);
+        defs.emit_resources(&self.resources, &id_name);
         defs.src
             .prepend_str(&format!("let {identifier}; // {id_name}\n{{\n"));
         self.src.prepend_str(&defs.src);
@@ -313,14 +313,15 @@ impl<'a> Bindgen<'a> {
         self.src.push_str("});\n");
         self.export_interfaces.push(unnamed);
     }
-    fn emit_resources(&mut self, resources: &BTreeMap<String, Bindgen>) {
+    // Resources are emitted in the interface that defines them, `owner`; others `use` them.
+    fn emit_resources(&mut self, resources: &BTreeMap<String, Bindgen>, owner: &str) {
         for (resource, src) in resources {
             self.src
                 .prepend_str(&format!("const {resource} = IDL.Rec();\n"));
             self.src
                 .push_str(&format!("{resource}.fill(IDL.Resource('{resource}', {{\n"));
             self.src.push_str(&src.src);
-            self.src.push_str("}));\n");
+            self.src.push_str(&format!("}}, '{owner}'));\n"));
         }
     }
     fn module_return(&mut self) {

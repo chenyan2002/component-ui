@@ -9,7 +9,8 @@ import { ImportDialogs } from './dialog';
 import { ConsolePanel } from './console';
 import './console';
 import { renderExports } from './exports-view';
-import { HostResources } from './host-resources';
+import { byImportName, HostResources, unversioned } from './host-resources';
+import { importTemplate } from './import-template';
 import { ResourceRegistry, usesResources } from './resources';
 import './resource-table';
 
@@ -43,6 +44,8 @@ interface Session {
   // JS source for each non-WASI import, keyed by package, as edited and as last applied.
   importCode: Record<string, string>;
   appliedCode: Record<string, string>;
+  // The commented-out template of each import, which implements nothing.
+  templates: Record<string, string>;
   // Whether the exports involve resources, which shows the resource table from the start.
   exportsResources: boolean;
   status: 'instantiating' | 'ready' | 'failed';
@@ -212,7 +215,7 @@ export class ComponentApp extends LitElement {
   // imports in JavaScript instead, and restart the component with them. It opens if that fails.
   private renderImports(s: Session) {
     const count = s.component.customImports.length;
-    const implemented = Object.values(s.appliedCode).filter((code) => code.trim() !== '').length;
+    const implemented = Object.entries(s.appliedCode).filter(([pkg, code]) => code.trim() !== '' && code !== s.templates[pkg]).length;
     return html`<wa-details id="importsCard" class="imports-card" .open=${s.status === 'failed'}>
       <div slot="summary" class="card-title">
         <span class="imports-title">
@@ -229,7 +232,7 @@ export class ComponentApp extends LitElement {
         ${s.component.customImports.map((pkg) => html`<wa-textarea
           class="code-editor"
           label=${pkg}
-          rows="3"
+          rows=${Math.min(Math.max(s.importCode[pkg].split('\n').length, 3), 16)}
           placeholder="export function name(...) { ... }"
           .spellcheck=${false}
           .value=${s.importCode[pkg]}
@@ -278,15 +281,17 @@ export class ComponentApp extends LitElement {
         return;
       }
       this.consolePanel?.clear();
-      // The editors start with the example code, but the component starts without any, so
-      // calling an import asks in the console.
-      const importCode = Object.fromEntries(component.customImports.map((pkg) => [pkg, EXAMPLE_IMPORT_CODE[pkg] ?? '']));
+      // The editors start with the example code, or a commented-out template, but the component
+      // starts without any, so calling an import asks in the console.
+      const ifaces = byImportName(component.imports);
+      const templates = Object.fromEntries(component.customImports.map((pkg) => [pkg, importTemplate(ifaces.get(unversioned(pkg)) ?? [])]));
+      const importCode = Object.fromEntries(component.customImports.map((pkg) => [pkg, EXAMPLE_IMPORT_CODE[pkg] ?? templates[pkg]]));
       const session: Session = {
-        id, name, component, importCode, appliedCode: {}, exportsResources: usesResources(component.interfaces),
+        id, name, component, importCode, appliedCode: {}, templates, exportsResources: usesResources(component.interfaces),
         status: 'instantiating', generation: 0,
       };
       this.session = session;
-      this.instantiate(session, {});
+      this.instantiate(session, templates);
     } catch (err) {
       if (id !== this.loadCounter) {
         return;

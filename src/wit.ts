@@ -279,7 +279,8 @@ export class FuncClass extends Type<any> {
     }
 }
 export class ResourceClass extends Type<any> {
-    constructor(public readonly _name: string, public readonly _fields: Record<string, FuncClass>) {
+    // `_interface` is the name of the interface that defines the resource.
+    constructor(public readonly _name: string, public readonly _fields: Record<string, FuncClass>, public readonly _interface: string = '') {
         super();
     }
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
@@ -346,6 +347,7 @@ export class InterfaceClass extends Type<any> {
     get isRoot(): boolean {
         return this._name === ROOT_INTERFACE;
     }
+    // The resources of the interface, including those it `use`s from others.
     public get_resources(): Array<ResourceClass> {
         return Object.entries(this._vars).filter(([_, ty]) => ty instanceof RecClass && ty.get_type() instanceof ResourceClass).map(([_, ty]) => (ty as RecClass).get_type() as ResourceClass);
     }
@@ -392,8 +394,8 @@ export function Func(args: Array<[string, Type]>, ret: [] | [Type], kind: string
 export function Interface(name: string, fields: Record<string, FuncClass>, vars: Record<string, Type> = {}): InterfaceClass {
     return new InterfaceClass(name, fields, vars);
 }
-export function Resource(name: string, fields: Record<string, FuncClass>): ResourceClass {
-    return new ResourceClass(name, fields);
+export function Resource(name: string, fields: Record<string, FuncClass>, iface = ''): ResourceClass {
+    return new ResourceClass(name, fields, iface);
 }
 export function Rec(): RecClass {
     return new RecClass();
