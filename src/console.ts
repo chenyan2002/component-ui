@@ -61,6 +61,8 @@ export interface ImportPrompt {
 export interface ImportLog extends LogEntry {
   // Shows the prompt until the import gets a result or an error.
   ask(prompt: ImportPrompt): void;
+  // A result shown below the call rather than after it, e.g. an HTTP response.
+  detail(text: string): void;
 }
 
 // An import the guest called, under the call that made it, if any.
@@ -69,6 +71,7 @@ interface ImportEntry {
   call: string;
   status: 'pending' | 'ok' | 'error';
   output?: string;
+  detail?: string;
   prompt?: ImportPrompt;
 }
 
@@ -136,6 +139,10 @@ export class ConsolePanel extends LitElement {
     return {
       result: (text) => finish('ok', text),
       error: (err) => finish('error', errorText(err)),
+      detail: (text) => {
+        Object.assign(entry, { status: 'ok', detail: text, prompt: undefined });
+        this.requestUpdate();
+      },
       ask: (prompt) => {
         entry.prompt = prompt;
         this.requestUpdate();
@@ -185,6 +192,7 @@ export class ConsolePanel extends LitElement {
         <code>${entry.call}</code>
         ${entry.output === undefined ? nothing : html`<span class="log-import-output">= <code>${entry.output}</code></span>`}
       </div>
+      ${entry.detail === undefined ? nothing : html`<div class="log-output"><pre>${entry.detail}</pre></div>`}
       ${entry.prompt ? this.renderPrompt(entry.prompt) : nothing}
     </div>`;
   }

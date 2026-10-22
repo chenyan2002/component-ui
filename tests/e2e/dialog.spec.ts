@@ -105,17 +105,18 @@ test('mock host resources stand in for the arguments a host would create', async
   await answerImport(page, 'incomingrequest_host0.authority()');
   await answerImport(page, 'incomingrequest_host0.pathWithQuery()', async (prompt) => {
     await prompt.locator('input[type=checkbox]').check();
-    await prompt.locator('input:not([type=checkbox])').fill('/hello');
+    await prompt.locator('input:not([type=checkbox])').fill('/');
   });
   await answerImport(page, 'incomingrequest_host0.consume()', selectMock('IncomingBody'));
   await answerImport(page, 'incomingbody_host3.stream()', selectMock('InputStream'));
 
   // The guest builds a real response with the shim, and hands it to the mock outparam: the
-  // host can't handle a mock, so that call shows in the console instead.
+  // host can't handle a mock, so that call shows in the console, with the response it sends.
   await expectCall(page, 'handle(incomingrequest_host0, responseoutparam_host1)', 'ok', 'undefined');
   const set = callEntry(page, 'handle(incomingrequest_host0, responseoutparam_host1)')
     .locator('.log-import', { hasText: 'ResponseOutparam.set(responseoutparam_host1' });
-  await expect(set).toContainText('outgoingresponse_host6');
+  await expect(set.locator('.log-call')).toContainText('outgoingresponse_host6');
+  await expect(set.locator('.log-output pre')).toHaveText('HTTP 200\ncontent-length: 30\n\nHello, wasi:http/proxy world!\n');
   await expect(row(page, 'incomingrequest_host0').locator('.instance-type')).toHaveText('IncomingRequest · mock');
   await expect(row(page, 'responseoutparam_host1').locator('wa-tag')).toHaveText('moved');
   await expect(row(page, 'outgoingresponse_host6').locator('.instance-type')).toHaveText('OutgoingResponse');

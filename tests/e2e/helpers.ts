@@ -76,7 +76,8 @@ export function callEntry(page: Page, label: string): Locator {
 export async function expectCall(page: Page, label: string, status: 'ok' | 'error', output: string | RegExp) {
   const entry = callEntry(page, label).last();
   await expect(entry).toHaveClass(new RegExp(`\\b${status}\\b`));
-  await expect(entry.locator('.log-output pre')).toHaveText(output);
+  // The call's own output, not that of the imports it made.
+  await expect(entry.locator(':scope > .log-output pre')).toHaveText(output);
 }
 
 // The prompt of a missing import the guest called; at most one waits at a time.
