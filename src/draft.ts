@@ -1,5 +1,5 @@
 import * as IDL from './wit';
-import { ResourceRegistry } from './resources';
+import { Instance, ResourceRegistry } from './resources';
 
 // A draft is the editable state of an argument form, shaped after its WIT type.
 interface DraftBase {
@@ -30,10 +30,21 @@ export interface MockFactory {
   create(t: IDL.ResourceClass): object;
 }
 
+// Who hands over the instances a resource draft selects: the UI, passing arguments, or the host,
+// returning the result of an import to the guest.
+export type Giver = 'ui' | 'host';
+
+// The instances a resource draft can select, which the giver owns.
+export function instanceChoices(t: IDL.ResourceClass, registry: ResourceRegistry, giver: Giver): Instance[] {
+  return giver === 'host' ? registry.hostOwned(t) : registry.uiOwned(t);
+}
+
 // The instance a resource draft selects. With nothing selected, a new mock if that is the only
-// choice, i.e. there is no live instance.
-export function selectedInstance(t: IDL.ResourceClass, d: TextDraft, registry: ResourceRegistry, mock?: MockFactory): string {
-  return d.text === '' && registry.live(t).length === 0 && mock?.canMock(t) ? NEW_MOCK : d.text;
+// choice, i.e. there is no instance to pick.
+export function selectedInstance(
+  t: IDL.ResourceClass, d: TextDraft, registry: ResourceRegistry, mock?: MockFactory, giver: Giver = 'ui',
+): string {
+  return d.text === '' && instanceChoices(t, registry, giver).length === 0 && mock?.canMock(t) ? NEW_MOCK : d.text;
 }
 
 const MAX_LIST_LENGTH = 100;
@@ -108,7 +119,7 @@ function randomNumber(signed: boolean): number {
 
 // Fills empty (or previously randomized) values in place, leaving user input alone.
 class Randomize extends IDL.Visitor<Draft, void> {
-  constructor(private readonly registry: ResourceRegistry, private readonly mock?: MockFactory) {
+  constructor(private readonly registry: ResourceRegistry, private readonly mock?: MockFactory, private readonly giver: Giver = 'ui') {
     super();
   }
   public visitType<T>(_t: IDL.Type<T>, _d: Draft): void {}
@@ -129,13 +140,13 @@ class Randomize extends IDL.Visitor<Draft, void> {
   }
   public visitResource(t: IDL.ResourceClass, d: Draft): void {
     const text = d as TextDraft;
-    // A new mock only when there is no live instance to pick.
-    const choices = this.registry.live(t).map((i) => i.id);
+    // A new mock only when there is no instance to pick.
+    const choices = instanceChoices(t, this.registry, this.giver).map((i) => i.id);
     if (choices.length === 0 && this.mock?.canMock(t)) {
       choices.push(NEW_MOCK);
     }
-    // Also replace a selection that is no longer live, e.g. after it was moved.
-    const selected = text.text === NEW_MOCK || this.registry.get(text.text)?.state === 'live';
+    // Also replace a selection that is no longer a choice, e.g. after it was moved.
+    const selected = text.text === NEW_MOCK || choices.includes(text.text);
     if (choices.length > 0 && (text.text === '' || text.auto || !selected)) {
       text.text = choices[randomInt(choices.length)];
       text.auto = true;
@@ -191,8 +202,8 @@ class Randomize extends IDL.Visitor<Draft, void> {
   }
 }
 
-export function randomize(t: IDL.Type, d: Draft, registry: ResourceRegistry, mock?: MockFactory) {
-  t.accept(new Randomize(registry, mock), d);
+export function randomize(t: IDL.Type, d: Draft, registry: ResourceRegistry, mock?: MockFactory, giver: Giver = 'ui') {
+  t.accept(new Randomize(registry, mock, giver), d);
 }
 
 // Converts to the JS representation jco expects: `number` up to 32 bits, `bigint` above.
@@ -216,7 +227,7 @@ function parseInteger(bits: number, signed: boolean, text: string): number | big
 // Converts a draft into the JS value jco expects. Invalid drafts get an `error`
 // and yield INVALID; every field is visited so all errors show at once.
 class Parse extends IDL.Visitor<Draft, any> {
-  constructor(private readonly registry: ResourceRegistry, private readonly mock?: MockFactory) {
+  constructor(private readonly registry: ResourceRegistry, private readonly mock?: MockFactory, private readonly giver: Giver = 'ui') {
     super();
   }
   public visitType<T>(t: IDL.Type<T>, d: Draft): any {
@@ -251,16 +262,17 @@ class Parse extends IDL.Visitor<Draft, any> {
   }
   public visitResource(t: IDL.ResourceClass, d: Draft): any {
     return this.leaf(d, () => {
-      const id = selectedInstance(t, d as TextDraft, this.registry, this.mock);
+      const id = selectedInstance(t, d as TextDraft, this.registry, this.mock, this.giver);
       if (id === NEW_MOCK && this.mock?.canMock(t)) {
         return this.mock.create(t);
       }
+      const choices = instanceChoices(t, this.registry, this.giver);
       const instance = this.registry.get(id);
       if (!instance) {
-        throw new Error(this.registry.live(t).length > 0 ? 'Select an instance' : `No ${t._name} instances yet`);
+        throw new Error(choices.length > 0 ? 'Select an instance' : `No ${t._name} instances yet`);
       }
-      if (instance.state !== 'live') {
-        throw new Error(`${id} was ${instance.fate}`);
+      if (!choices.includes(instance)) {
+        throw new Error(instance.state === 'live' ? `${id} is held by the guest` : `${id} was ${instance.fate}`);
       }
       return instance.obj;
     });
@@ -329,8 +341,8 @@ class Parse extends IDL.Visitor<Draft, any> {
 }
 
 // Parses a single value, recording errors on the draft. Returns INVALID on failure.
-export function parseDraft(t: IDL.Type, d: Draft, registry: ResourceRegistry, mock?: MockFactory): any {
-  return t.accept(new Parse(registry, mock), d);
+export function parseDraft(t: IDL.Type, d: Draft, registry: ResourceRegistry, mock?: MockFactory, giver: Giver = 'ui'): any {
+  return t.accept(new Parse(registry, mock, giver), d);
 }
 
 // Parses all arguments, or returns undefined if any of them is invalid.

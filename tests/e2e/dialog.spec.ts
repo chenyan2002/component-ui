@@ -51,6 +51,32 @@ test('a missing host resource is mocked, and its calls ask for their results', a
     .toHaveText(['moved', 'dropped', 'moved', 'moved', 'dropped', 'dropped']);
 });
 
+test('an import returns instances the host owns, not those the guest holds', async ({ page }) => {
+  await loadResource(page);
+  await call(funcCard(page, 'testImports'));
+  const returns = (choices: string[], pick: string) => async (prompt: ReturnType<typeof importPrompt>) => {
+    await expect(prompt.locator('select option:not([disabled])')).toHaveText(choices);
+    await prompt.locator('select').selectOption({ label: pick });
+  };
+  await answerImport(page, 'y_host0.getA()', s32('10'));
+  await answerImport(page, 'y_host0.getA()', s32('20'));
+  // The guest moved y_host0 into the call, so the host can hand it back.
+  await answerImport(page, 'Y.add(y_host0, 10)', returns(['New mock Y', 'y_host0'], 'y_host0'));
+  await answerImport(page, 'y_host0.getA()', s32('30'));
+  await answerImport(page, 'y_host1.getA()', s32('1'));
+  await answerImport(page, 'y_host2.getA()', s32('2'));
+  await answerImport(page, 'y_host1.getA()', s32('10'));
+  await answerImport(page, 'y_host2.getA()', s32('20'));
+  // The guest still holds y_host2, and dropped y_host0.
+  await answerImport(page, 'Y.add(y_host1, 20)', returns(['New mock Y', 'y_host1'], 'New mock Y'));
+  await answerImport(page, 'Y.add(y_host2, 30)', returns(['New mock Y', 'y_host1', 'y_host2'], 'New mock Y'));
+  await answerImport(page, 'y_host3.getA()', s32('30'));
+  await answerImport(page, 'y_host4.getA()', s32('50'));
+  await expectCall(page, 'testImports()', 'ok', 'undefined');
+  await expect(page.locator('resource-table tr.resource-row wa-tag'))
+    .toHaveText(['dropped', 'moved', 'moved', 'dropped', 'dropped']);
+});
+
 test('a partial stub only asks for what it leaves out', async ({ page }) => {
   await loadResource(page, [
     'export class Y {',

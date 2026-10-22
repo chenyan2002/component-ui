@@ -3,8 +3,8 @@ import { classMap } from 'lit/directives/class-map.js';
 import { live } from 'lit/directives/live.js';
 import * as IDL from './wit';
 import {
-  BoolDraft, CaseDraft, Draft, FieldsDraft, ListDraft, MockFactory, NEW_MOCK, OptDraft, TextDraft,
-  parseDraft, resizeList, selectCase, selectedInstance, setSome,
+  BoolDraft, CaseDraft, Draft, FieldsDraft, Giver, ListDraft, MockFactory, NEW_MOCK, OptDraft, TextDraft,
+  instanceChoices, parseDraft, resizeList, selectCase, selectedInstance, setSome,
 } from './draft';
 import { ResourceRegistry } from './resources';
 
@@ -16,6 +16,8 @@ export interface FormContext {
   registry: ResourceRegistry;
   // For an import's result, resource pickers also offer a new mock instance.
   mock?: MockFactory;
+  // Who hands over the resource instances picked, `ui` by default.
+  giver?: Giver;
 }
 
 interface RenderData {
@@ -53,7 +55,7 @@ class Render extends IDL.Visitor<RenderData, Rendered> {
       }}
       @blur=${() => {
         if (text.text !== '') {
-          parseDraft(t, d, ctx.registry, ctx.mock);
+          parseDraft(t, d, ctx.registry, ctx.mock, ctx.giver);
           ctx.update();
         }
       }}
@@ -73,12 +75,13 @@ class Render extends IDL.Visitor<RenderData, Rendered> {
       }}
     />`;
   }
-  // Picks one of the live instances of the resource.
+  // Picks one of the instances of the resource the giver owns.
   public visitResource(t: IDL.ResourceClass, { d, ctx }: RenderData): Rendered {
     const text = d as TextDraft;
-    const instances = ctx.registry.live(t);
+    const giver = ctx.giver ?? 'ui';
+    const instances = instanceChoices(t, ctx.registry, giver);
     const mock = !!ctx.mock?.canMock(t);
-    const id = selectedInstance(t, text, ctx.registry, ctx.mock);
+    const id = selectedInstance(t, text, ctx.registry, ctx.mock, giver);
     const selected = instances.some((i) => i.id === id) || (mock && id === NEW_MOCK);
     return html`<select
       class=${controlClass(d)}
