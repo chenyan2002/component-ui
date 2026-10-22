@@ -5,8 +5,8 @@ import { ifDefined } from 'lit/directives/if-defined.js';
 import { live } from 'lit/directives/live.js';
 import * as IDL from './wit';
 import {
-  BoolDraft, CaseDraft, Draft, FieldsDraft, Giver, ListDraft, MAX_LIST_LENGTH, MockFactory, NEW_MOCK, OptDraft, TextDraft,
-  instanceChoices, parseDraft, removeItem, resizeList, selectCase, selectedInstance, setSome, setTextItems,
+  BoolDraft, ByteEncoding, BytesDraft, CaseDraft, Draft, FieldsDraft, Giver, ListDraft, MAX_LIST_LENGTH, MockFactory, NEW_MOCK, OptDraft, TextDraft,
+  bytesOf, instanceChoices, parseDraft, removeItem, resizeList, selectCase, selectedInstance, setEncoding, setSome, setTextItems,
 } from './draft';
 import { ResourceRegistry } from './resources';
 
@@ -199,7 +199,10 @@ class Render extends IDL.Visitor<RenderData, Rendered> {
       ${opt.some ? subform([renderField(ty, opt.inner!, ctx)]) : nothing}
     `;
   }
-  public visitVec(_t: IDL.VecClass, ty: IDL.Type, data: RenderData): Rendered {
+  public visitVec(t: IDL.VecClass, ty: IDL.Type, data: RenderData): Rendered {
+    if (data.d.kind === 'bytes') {
+      return renderBytes(t, data);
+    }
     return isNumber(ty) ? renderTags(ty, data) : renderItems(ty, data);
   }
   public visitRecord(_t: IDL.RecordClass, fields: Record<string, IDL.Type>, { d, ctx }: RenderData): Rendered {
@@ -246,7 +249,7 @@ class Render extends IDL.Visitor<RenderData, Rendered> {
   }
 }
 
-function editText(d: TextDraft, text: string, ctx: FormContext) {
+function editText(d: TextDraft | BytesDraft, text: string, ctx: FormContext) {
   d.text = text;
   d.auto = false;
   d.error = undefined;
@@ -254,7 +257,7 @@ function editText(d: TextDraft, text: string, ctx: FormContext) {
 }
 
 // Checks the value once the user is done editing it.
-function commitText(t: IDL.Type, d: TextDraft, ctx: FormContext) {
+function commitText(t: IDL.Type, d: TextDraft | BytesDraft, ctx: FormContext) {
   if (d.text !== '') {
     parseDraft(t, d, ctx.registry, ctx.mock, ctx.giver);
     ctx.update();
@@ -284,6 +287,40 @@ function renderNumber(t: IDL.Type, { d, ctx }: RenderData, { min, max, float, di
     @change=${edit}
     @blur=${() => commitText(t, text, ctx)}
   ></wa-number-input>`;
+}
+
+const BYTE_ENCODINGS: ByteEncoding[] = ['text', 'hex'];
+
+// A `list<u8>` is typed as text, sent as its UTF-8 bytes, or as hex for other bytes.
+function renderBytes(t: IDL.Type, { d, ctx }: RenderData): Rendered {
+  const bytes = d as BytesDraft;
+  let count = '';
+  try {
+    const n = bytesOf(bytes).length;
+    count = `${n} byte${n === 1 ? '' : 's'}`;
+  } catch {
+    // Shown as the field's error once parsed.
+  }
+  return html`
+    <div class="bytes-mode">
+      ${renderCases(bytes, BYTE_ENCODINGS, BYTE_ENCODINGS.indexOf(bytes.encoding), (index) => {
+        setEncoding(bytes, BYTE_ENCODINGS[index]);
+        ctx.update();
+      })}
+      <span class="muted">${count}</span>
+    </div>
+    <wa-textarea
+      size="s"
+      rows="1"
+      resize="auto"
+      class=${controlClass(d, { bytes: true, hex: bytes.encoding === 'hex' })}
+      placeholder=${bytes.encoding === 'text' ? 'UTF-8 text' : 'hex bytes, e.g. 48 69'}
+      .spellcheck=${false}
+      .value=${live(bytes.text)}
+      @input=${(e: Event) => editText(bytes, inputValue(e), ctx)}
+      @blur=${() => commitText(t, bytes, ctx)}
+    ></wa-textarea>
+  `;
 }
 
 // A list of numbers is typed, or pasted, as tags; each is checked as it is added.

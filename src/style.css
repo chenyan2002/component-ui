@@ -362,6 +362,14 @@ wa-radio-group.result wa-radio[value='err']:state(checked) {
   border-color: var(--wa-color-danger-border-loud);
   background-color: var(--wa-color-danger-fill-quiet);
 }
+.bytes-mode {
+  display: flex;
+  align-items: center;
+  gap: var(--wa-space-s);
+}
+.field wa-textarea.hex::part(textarea) {
+  font-family: var(--wa-font-family-code);
+}
 .field-heading {
   display: flex;
   align-items: center;

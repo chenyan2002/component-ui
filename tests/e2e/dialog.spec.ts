@@ -124,21 +124,30 @@ test('mock host resources stand in for the arguments a host would create', async
   await answerImport(page, '#borrowed-host-incomingrequest-1.headers()', async (prompt) => {
     await expect(chosen(picker(prompt))).toHaveText('New mock Fields');
   });
-  // Items are added and removed one by one; a list of bytes is typed as tags, rejecting those out of range.
+  // Items are added and removed one by one. A `list<u8>` is typed as text, sent as UTF-8, or as hex.
   await answerImport(page, '#borrowed-host-fields-3.entries()', async (prompt) => {
-    await prompt.locator('wa-button', { hasText: 'Add item' }).click();
+    const add = prompt.locator('wa-button', { hasText: 'Add item' });
+    await add.click();
+    await add.click();
+    await prompt.locator('.remove-item').nth(1).click();
+    await expect(prompt.locator('.remove-item')).toHaveCount(1);
     await prompt.locator('wa-input input').fill('x-id');
-    const bytes = prompt.locator('wa-tag-input');
-    await bytes.locator('input').fill('1, 256, 2 ');
-    await expect(bytes.locator('wa-tag')).toHaveText(['1', '2']);
-    await expect(prompt.locator('.field-error')).toHaveText('Out of range for u8: [0, 255]');
-    await bytes.locator('input').fill('');
-    await expect(prompt.locator('.field-error')).toHaveCount(0);
-    // Headers would change what the guest does next, so return none.
-    await prompt.locator('.remove-item').click();
-    await expect(prompt.locator('wa-tag-input')).toHaveCount(0);
+    const bytes = prompt.locator('wa-textarea textarea');
+    await bytes.fill('hé');
+    await expect(prompt.locator('.bytes-mode')).toContainText('3 bytes');
+    await choose(picker(prompt), 'hex');
+    await expect(bytes).toHaveValue('68 c3 a9');
+    await bytes.fill('68 c3 zz');
+    await bytes.blur();
+    await expect(prompt.locator('.field-error')).toHaveText('Expected hex bytes, e.g. "48 69"');
+    // Bytes that aren't UTF-8 can't be shown as text, so they stay hex.
+    await bytes.fill('68 69 ff');
+    await choose(picker(prompt), 'text');
+    await expect(prompt.locator('.field-error')).toHaveText("These bytes aren't valid UTF-8 text");
+    await expect(chosen(picker(prompt))).toHaveText('hex');
+    await bytes.fill('0x68,0x69');
   });
-  await expect(page.locator('.log-import').filter({ hasText: 'entries()' }).locator('.log-import-output code')).toHaveText('[]');
+  await expect(page.locator('.log-import').filter({ hasText: 'entries()' }).locator('.log-import-output code')).toHaveText('[("x-id", [104, 105])]');
   await answerImport(page, '#borrowed-host-incomingrequest-1.method()', (prompt) => choose(picker(prompt), 'get'));
   await answerImport(page, '#borrowed-host-incomingrequest-1.scheme()');
   await answerImport(page, '#borrowed-host-incomingrequest-1.authority()');
