@@ -5,7 +5,7 @@ import { Draft, MockFactory } from './draft';
 import { renderField, typeName } from './form';
 import { ResourceRegistry } from './resources';
 
-// Marks a string produced by `describe` so it is shown unquoted.
+// Marks a string shown unquoted: a name from `describe`, or a `bigint` (e.g. a `u64`).
 const RAW = '\uE000';
 
 // Pretty-prints a value; `describe` can replace objects (e.g. resource handles) by a name.
@@ -18,7 +18,10 @@ export function customStringify(obj: any, describe?: (value: any) => string | un
     if (name !== undefined) {
       return RAW + name;
     }
-    if (typeof value === 'function' || typeof value === 'bigint' || typeof value === 'symbol') {
+    if (typeof value === 'bigint') {
+      return RAW + value.toString();
+    }
+    if (typeof value === 'function' || typeof value === 'symbol') {
       return value.toString();
     }
     if (value instanceof Uint8Array) {

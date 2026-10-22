@@ -14,7 +14,6 @@ import './resource-table';
 
 const EXAMPLES: Array<[file: string, label: string]> = [
   ['calculator.wasm', 'Calculator'],
-  ['adder.wasm', 'Adder'],
   ['variants.wasm', 'Variants'],
   ['resource.wasm', 'Resource'],
   ['wasi-http.wasm', 'WASI HTTP'],

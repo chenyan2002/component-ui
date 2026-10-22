@@ -112,7 +112,8 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   await arg(getMethod, 0).locator('select').selectOption('request_host0');
   await arg(getMethod, 1).locator('input').fill('10');
   await call(getMethod);
-  await expectCall(page, 'request_host0.getMethod("10")', 'ok', '"POST"');
+  // A `u64` is a `bigint`, shown as a number.
+  await expectCall(page, 'request_host0.getMethod(10)', 'ok', '"POST"');
 
   // The guest accepts them; imports the stubs leave out ask for their results.
   const handle = funcCard(page, 'handle');
@@ -130,11 +131,12 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   await expectCall(page, 'handle(request_host0, pollable_host1)', 'error', /^Trapped at /);
 });
 
-test('adder: rejects invalid numbers without calling', async ({ page }) => {
-  await loadExample(page, 'adder.wasm');
-  const card = funcCard(page, 'add');
-  await arg(card, 0).locator('input').fill('abc');
-  await arg(card, 1).locator('input').fill('4294967296');
+test('calculator: rejects invalid numbers without calling', async ({ page }) => {
+  await loadExample(page, 'calculator.wasm');
+  const card = funcCard(page, 'evalExpression');
+  await arg(card, 0).locator('select').selectOption('add');
+  await arg(card, 1).locator('input').fill('abc');
+  await arg(card, 2).locator('input').fill('4294967296');
   await call(card);
   await expect(card.locator('.field-error')).toHaveText([
     'Expected an integer, got "abc"',
@@ -142,23 +144,28 @@ test('adder: rejects invalid numbers without calling', async ({ page }) => {
   ]);
   await expect(callEntries(page)).toHaveCount(0);
 
-  await arg(card, 0).locator('input').fill('40');
-  await arg(card, 1).locator('input').fill('2');
+  await arg(card, 1).locator('input').fill('40');
+  await arg(card, 2).locator('input').fill('2');
   await call(card);
-  await expectCall(page, 'add(40, 2)', 'ok', '42');
+  await answerImport(page, 'docs:adder/add#add(40, 2)', (prompt) => prompt.locator('input').fill('42'));
+  await expectCall(page, 'evalExpression("add", 40, 2)', 'ok', '42');
 });
 
-test('adder: Random fills empty fields and keeps typed ones', async ({ page }) => {
-  await loadExample(page, 'adder.wasm');
-  const card = funcCard(page, 'add');
-  await arg(card, 0).locator('input').fill('5');
-  await call(card, 'Random');
-  await call(card, 'Random');
+test('calculator: Random fills empty fields and keeps typed ones', async ({ page }) => {
+  await loadExample(page, 'calculator.wasm');
+  const card = funcCard(page, 'evalExpression');
+  await arg(card, 1).locator('input').fill('5');
+  for (let i = 0; i < 2; i++) {
+    await call(card, 'Random');
+    await answerImport(page, (await page.locator('.log-import').last().locator('.log-call code').first().textContent())!,
+      (prompt) => prompt.locator('wa-button', { hasText: 'Random' }).click());
+  }
   await expect(callEntries(page)).toHaveCount(2);
-  await expect(callEntries(page).locator('.log-call code')).toHaveText([/^add\(5, \d+\)$/, /^add\(5, \d+\)$/]);
-  // The generated value is shown in the form, marked as generated.
-  await expect(arg(card, 1).locator('input')).toHaveClass(/\bauto\b/);
-  await expect(arg(card, 1).locator('input')).not.toHaveValue('');
+  await expect(callEntries(page).locator(':scope > .log-call code'))
+    .toHaveText([/^evalExpression\("add", 5, \d+\)$/, /^evalExpression\("add", 5, \d+\)$/]);
+  // The generated values are shown in the form, marked as generated.
+  await expect(arg(card, 2).locator('input')).toHaveClass(/\bauto\b/);
+  await expect(arg(card, 2).locator('input')).not.toHaveValue('');
 });
 
 test.describe('variants', () => {
@@ -223,9 +230,9 @@ test('wasi-http: renders the handler and its resources', async ({ page }) => {
 
 test('loading: upload, switching components and rejecting other files', async ({ page }) => {
   await page.goto('./');
-  await page.locator('#wasmFileInput').setInputFiles(path.join(PUBLIC_DIR, 'adder.wasm'));
-  await expect(page.locator('#componentName')).toHaveText('adder.wasm');
-  await call(funcCard(page, 'add'), 'Random');
+  await page.locator('#wasmFileInput').setInputFiles(path.join(PUBLIC_DIR, 'printer.wasm'));
+  await expect(page.locator('#componentName')).toHaveText('printer.wasm');
+  await call(funcCard(page, 'greet'), 'Random');
   await expect(callEntries(page)).toHaveCount(1);
 
   // Switching components replaces the workspace and clears the console.
