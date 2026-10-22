@@ -73,7 +73,8 @@ export class ComponentApp extends LitElement {
   @query('console-panel') accessor consolePanel!: ConsolePanel | null;
   @query('#wasmFileInput') accessor fileInput!: HTMLInputElement;
   @query('.component-pane') accessor componentPane!: HTMLElement | null;
-  @query('#importsCard') accessor importsCard!: (HTMLElement & { open: boolean }) | null;
+  // Whether the dialog implementing imports in JavaScript is open.
+  @state() accessor editingImports = false;
 
   // Guards against a slow load finishing after a newer one has started.
   private loadCounter = 0;
@@ -211,23 +212,47 @@ export class ComponentApp extends LitElement {
     </wa-split-panel>`;
   }
 
-  // Collapsed, since calls to imports ask in the console by default. Expand it to implement
-  // imports in JavaScript instead, and restart the component with them. It opens if that fails.
+  // Calls to imports ask in the console by default. The dialog implements them in JavaScript
+  // instead, and restarts the component with them; it stays open if that fails.
   private renderImports(s: Session) {
     const count = s.component.customImports.length;
     const implemented = Object.entries(s.appliedCode).filter(([pkg, code]) => code.trim() !== '' && code !== s.templates[pkg]).length;
-    return html`<wa-details id="importsCard" class="imports-card" .open=${s.status === 'failed'}>
-      <div slot="summary" class="card-title">
+    const pending = s.component.customImports.some((pkg) => (s.importCode[pkg] ?? '') !== (s.appliedCode[pkg] ?? ''));
+    return html`<div id="importsCard" class="imports-card">
+      <div class="card-title">
         <span class="imports-title">
           Imports
           <wa-badge variant="neutral" appearance="filled" pill>${count} interface${count === 1 ? '' : 's'}</wa-badge>
           ${implemented > 0 ? html`<wa-tag size="s" variant="brand">${implemented} in JavaScript</wa-tag>` : nothing}
         </span>
         <span class="muted">
-          Calls to imports ask for their results in the console. Expand to implement imports in
-          JavaScript instead; the functions you leave out still ask.
+          Calls to imports ask for their results in the console. Implement them in JavaScript
+          instead; the functions you leave out still ask.
         </span>
       </div>
+      <wa-button id="editImportsButton" appearance="outlined" size="s" @click=${() => (this.editingImports = true)}>
+        <wa-icon slot="start" name="code"></wa-icon>
+        Implement in JavaScript
+      </wa-button>
+    </div>
+    <wa-dialog
+      id="importsDialog"
+      class="imports-dialog"
+      label="Implement imports in JavaScript"
+      .open=${this.editingImports}
+      @wa-after-hide=${(e: Event) => {
+        if (e.target === e.currentTarget) {
+          this.editingImports = false;
+        }
+      }}
+    >
+      <p class="muted imports-help">
+        Each interface is an ES module exporting its functions and resource classes. The functions
+        you leave out ask for their results in the console.
+      </p>
+      ${s.status === 'failed'
+        ? html`<wa-callout variant="danger"><strong>Instantiation failed</strong><br />${errorMessage(s.error)}</wa-callout>`
+        : nothing}
       <div class="imports">
         ${s.component.customImports.map((pkg) => html`<wa-textarea
           class="code-editor"
@@ -242,7 +267,8 @@ export class ComponentApp extends LitElement {
           }}
         ></wa-textarea>`)}
       </div>
-      <div class="func-actions">
+      <div slot="footer" class="func-actions">
+        ${pending ? html`<span class="muted imports-pending">Not applied yet</span>` : nothing}
         <wa-button
           id="applyImportsButton"
           variant="brand"
@@ -253,11 +279,8 @@ export class ComponentApp extends LitElement {
           <wa-icon slot="start" name="rotate-right"></wa-icon>
           Apply and restart
         </wa-button>
-        ${s.component.customImports.some((pkg) => (s.importCode[pkg] ?? '') !== (s.appliedCode[pkg] ?? ''))
-          ? html`<span class="muted imports-pending">Not applied yet</span>`
-          : nothing}
       </div>
-    </wa-details>`;
+    </wa-dialog>`;
   }
 
   private renderExportsArea(s: Session) {
@@ -291,6 +314,7 @@ export class ComponentApp extends LitElement {
         status: 'instantiating', generation: 0,
       };
       this.session = session;
+      this.editingImports = false;
       this.instantiate(session, templates);
     } catch (err) {
       if (id !== this.loadCounter) {
@@ -340,11 +364,9 @@ export class ComponentApp extends LitElement {
     }
     this.requestUpdate();
     if (s.status === 'ready') {
-      // Applied imports collapse; show the beginning of the exports.
+      // Applied imports close the dialog; show the beginning of the exports.
+      this.editingImports = false;
       await this.updateComplete;
-      if (this.importsCard) {
-        this.importsCard.open = false;
-      }
       this.componentPane?.scrollTo({ top: 0 });
     }
   }

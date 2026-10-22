@@ -22,16 +22,21 @@ export async function loadExample(page: Page, file: string) {
 
 // Implements imports in JavaScript, keyed by package, and restarts the component with them.
 export async function applyImports(page: Page, code: Record<string, string>) {
-  const card = page.locator('#importsCard');
-  if ((await card.getAttribute('open')) === null) {
-    await card.locator('.card-title').click();
-  }
+  const dialog = await openImports(page);
   for (const [pkg, source] of Object.entries(code)) {
-    await card.locator(`wa-textarea[label="${pkg}"] textarea`).fill(source);
+    await dialog.locator(`wa-textarea[label="${pkg}"] textarea`).fill(source);
   }
-  await card.locator('#applyImportsButton').click();
-  // The card collapses once the new instance is ready.
-  await expect(card).not.toHaveAttribute('open');
+  await dialog.locator('#applyImportsButton').click();
+  // The dialog closes once the new instance is ready.
+  await expect(dialog).not.toHaveAttribute('open');
+}
+
+// Opens the dialog implementing imports in JavaScript.
+export async function openImports(page: Page): Promise<Locator> {
+  const dialog = page.locator('#importsDialog');
+  await page.locator('#editImportsButton').click();
+  await expect(dialog).toHaveAttribute('open');
+  return dialog;
 }
 
 // The card of the exported function `name`, e.g. `add` or `constructor`.
@@ -42,6 +47,33 @@ export function funcCard(scope: Page | Locator, name: string): Locator {
 // The `i`-th argument field of a function card.
 export function arg(card: Locator, i: number): Locator {
   return card.locator('.func-args > .field').nth(i);
+}
+
+// The `i`-th case or instance picker in `scope`: a row of buttons, or a dropdown for many choices.
+export function picker(scope: Locator, i = 0): Locator {
+  return scope.locator('wa-radio-group, wa-select').nth(i);
+}
+
+// Picks the choice with the value `choice`, e.g. a case or an instance id, or the one labeled `label`.
+export async function choose(picker: Locator, choice: string | { label: string }) {
+  const buttons = await picker.evaluate((e) => e.localName === 'wa-radio-group');
+  const item = buttons ? 'wa-radio' : 'wa-option';
+  if (!buttons) {
+    await picker.click();
+  }
+  await (typeof choice === 'string'
+    ? picker.locator(`${item}[value="${choice}"]`)
+    : picker.getByRole(buttons ? 'radio' : 'option', { name: choice.label, exact: true })).click();
+  await expect(chosen(picker)).toHaveCount(1);
+}
+
+// The choices a picker offers, and the one picked.
+export function choices(picker: Locator): Locator {
+  return picker.locator('wa-radio:not([disabled]), wa-option:not([disabled])');
+}
+
+export function chosen(picker: Locator): Locator {
+  return picker.locator('wa-radio:state(checked), wa-option:state(selected)');
 }
 
 export async function call(card: Locator, button: 'Call' | 'Random' = 'Call') {

@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import {
-  answerImport, applyImports, arg, call, callEntries, callEntry, expectCall, funcCard, importPrompt, loadExample, resource, row,
+  answerImport, applyImports, arg, call, callEntries, callEntry, choices, choose, expectCall, funcCard, importPrompt, loadExample,
+  openImports, picker, resource, row,
   streamEntries,
 } from './helpers';
 
@@ -32,14 +33,14 @@ test('a browser without JSPI gets a message instead of the app', async ({ page }
 });
 
 test('calculator: imports are answered in the console, or implemented in JavaScript', async ({ page }) => {
-  // It instantiates right away; the imports card is collapsed.
+  // It instantiates right away, with no imports in JavaScript yet.
   await loadExample(page, 'calculator.wasm');
   const imports = page.locator('#importsCard');
-  await expect(imports).not.toHaveAttribute('open');
+  await expect(page.locator('#importsDialog')).not.toHaveAttribute('open');
   await expect(imports.locator('.imports-title wa-tag')).toHaveCount(0);
   const add = async () => {
     const card = funcCard(page, 'evalExpression');
-    await arg(card, 0).locator('select').selectOption('add');
+    await choose(picker(arg(card, 0)), 'add');
     await arg(card, 1).locator('input').fill('2');
     await arg(card, 2).locator('input').fill('3');
     await call(card);
@@ -48,20 +49,35 @@ test('calculator: imports are answered in the console, or implemented in JavaScr
   await answerImport(page, 'docs:adder/add#add(2, 3)', (prompt) => prompt.locator('input').fill('5'));
   await expectCall(page, 'evalExpression(add, 2, 3)', 'ok', '5');
 
-  // Expanding the card shows example code, which takes effect once applied.
-  await imports.locator('.card-title').click();
-  const stub = imports.locator('wa-textarea[label="docs:adder/add"]');
+  // The dialog shows example code, which takes effect once applied.
+  const dialog = await openImports(page);
+  const stub = dialog.locator('wa-textarea[label="docs:adder/add"]');
   await expect(stub).toHaveJSProperty('value', 'export function add(a, b) { return a + b }');
-  await expect(imports.locator('.imports-pending')).toHaveText('Not applied yet');
-  await imports.locator('#applyImportsButton').click();
-  await expect(imports).not.toHaveAttribute('open');
+  await expect(dialog.locator('.imports-pending')).toHaveText('Not applied yet');
+  await dialog.locator('#applyImportsButton').click();
+  await expect(dialog).not.toHaveAttribute('open');
   await expect(imports.locator('.imports-title wa-tag')).toHaveText('1 in JavaScript');
-  await expect(imports.locator('.imports-pending')).toHaveCount(0);
+  await expect(dialog.locator('.imports-pending')).toHaveCount(0);
   await add();
   await expect(callEntries(page).last().locator('.log-import')).toHaveCount(0);
   await expectCall(page, 'evalExpression(add, 2, 3)', 'ok', '5');
   // Nothing involves resources, so the resource table stays collapsed.
   await expect(page.locator('.resource-pane')).toBeHidden();
+});
+
+test('calculator: imports that fail to apply keep the dialog open, with the error', async ({ page }) => {
+  await loadExample(page, 'calculator.wasm');
+  const dialog = await openImports(page);
+  const stub = dialog.locator('wa-textarea[label="docs:adder/add"] textarea');
+  await stub.fill('export function add(a, b) {');
+  await dialog.locator('#applyImportsButton').click();
+  await expect(dialog.locator('wa-callout[variant="danger"]')).toContainText('Instantiation failed');
+  await expect(dialog).toHaveAttribute('open');
+  // Fixing the code and applying again closes it.
+  await stub.fill('export function add(a, b) { return a + b }');
+  await dialog.locator('#applyImportsButton').click();
+  await expect(dialog).not.toHaveAttribute('open');
+  await expect(funcCard(page, 'evalExpression')).toBeVisible();
 });
 
 test('kv-store: instantiates with its Fastly imports answered in the console', async ({ page }) => {
@@ -71,7 +87,7 @@ test('kv-store: instantiates with its Fastly imports answered in the console', a
   await expect(page.locator('wa-details.resource', { hasText: 'Request' })).not.toHaveAttribute('open');
   await expect(page.locator('.section-summary code', { hasText: 'fastly:compute/http-incoming@0.1.0' })).toBeVisible();
   // `body` is `pollable` renamed by a `use` in http-body, then used again by http-incoming.
-  await expect(arg(funcCard(page, 'handle'), 1).locator('.field-type')).toHaveText('own<Pollable>');
+  await expect(arg(funcCard(page, 'handle'), 1).locator('.field-type')).toHaveText('Pollable');
   // Every card renders its signature; a type that failed to resolve leaves one blank.
   const cards = page.locator('func-card');
   await expect(cards.locator('.sig-name')).toHaveCount(await cards.count());
@@ -105,11 +121,11 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   await expectCall(page, 'Pollable.newReady()', 'ok', '#host-pollable-2');
 
   const setMethod = funcCard(request, 'setMethod');
-  await arg(setMethod, 0).locator('select').selectOption('host-request-1');
+  await choose(picker(arg(setMethod, 0)), 'host-request-1');
   await arg(setMethod, 1).locator('input').fill('POST');
   await call(setMethod);
   const getMethod = funcCard(request, 'getMethod');
-  await arg(getMethod, 0).locator('select').selectOption('host-request-1');
+  await choose(picker(arg(getMethod, 0)), 'host-request-1');
   await arg(getMethod, 1).locator('input').fill('10');
   await call(getMethod);
   // A `u64` is a `bigint`, shown as a number.
@@ -117,12 +133,12 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
 
   // The guest accepts them; imports the stubs leave out ask for their results.
   const handle = funcCard(page, 'handle');
-  await arg(handle, 0).locator('select').selectOption('host-request-1');
-  await arg(handle, 1).locator('select').selectOption('host-pollable-2');
+  await choose(picker(arg(handle, 0)), 'host-request-1');
+  await choose(picker(arg(handle, 1)), 'host-pollable-2');
   await call(handle);
   await answerImport(page, 'fastly:private/privileged-kv-store-service#get()', async (prompt) => {
-    await prompt.locator('select').first().selectOption('ok');
-    await prompt.locator('select').nth(1).selectOption({ label: 'New mock Service' });
+    await choose(picker(prompt), 'ok');
+    await choose(picker(prompt, 1), { label: 'New mock Service' });
   });
   await expect(row(page, 'host-service-3').locator('.instance-type')).toHaveText('Service · mock');
   // The guest goes on to the next import; failing it fails the call.
@@ -134,12 +150,12 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
 test('calculator: rejects invalid numbers without calling', async ({ page }) => {
   await loadExample(page, 'calculator.wasm');
   const card = funcCard(page, 'evalExpression');
-  await arg(card, 0).locator('select').selectOption('add');
-  await arg(card, 1).locator('input').fill('abc');
+  await choose(picker(arg(card, 0)), 'add');
+  await arg(card, 1).locator('input').fill('1.5');
   await arg(card, 2).locator('input').fill('4294967296');
   await call(card);
   await expect(card.locator('.field-error')).toHaveText([
-    'Expected an integer, got "abc"',
+    'Expected an integer, got "1.5"',
     'Out of range for u32: [0, 4294967295]',
   ]);
   await expect(callEntries(page)).toHaveCount(0);
@@ -164,7 +180,7 @@ test('calculator: Random fills empty fields and keeps typed ones', async ({ page
   await expect(callEntries(page).locator(':scope > .log-call code'))
     .toHaveText([/^evalExpression\(add, 5, \d+\)$/, /^evalExpression\(add, 5, \d+\)$/]);
   // The generated values are shown in the form, marked as generated.
-  await expect(arg(card, 2).locator('input')).toHaveClass(/\bauto\b/);
+  await expect(arg(card, 2).locator('wa-number-input')).toHaveClass(/\bauto\b/);
   await expect(arg(card, 2).locator('input')).not.toHaveValue('');
 });
 
@@ -179,7 +195,7 @@ test.describe('variants', () => {
     await expect(card.locator('.field-error')).toHaveText('Select a case');
     await expect(callEntries(page)).toHaveCount(0);
 
-    await arg(card, 0).locator('select').selectOption('b');
+    await choose(picker(arg(card, 0)), 'b');
     await call(card);
     await expectCall(page, 'roundtripEnum(b)', 'ok', 'b');
   });
@@ -207,8 +223,8 @@ test.describe('variants', () => {
   test('a trap shows the stderr output and disables the instance', async ({ page }) => {
     // The test component asserts on its arguments; these values trap.
     const card = funcCard(page, 'variantEnums');
-    await arg(card, 1).locator('select').selectOption('ok');
-    await arg(card, 2).locator('select').selectOption('a');
+    await choose(picker(arg(card, 1)), 'ok');
+    await choose(picker(arg(card, 2)), 'a');
     await call(card);
     await expectCall(page, 'variantEnums(false, ok, a)', 'error', /^wasm trap/);
     await expect(streamEntries(page, 'stderr').last()).toContainText('Assertion failed');
@@ -224,7 +240,7 @@ test('wasi-http: renders the handler and its resources', async ({ page }) => {
   await expect(page.locator('func-card').filter({ hasNot: methodTag })).toHaveCount(2);
   await expect(funcCard(page, 'handle')).toBeVisible();
   // Methods take the instance as `self`: a live one, or a new mock of the host resource.
-  await expect(arg(funcCard(page, 'pathWithQuery'), 0).locator('option:not([disabled])')).toHaveText(['New mock IncomingRequest']);
+  await expect(choices(picker(arg(funcCard(page, 'pathWithQuery'), 0)))).toHaveText(['New mock IncomingRequest']);
   await expect(page.locator('.section-summary code', { hasText: 'ResponseOutparam' })).toBeVisible();
 });
 

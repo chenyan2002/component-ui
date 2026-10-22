@@ -15,8 +15,8 @@ writing any glue code.
 - **Mock imports interactively.** Any import that isn't WASI and that you haven't implemented
   asks for its return value in the console when the guest calls it, and the guest waits for
   your answer. This includes methods of imported/host resources, which can also be passed to exports as mock arguments.
-- **Implement imports in JavaScript.** Expand the **Imports** card to write an ES module for
-  an imported interface, then **Apply and restart**. Functions you leave out still get mocked interactively.
+- **Implement imports in JavaScript.** Click **Implement in JavaScript** on the **Imports** bar to write an ES
+  module for an imported interface, then **Apply and restart**. Functions you leave out still get mocked interactively.
 - **Resource table.** Tracks each resource handle: who created it, whether it is live, moved
   or dropped, and which handle index it reuses. Live instances can be picked as arguments, and
   dropped from the table.

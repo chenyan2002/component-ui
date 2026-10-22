@@ -47,7 +47,7 @@ export function selectedInstance(
   return d.text === '' && instanceChoices(t, registry, giver).length === 0 && mock?.canMock(t) ? NEW_MOCK : d.text;
 }
 
-const MAX_LIST_LENGTH = 100;
+export const MAX_LIST_LENGTH = 100;
 
 class Init extends IDL.Visitor<null, Draft> {
   public visitType<T>(_t: IDL.Type<T>, _d: null): Draft {
@@ -99,6 +99,17 @@ export function resizeList(d: ListDraft, ty: IDL.Type, length: string) {
   const n = Math.min(Math.max(Math.floor(Number(length)) || 0, 0), MAX_LIST_LENGTH);
   d.length = length === '' ? '' : `${n}`;
   d.items = Array.from({ length: n }, (_, i) => d.items[i] ?? initDraft(ty));
+}
+
+export function removeItem(d: ListDraft, index: number) {
+  d.items.splice(index, 1);
+  d.length = `${d.items.length}`;
+}
+
+// Replaces the items of a list edited as tags, e.g. a list of numbers.
+export function setTextItems(d: ListDraft, texts: string[]) {
+  d.items = texts.slice(0, MAX_LIST_LENGTH).map((text) => ({ kind: 'text', text }));
+  d.length = `${d.items.length}`;
 }
 
 // `ty` is the payload type of the selected case; enums have none.

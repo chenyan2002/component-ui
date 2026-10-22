@@ -310,8 +310,9 @@ export class OwnedClass extends Type<any> {
     get resource(): ResourceClass {
         return this._ty.get_type() as ResourceClass;
     }
+    // As in WIT, where an owned handle is just the resource name.
     get name(): string {
-        return `own<${resourceName(this._ty)}>`;
+        return resourceName(this._ty);
     }
 }
 export class BorrowClass extends Type<any> {
