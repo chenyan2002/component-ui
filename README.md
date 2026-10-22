@@ -1,4 +1,93 @@
-## TODO
+# Component UI
 
-* Import Wasm
-* Import JS stub, including resource
+A browser-based explorer for [WebAssembly components](https://component-model.bytecodealliance.org/).
+Load a `.wasm` component and every exported function gets a form generated from its WIT
+signature, so you can call it, inspect the results, and mock the host for its imports, without
+writing any glue code.
+
+**Live demo:** https://chenyan2002.github.io/component-ui/
+
+## Features
+
+- **Forms from WIT types.** Arguments for records, variants, enums, options, results, lists,
+  tuples, flags and resources are edited with typed inputs and validated before a call.
+  **Random** fills empty fields with valid values and keeps the ones you typed.
+- **Mock imports interactively.** Any import that isn't WASI and that you haven't implemented
+  asks for its return value in the console when the guest calls it, and the guest waits for
+  your answer. This includes methods of imported/host resources, which can also be passed to exports as mock arguments.
+- **Implement imports in JavaScript.** Expand the **Imports** card to write an ES module for
+  an imported interface, then **Apply and restart**. Functions you leave out still get mocked interactively.
+- **Resource table.** Tracks each resource handle: who created it, whether it is live, moved
+  or dropped, and which handle index it reuses. Live instances can be picked as arguments, and
+  dropped from the table.
+- **WASI in the browser.** WASI imports are provided by
+  [`@bytecodealliance/preview2-shim`](https://www.npmjs.com/package/@bytecodealliance/preview2-shim),
+  with stdout and stderr streamed to the console, an in-memory filesystem, and in-page sockets.
+
+## Browser support
+
+Component UI requires [JavaScript Promise Integration (JSPI)](https://github.com/WebAssembly/js-promise-integration),
+which lets the guest suspend while you answer/mock an import. Use a recent Chrome or Edge; other
+browsers get a message instead of the app.
+
+## How it works
+
+1. **WIT → type AST.** [`crates/bindgen`](crates/bindgen) is a Rust component built on
+   `wit-parser` and `wit-component`. It decodes the component's WIT and emits JavaScript that
+   builds a type description (see [`src/wit.ts`](src/wit.ts)) of its imports and exports. It
+   is compiled to `wasm32-wasip2` and transpiled with jco into [`src/obj`](src/obj), so it runs
+   in the browser too.
+2. **Transpile.** The component itself is transpiled in the browser by
+   [jco](https://github.com/bytecodealliance/jco), with JSPI enabled for imports and exports.
+3. **Instantiate.** WASI imports come from the preview2 shim; other imports come from your
+   JavaScript, with console prompts and mocks standing in for whatever is missing
+   ([`src/dialog.ts`](src/dialog.ts)).
+4. **Render.** The UI is built with [Lit](https://lit.dev/) and
+   [Web Awesome](https://webawesome.com/), and is essentially an interpreter over WIT types.
+
+## Development
+
+Requires Node.js 22.
+
+```sh
+npm install
+npm run dev        # start the Vite dev server
+npm run typecheck  # type-check the app and the tests
+npm run build      # type-check and build into dist/
+npm run preview    # serve the production build
+```
+
+### Tests
+
+End-to-end tests use [Playwright](https://playwright.dev/) against the production build:
+
+```sh
+npx playwright install chromium
+npm test
+```
+
+### Rebuilding the bindgen component
+
+`src/obj` is checked in, so this is only needed after changing `crates/bindgen`. It requires
+Rust with the `wasm32-wasip2` target:
+
+```sh
+rustup target add wasm32-wasip2
+npm run build:bindgen
+```
+
+## Known limitations
+
+- Exported resource constructors and static functions are called synchronously, as jco emits
+  invalid async code for them, so they can't wait on an import prompt.
+- Imports called during instantiation can't prompt.
+- A real host object's method that receives a mock argument isn't routed to a prompt, so it may still fail in the host code.
+- jco merges incompatible versions (e.g., 0.2.0 and 0.3.0) into one unversioned import, so a prompt can show the wrong form
+  for the other version.
+- jco's async imports hang on failure; the loader patches jco's output to rethrow, which may need updating when jco changes.
+- While a call is waiting on an import, other calls are disabled, since the component instance
+  can't be re-entered.
+
+## Acknowledgement
+
+This work is inspired by [Candid UI](https://github.com/dfinity/candid/tree/master/tools/ui) and [proxy-component](https://github.com/chenyan2002/proxy-component), with significant help from Claude.
