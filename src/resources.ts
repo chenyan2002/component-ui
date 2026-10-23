@@ -3,9 +3,10 @@ import * as WIT from './wit';
 export type InstanceState = 'live' | 'moved' | 'dropped';
 
 export interface Instance {
-  // `{resource}-{handle}`, e.g. `x-1`. Host-implemented instances have no handle index, as jco
-  // doesn't expose the host side's handles, so they are numbered in creation order instead, as
-  // `host-{resource}-{n}`, e.g. `host-y-1`; the prefix keeps them apart from guest instances.
+  // `{resource}-{handle}`, e.g. `x-1`, with the resource's WIT name. Host-implemented
+  // instances have no handle index, as jco doesn't expose the host side's handles, so they are
+  // numbered in creation order instead, e.g. `y-1`. A resource name the host and the guest both
+  // implement gets a `host-` prefix on the host side, e.g. `host-y-1`, so ids can't clash.
   // The console shows it as `#x-1`.
   id: string;
   // The handle index in the component instance's table.
@@ -63,6 +64,19 @@ export function callable(instance: Instance): boolean {
   return !instance.holders || instance.holders.ui;
 }
 
+// Names of resources both the host and the guest implement, e.g. those of an interface the
+// component imports and exports. Exports also refer to imported resources they `use`, which the
+// guest doesn't implement.
+export function clashingNames(imports: WIT.InterfaceClass[], exports: WIT.InterfaceClass[]): Set<string> {
+  const imported = new Set(imports.map((iface) => iface._name));
+  const exported = new Set(exports.map((iface) => iface._name));
+  const host = new Set(imports.flatMap((iface) => iface.get_resources()).map((r) => r.witName));
+  const guest = exports.flatMap((iface) => iface.get_resources())
+    .filter((r) => exported.has(r._interface) || !imported.has(r._interface))
+    .map((r) => r.witName);
+  return new Set(guest.filter((name) => host.has(name)));
+}
+
 // Tracks the resource instances of one component instance, by handle index. Indices are
 // shared by all resource types of the component instance and reused once freed, so an
 // id refers to the latest instance that held the index. Host-implemented instances have no
@@ -70,6 +84,11 @@ export function callable(instance: Instance): boolean {
 export class ResourceRegistry extends EventTarget {
   // Called for each new host-implemented instance, to observe what the guest does with it.
   public onHostInstance?: (instance: Instance) => void;
+
+  // `clashing` names resources both sides implement, from `clashingNames`.
+  constructor(private readonly clashing: ReadonlySet<string> = new Set()) {
+    super();
+  }
 
   private readonly slots = new Map<string, Slot>();
   private readonly byId = new Map<string, Instance>();
@@ -115,11 +134,12 @@ export class ResourceRegistry extends EventTarget {
   private create(
     resource: WIT.ResourceClass, obj: object, origin: string, handle?: number, holders?: Instance['holders'],
   ): Instance {
-    const prefix = resource._name.toLowerCase();
+    const prefix = resource.witName;
     const number = handle ?? this.hostCount++;
     // Host instances get slots apart from those of handle indices.
     const key = handle === undefined ? `host${number}` : `${number}`;
-    const instance: Instance = { id: `${handle === undefined ? 'host-' : ''}${prefix}-${number}`, handle, resource, obj, state: 'live', origin, holders };
+    const host = handle === undefined && this.clashing.has(prefix) ? 'host-' : '';
+    const instance: Instance = { id: `${host}${prefix}-${number}`, handle, resource, obj, state: 'live', origin, holders };
     const slot = this.slots.get(key);
     if (slot) {
       slot.earlier.push(slot.current);
@@ -334,17 +354,11 @@ export function usesResources(interfaces: WIT.InterfaceClass[]): boolean {
 }
 
 // The `ok` and `err` types of a function returning a `result`; jco returns the `ok` payload
-// and throws on `err`. The bindgen encodes results as `variant { ok, err }`.
+// and throws on `err`.
 function resultTypes(func: WIT.FuncClass): { ok?: WIT.Type; err?: WIT.Type } | undefined {
   const [ret] = func._ret;
   const inner = ret instanceof WIT.RecClass ? ret.get_type() : ret;
-  if (inner instanceof WIT.VariantClass) {
-    const cases = Object.keys(inner._fields);
-    if (cases.length === 2 && cases[0] === 'ok' && cases[1] === 'err') {
-      return inner._fields;
-    }
-  }
-  return undefined;
+  return inner instanceof WIT.ResultClass ? inner._fields : undefined;
 }
 
 // The type of the JS value a call returns.

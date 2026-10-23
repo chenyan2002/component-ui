@@ -70,7 +70,7 @@ function resourceClass(ctx: ExportsContext, iface: WIT.InterfaceClass, resource:
   }
   const cls = ctx.host.hostClass(resource);
   if (!cls) {
-    throw new Error(`The host doesn't implement ${resource._name}`);
+    throw new Error(`The host doesn't implement ${resource.witName}`);
   }
   return cls;
 }
@@ -97,26 +97,28 @@ function errorText(ctx: ExportsContext, func: WIT.FuncClass, err: unknown): unkn
 }
 
 function resolveCall(ctx: ExportsContext, target: CallTarget, name: string, func: WIT.FuncClass, args: any[]): Call {
+  // Labels show the WIT name; `name` is jco's.
+  const shown = func.displayName(name);
   const argList = formatArgs(ctx.registry, func, target.type === 'method' ? args.slice(1) : args);
   switch (target.type) {
     case 'func': {
       const mod = exportsOf(ctx, target.iface);
-      return { label: `${name}(${argList})`, invoke: () => mod[name](...args) };
+      return { label: `${shown}(${argList})`, invoke: () => mod[name](...args) };
     }
     case 'constructor': {
       const cls = resourceClass(ctx, target.iface, target.resource);
-      return { label: `new ${target.resource._name}(${argList})`, invoke: () => new cls(...args) };
+      return { label: `new ${target.resource.witName}(${argList})`, invoke: () => new cls(...args) };
     }
     case 'static': {
       const cls = resourceClass(ctx, target.iface, target.resource);
       if (typeof cls[name] !== 'function') {
-        throw new Error(`${target.resource._name}.${name} is not implemented`);
+        throw new Error(`${target.resource.witName}.${shown} is not implemented`);
       }
-      return { label: `${target.resource._name}.${name}(${argList})`, invoke: () => cls[name](...args) };
+      return { label: `${target.resource.witName}.${shown}(${argList})`, invoke: () => cls[name](...args) };
     }
     case 'method': {
       const [self, ...rest] = args;
-      return { label: `${formatHandle(ctx.registry, self, target.resource, true)}.${name}(${argList})`, invoke: () => self[name](...rest) };
+      return { label: `${formatHandle(ctx.registry, self, target.resource, true)}.${shown}(${argList})`, invoke: () => self[name](...rest) };
     }
   }
 }

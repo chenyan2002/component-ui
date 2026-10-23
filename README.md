@@ -88,7 +88,9 @@ npm run build:bindgen
 - While a call is waiting on an import, other calls are disabled, since the component instance
   can't be re-entered.
 - jco doesn't expose the handle index of a host-implemented resource, so the resource table shows
-  host instances as `host` and numbers them in creation order (e.g. `#host-y-1`) rather than by handle.
+  host instances as `host` and numbers them in creation order (e.g. `#y-1`) rather than by handle.
+  If the host and the component both implement a resource of the same name, the host's instances
+  are prefixed, e.g. `#host-y-1`, so ids stay unique.
 
 ## Acknowledgement
 

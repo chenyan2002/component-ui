@@ -24,12 +24,12 @@ async function construct(page: Page, resourceName: string, value: string) {
 }
 
 test('owned arguments are moved and returned resources take their handle index', async ({ page }) => {
-  await construct(page, 'X', '5');
-  await expectCall(page, 'new X(5)', 'ok', '#x-1');
+  await construct(page, 'x', '5');
+  await expectCall(page, 'new x(5)', 'ok', '#x-1');
   await expect(row(page, 'x-1').locator('td.handle')).toHaveText('1');
 
   // The picker lists live instances only.
-  const add = funcCard(resource(page, 'X'), 'add');
+  const add = funcCard(resource(page, 'x'), 'add');
   const instances = picker(arg(add, 0));
   await expect(choices(instances)).toHaveText(['#x-1']);
   await choose(instances, 'x-1');
@@ -37,18 +37,18 @@ test('owned arguments are moved and returned resources take their handle index',
   await call(add);
 
   // The result reuses the index freed by moving x-1; the moved instance is kept as history.
-  await expectCall(page, 'X.add(#x-1, 1)', 'ok', '#x-1');
+  await expectCall(page, 'x.add(#x-1, 1)', 'ok', '#x-1');
   await expect(page.locator('resource-table tr.resource-row')).toHaveCount(1);
   await expect(row(page, 'x-1').locator('wa-tag')).toHaveText('live');
-  await expect(row(page, 'x-1').locator(':scope > td.history > .instance-origin')).toHaveText('X.add(#x-1, 1)');
+  await expect(row(page, 'x-1').locator(':scope > td.history > .instance-origin')).toHaveText('x.add(#x-1, 1)');
   await expect(row(page, 'x-1').locator('.earlier summary')).toHaveText('1 earlier');
-  await expect(row(page, 'x-1').locator('.earlier li')).toHaveText(/new X\(5\)\s*→ moved into X\.add\(#x-1, 1\)/);
+  await expect(row(page, 'x-1').locator('.earlier li')).toHaveText(/new x\(5\)\s*→ moved into x\.add\(#x-1, 1\)/);
 
   // Methods take the instance as `self`.
-  const getA = funcCard(resource(page, 'X'), 'getA');
+  const getA = funcCard(resource(page, 'x'), 'get-a');
   await choose(picker(arg(getA, 0)), 'x-1');
   await call(getA);
-  await expectCall(page, '#borrowed-x-1.getA()', 'ok', '6');
+  await expectCall(page, '#borrowed-x-1.get-a()', 'ok', '6');
 
   const consume = worldFunc(page, 'consume');
   await choose(picker(arg(consume, 0)), 'x-1');
@@ -66,8 +66,8 @@ test('owned arguments are moved and returned resources take their handle index',
 });
 
 test('borrowed arguments stay live, and Drop runs the destructor', async ({ page }) => {
-  await construct(page, 'Z', '2');
-  await construct(page, 'Z', '3');
+  await construct(page, 'z', '2');
+  await construct(page, 'z', '3');
   await expect(page.locator('resource-table tr.resource-row')).toHaveCount(2);
 
   const add = worldFunc(page, 'add');
@@ -77,13 +77,13 @@ test('borrowed arguments stay live, and Drop runs the destructor', async ({ page
   await expectCall(page, 'add(#borrowed-z-1, #borrowed-z-2)', 'ok', '#z-3');
   await expect(row(page, 'z-1')).not.toHaveClass(/\bdead\b/);
   await expect(row(page, 'z-2')).not.toHaveClass(/\bdead\b/);
-  const getA = funcCard(resource(page, 'Z'), 'getA');
+  const getA = funcCard(resource(page, 'z'), 'get-a');
   await choose(picker(arg(getA, 0)), 'z-3');
   await call(getA);
-  await expectCall(page, '#borrowed-z-3.getA()', 'ok', '5');
+  await expectCall(page, '#borrowed-z-3.get-a()', 'ok', '5');
 
   // The component counts destructor calls.
-  const numDropped = funcCard(resource(page, 'Z'), 'numDropped');
+  const numDropped = funcCard(resource(page, 'z'), 'num-dropped');
   await call(numDropped);
   const before = Number(await page.locator('.log-entry').last().locator('.log-output pre').textContent());
   await row(page, 'z-1').locator('wa-button', { hasText: 'Drop' }).click();
@@ -97,27 +97,27 @@ test('borrowed arguments stay live, and Drop runs the destructor', async ({ page
 });
 
 test('a freed index is reused by any resource, and Clear freed removes freed rows', async ({ page }) => {
-  await construct(page, 'X', '5');
+  await construct(page, 'x', '5');
   await row(page, 'x-1').locator('wa-button', { hasText: 'Drop' }).click();
   await expectCall(page, 'drop #x-1', 'ok', 'dropped');
-  await construct(page, 'Z', '2');
-  await expectCall(page, 'new Z(2)', 'ok', '#z-1');
+  await construct(page, 'z', '2');
+  await expectCall(page, 'new z(2)', 'ok', '#z-1');
   await expect(row(page, 'x-1')).toHaveCount(0);
   await expect(row(page, 'z-1').locator('td.handle')).toHaveText('1');
-  await expect(row(page, 'z-1').locator('.earlier li')).toHaveText(/^x-1 · new X\(5\)\s*→ dropped$/);
+  await expect(row(page, 'z-1').locator('.earlier li')).toHaveText(/^x-1 · new x\(5\)\s*→ dropped$/);
 
   // The id opens the instance's methods; picking one selects it as `self`, expanding its section.
-  await resource(page, 'Z').locator('.section-summary').click();
-  await expect(resource(page, 'Z')).not.toHaveAttribute('open');
+  await resource(page, 'z').locator('.section-summary').click();
+  await expect(resource(page, 'z')).not.toHaveAttribute('open');
   await row(page, 'z-1').locator('button.instance-id').click();
-  await page.locator('wa-dropdown-item', { hasText: 'getA' }).click();
-  const getA = funcCard(resource(page, 'Z'), 'getA');
+  await page.locator('wa-dropdown-item', { hasText: 'get-a' }).click();
+  const getA = funcCard(resource(page, 'z'), 'get-a');
   await expect(getA).toBeInViewport();
   await expect(picker(arg(getA, 0))).toHaveJSProperty('value', 'z-1');
   await call(getA);
-  await expectCall(page, '#borrowed-z-1.getA()', 'ok', '2');
+  await expectCall(page, '#borrowed-z-1.get-a()', 'ok', '2');
 
-  await construct(page, 'Z', '3');
+  await construct(page, 'z', '3');
   await row(page, 'z-2').locator('wa-button', { hasText: 'Drop' }).click();
   await expect(page.locator('resource-table .panel-title')).toContainText('1 live · 1 freed');
   await page.locator('resource-table wa-button', { hasText: 'Clear freed' }).click();
@@ -136,21 +136,21 @@ test('resources the host hands to the guest are tracked until the guest drops or
       '}',
     ].join('\n'),
   });
-  await call(worldFunc(page, 'testImports'));
-  await expectCall(page, 'testImports()', 'ok', 'ok');
+  await call(worldFunc(page, 'test-imports'));
+  await expectCall(page, 'test-imports()', 'ok', 'ok');
   const rows = page.locator('resource-table tr.resource-row');
   await expect(rows).toHaveCount(6);
   await expect(rows.locator('td.handle')).toHaveText(Array(6).fill('host'));
   await expect(rows.locator('wa-tag')).toHaveText(['moved', 'dropped', 'moved', 'moved', 'dropped', 'dropped']);
-  await expect(row(page, 'host-y-1').locator(':scope > td.history > .instance-origin')).toHaveText('new Y(10)');
-  await expect(fate(row(page, 'host-y-1'))).toHaveText('→ moved into Y.add(#host-y-1, 10)');
-  await expect(row(page, 'host-y-2').locator(':scope > td.history > .instance-origin')).toHaveText('Y.add(#host-y-1, 10)');
-  await expect(fate(row(page, 'host-y-2'))).toHaveText('→ dropped by the guest');
+  await expect(row(page, 'y-1').locator(':scope > td.history > .instance-origin')).toHaveText('new y(10)');
+  await expect(fate(row(page, 'y-1'))).toHaveText('→ moved into y.add(#y-1, 10)');
+  await expect(row(page, 'y-2').locator(':scope > td.history > .instance-origin')).toHaveText('y.add(#y-1, 10)');
+  await expect(fate(row(page, 'y-2'))).toHaveText('→ dropped by the guest');
 });
 
 test('Random picks a live instance for a resource argument', async ({ page }) => {
-  await construct(page, 'KebabCase', '7');
-  await call(funcCard(resource(page, 'KebabCase'), 'takeOwned'), 'Random');
-  await expectCall(page, 'KebabCase.takeOwned(#kebabcase-1)', 'ok', '7');
-  await expect(row(page, 'kebabcase-1').locator('wa-tag')).toHaveText('moved');
+  await construct(page, 'kebab-case', '7');
+  await call(funcCard(resource(page, 'kebab-case'), 'take-owned'), 'Random');
+  await expectCall(page, 'kebab-case.take-owned(#kebab-case-1)', 'ok', '7');
+  await expect(row(page, 'kebab-case-1').locator('wa-tag')).toHaveText('moved');
 });

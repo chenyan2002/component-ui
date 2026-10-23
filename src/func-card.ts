@@ -54,7 +54,7 @@ export class FuncCard extends LitElement {
   // The arguments of the form; methods take the instance first.
   private get args(): Array<[string, WIT.Type]> {
     const args = this.func._args;
-    return this.target.type === 'method' ? [['self', this.target.resource], ...args] : args;
+    return this.target.type === 'method' ? [['self', WIT.borrowOf(this.target.resource)], ...args] : args;
   }
 
   protected willUpdate(changed: PropertyValues<this>) {
@@ -75,7 +75,7 @@ export class FuncCard extends LitElement {
     const blockedTitle = blocked ? 'Another call is still running' : undefined;
     return html`<wa-card class="func-card">
       <div slot="header" class="func-header">
-        ${renderSignature(this.name, this.func)}
+        ${renderSignature(this.func.displayName(this.name), this.func)}
         ${this.target.type === 'func' ? nothing : html`<wa-tag size="s" variant="neutral">${this.target.type}</wa-tag>`}
       </div>
       <div class="func-args flow">

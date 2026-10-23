@@ -50,12 +50,6 @@ function float(value: number): string {
   return Object.is(value, -0) ? '-0' : `${value}`;
 }
 
-// The cases of a `result`, which the bindgen encodes as `variant { ok, err }`; they aren't escaped.
-function isResult(fields: Record<string, WIT.Type>): boolean {
-  const cases = Object.keys(fields);
-  return cases.length === 2 && cases[0] === 'ok' && cases[1] === 'err';
-}
-
 function payload(name: string, ty: WIT.Type | undefined, value: string): string {
   return ty === undefined || ty instanceof WIT.NullClass ? name : `${name}(${value})`;
 }
@@ -112,9 +106,10 @@ class Wave extends WIT.Visitor<any, string> {
   public visitTuple(_t: WIT.TupleClass, components: WIT.Type[], v: any): string {
     return `(${components.map((ty, i) => ty.accept(this, v[i])).join(', ')})`;
   }
-  public visitVariant(_t: WIT.VariantClass, fields: Record<string, WIT.Type>, v: any): string {
+  public visitVariant(t: WIT.VariantClass, fields: Record<string, WIT.Type>, v: any): string {
     const ty = fields[v.tag];
-    const name = isResult(fields) ? v.tag : label(v.tag);
+    // The cases of a `result` are keywords themselves; a variant's are escaped if they're keywords.
+    const name = t instanceof WIT.ResultClass ? v.tag : label(v.tag);
     return payload(name, ty, ty === undefined ? '' : ty.accept(this, v.val));
   }
   public visitEnum(_t: WIT.EnumClass, _tags: string[], v: any): string {
@@ -137,7 +132,7 @@ class Wave extends WIT.Visitor<any, string> {
 // A resource instance by its id, e.g. `#x-1`, or `#borrowed-x-1` for a borrow, including a method's
 // receiver; `#<X>` for an object the table doesn't track.
 export function formatHandle(registry: ResourceRegistry, obj: unknown, resource?: WIT.ResourceClass, borrowed = false): string {
-  const id = registry.idOf(obj) ?? `<${resource?._name ?? 'unknown'}>`;
+  const id = registry.idOf(obj) ?? `<${resource?.witName ?? 'unknown'}>`;
   return `#${borrowed ? 'borrowed-' : ''}${id}`;
 }
 

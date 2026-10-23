@@ -109,7 +109,7 @@ export class HostResources {
             resources.forEach((resource) => this.classes.set(resource, value));
           }
           wrapped.set(key, func
-            ? this.wrapFunc(func, value, (args) => `${name}#${key}(${this.format(func, args)})`)
+            ? this.wrapFunc(func, value, (args) => `${name}.${func.displayName(key)}(${this.format(func, args)})`)
             : resources.length > 0 ? this.wrapClass(resources[0], value) : value);
         }
         return wrapped.get(key);
@@ -136,7 +136,7 @@ export class HostResources {
         const ctor = ownFunc(fields, 'constructor');
         const construct = () => Reflect.construct(target, args, newTarget);
         return ctor
-          ? this.observe(ctor, args, construct, () => `new ${resource._name}(${this.format(ctor, args)})`, resource)
+          ? this.observe(ctor, args, construct, () => `new ${resource.witName}(${this.format(ctor, args)})`, resource)
           : construct();
       },
       get: (target, key, receiver) => {
@@ -146,7 +146,7 @@ export class HostResources {
           return value;
         }
         if (!statics.has(key)) {
-          statics.set(key, this.wrapFunc(func, value.bind(target), (args) => `${resource._name}.${key}(${this.format(func, args)})`));
+          statics.set(key, this.wrapFunc(func, value.bind(target), (args) => `${resource.witName}.${func.displayName(key)}(${this.format(func, args)})`));
         }
         return statics.get(key);
       },
@@ -175,7 +175,7 @@ export class HostResources {
         const host = observers.get(obj);
         const call = () => method.apply(this, args);
         return host
-          ? host.observe(func, args, call, () => `${formatHandle(host.registry, obj, instance.resource, true)}.${name}(${host.format(func, args)})`)
+          ? host.observe(func, args, call, () => `${formatHandle(host.registry, obj, instance.resource, true)}.${func.displayName(name)}(${host.format(func, args)})`)
           : call();
       });
     }

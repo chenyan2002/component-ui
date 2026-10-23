@@ -91,12 +91,6 @@ function selectWidth(labels: string[]): string {
   return `--chars: ${Math.max(...labels.map((label) => label.length))}`;
 }
 
-// jco lowers `result<T, E>` as a variant with these cases.
-function isResult(fields: Record<string, IDL.Type>): boolean {
-  const tags = Object.keys(fields);
-  return tags.length === 2 && tags[0] === 'ok' && tags[1] === 'err';
-}
-
 function isNumber(t: IDL.Type): boolean {
   return t instanceof IDL.FixedNatClass || t instanceof IDL.FixedIntClass || t instanceof IDL.FixedFloatClass;
 }
@@ -167,8 +161,8 @@ class Render extends IDL.Visitor<RenderData, Rendered> {
     const mock = !!ctx.mock?.canMock(t);
     const id = selectedInstance(t, text, ctx.registry, ctx.mock, giver);
     const selected = instances.some((i) => i.id === id) || (mock && id === NEW_MOCK);
-    const placeholder = instances.length > 0 || mock ? 'Select an instance…' : `No live ${t._name} instances`;
-    const mockLabel = `New mock ${t._name}`;
+    const placeholder = instances.length > 0 || mock ? 'Select an instance…' : `No live ${t.witName} instances`;
+    const mockLabel = `New mock ${t.witName}`;
     const labels = instances.map((i) => `#${i.id}`);
     return html`<wa-select
       size="s"
@@ -226,14 +220,14 @@ class Render extends IDL.Visitor<RenderData, Rendered> {
     const tuple = d as FieldsDraft;
     return subform(components.map((ty, i) => renderField(ty, tuple.fields[i], ctx, `${i}`)), { nested: components.length > 1, flow: true });
   }
-  public visitVariant(_t: IDL.VariantClass, fields: Record<string, IDL.Type>, { d, ctx }: RenderData): Rendered {
+  public visitVariant(t: IDL.VariantClass, fields: Record<string, IDL.Type>, { d, ctx }: RenderData): Rendered {
     const entries = Object.entries(fields);
     const variant = d as CaseDraft;
     return html`
       ${renderCases(variant, entries.map(([tag]) => tag), variant.index, (index) => {
         selectCase(variant, index, entries[index][1]);
         ctx.update();
-      }, isResult(fields))}
+      }, t instanceof IDL.ResultClass)}
       ${variant.payload ? subform([renderField(entries[variant.index][1], variant.payload, ctx)]) : nothing}
     `;
   }
@@ -401,11 +395,11 @@ const render = new Render();
 
 const MAX_TYPE_LENGTH = 48;
 
-// Long inline types (e.g. large variants) are truncated; the full type is shown on hover.
+// Long types (e.g. inline tuples) are truncated; hovering shows how WIT declares the type.
 export function typeName(type: IDL.Type) {
   const name = type.name;
   const short = name.length > MAX_TYPE_LENGTH ? `${name.slice(0, MAX_TYPE_LENGTH - 1)}…` : name;
-  return html`<span class="sig-type" title=${name}>${short}</span>`;
+  return html`<span class="sig-type" title=${type.definition}>${short}</span>`;
 }
 
 // Renders a labeled input for a value of type `t`, backed by the draft `d`. `action`, e.g. a button
@@ -418,7 +412,7 @@ export function renderField(t: IDL.Type, d: Draft, ctx: FormContext, label?: str
   const heading = label
     ? html`<label class="field-label">
         <span>${label}</span>
-        <span class="field-type" title=${t.name}>${t.name}</span>
+        <span class="field-type" title=${t.definition}>${t.name}</span>
       </label>`
     : nothing;
   // Outside the label, which would otherwise pass its clicks on to the action.

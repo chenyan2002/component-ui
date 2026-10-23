@@ -62,7 +62,7 @@ export class ImportDialogs implements MockFactory {
     // jco gives all versions of an interface one import object; the first one's types stand for all.
     const funcs = new Map(ifaces.flatMap((iface) => Object.entries(iface._fields)).reverse());
     for (const [key, func] of funcs) {
-      const label = (_self: unknown, args: any[]) => `${name}#${key}(${this.format(func, args)})`;
+      const label = (_self: unknown, args: any[]) => `${name}.${func.displayName(key)}(${this.format(func, args)})`;
       completed[key] = typeof mod[key] === 'function'
         ? this.routing(`${name}#${func._witName}`, func, mod[key], label)
         : this.prompting(func, label);
@@ -134,14 +134,14 @@ export class ImportDialogs implements MockFactory {
     const statics = new Map(resource.get_static_funcs()
       .filter(([key, func]) => func.callKind === 'static' && typeof (cls as any)[key] === 'function')
       .map(([key, func]) => [key, this.routing(`${name}#${func._witName}`, func, (cls as any)[key].bind(cls), (_self, args) =>
-        `${resource._name}.${key}(${this.format(func, args)})`)]));
+        `${resource.witName}.${func.displayName(key)}(${this.format(func, args)})`)]));
     return statics.size === 0 ? cls : new Proxy(cls, {
       get: (target, key, receiver) => (typeof key === 'string' && statics.get(key)) || Reflect.get(target, key, receiver),
     });
   }
 
   private methodLabel(resource: WIT.ResourceClass, key: string, func: WIT.FuncClass, self: unknown, args: any[]): string {
-    return `${formatHandle(this.registry, self, resource, true)}.${key}(${this.format(func, args)})`;
+    return `${formatHandle(this.registry, self, resource, true)}.${func.displayName(key)}(${this.format(func, args)})`;
   }
 
   private mockClass(resource: WIT.ResourceClass): Function {
@@ -152,7 +152,7 @@ export class ImportDialogs implements MockFactory {
         constructor(...args: any[]) {
           super();
           const ctor = ownFunc(resource._fields, 'constructor');
-          dialogs.constructed(this, resource, `new ${resource._name}(${dialogs.format(ctor, args)})`);
+          dialogs.constructed(this, resource, `new ${resource.witName}(${dialogs.format(ctor, args)})`);
         }
       };
       define(cls, 'name', resource._name);
@@ -170,7 +170,7 @@ export class ImportDialogs implements MockFactory {
     }
     for (const [key, func] of resource.get_static_funcs()) {
       if (func.callKind === 'static' && typeof (cls as any)[key] !== 'function') {
-        define(cls, key, this.prompting(func, (_self, args) => `${resource._name}.${key}(${this.format(func, args)})`));
+        define(cls, key, this.prompting(func, (_self, args) => `${resource.witName}.${func.displayName(key)}(${this.format(func, args)})`));
       }
     }
     return cls;

@@ -69,6 +69,12 @@ export abstract class Visitor<D, R> {
     }
 }
 
+// A WIT name jco turned into camelCase or PascalCase, e.g. `getRegion` or `IncomingRequest`,
+// back in kebab case. Single-letter words are ambiguous: `ABTest` reads as `ab-test`.
+export function kebabName(name: string): string {
+    return name.replace(/([A-Z])(?=[A-Z][a-z])/g, '$1-').replace(/([a-z0-9])(?=[A-Z])/g, '$1-').toLowerCase();
+}
+
 // jco exposes record fields (and flags) in lowerCamelCase, e.g. `link-count` as `linkCount`.
 export function jsFieldName(name: string): string {
     const [first, ...rest] = name.split('-');
@@ -78,14 +84,32 @@ export function jsFieldName(name: string): string {
 export abstract class Type<T = any> {
     // Phantom field so `T` (the JS value type) participates in type checking.
     declare protected readonly _value?: T;
-    public abstract readonly name: string;
+    // The WIT name of a type its interface declares, e.g. `op` for `enum op { add }`.
+    public _typeName?: string;
+    // The type as WIT writes it: its name if it has one, otherwise its expression.
+    get name(): string {
+        return this._typeName ?? this.expr;
+    }
+    // The type's structure, e.g. `enum { add }` or `tuple<u8, u8>`.
+    public abstract readonly expr: string;
+    // How WIT declares the type, e.g. `enum op { add }` or `type casts = tuple<c1, c2>`; an
+    // unnamed type shows its expression.
+    get definition(): string {
+        if (!this._typeName) {
+            return this.expr;
+        }
+        const keyword = /^(record|flags|variant|enum) /.exec(this.expr);
+        return keyword
+            ? `${keyword[1]} ${this._typeName} ${this.expr.slice(keyword[0].length)}`
+            : `type ${this._typeName} = ${this.expr}`;
+    }
     public abstract accept<D, R>(v: Visitor<D, R>, d: D): R;
 }
 export class NullClass extends Type<void> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitNull(this, d);
     }
-    get name(): string {
+    get expr(): string {
         return '_';
     }
 }
@@ -93,7 +117,7 @@ export class BoolClass extends Type<boolean> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitBool(this, d);
     }
-    get name(): string {
+    get expr(): string {
         return 'bool';
     }
 }
@@ -101,7 +125,7 @@ export class StringClass extends Type<string> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitString(this, d);
     }
-    get name(): string {
+    get expr(): string {
         return 'string';
     }
 }
@@ -109,7 +133,7 @@ export class CharClass extends Type<string> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitChar(this, d);
     }
-    get name(): string {
+    get expr(): string {
         return 'char';
     }
 }
@@ -120,7 +144,7 @@ export class FixedNatClass extends Type<number> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitFixedNat(this, d);
     }
-    get name(): string {
+    get expr(): string {
         return `u${this._bits}`;
     }
 }
@@ -131,7 +155,7 @@ export class FixedIntClass extends Type<number> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitFixedInt(this, d);
     }
-    get name(): string {
+    get expr(): string {
         return `s${this._bits}`;
     }
 }
@@ -142,7 +166,7 @@ export class FixedFloatClass extends Type<number> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitFixedFloat(this, d);
     }
-    get name(): string {
+    get expr(): string {
         return `f${this._bits}`;
     }
 }
@@ -153,7 +177,7 @@ export class OptClass extends Type<any> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitOpt(this, this._ty, d);
     }
-    get name(): string {
+    get expr(): string {
         return `option<${this._ty.name}>`;
     }
     public maybe_null(): boolean {
@@ -171,7 +195,7 @@ export class VecClass extends Type<Array<any>> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitVec(this, this._ty, d);
     }
-    get name(): string {
+    get expr(): string {
         return `list<${this._ty.name}>`;
     }
 }
@@ -182,7 +206,7 @@ export class RecordClass extends Type<Record<string, any>> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitRecord(this, this._fields, d);
     }
-    get name(): string {    
+    get expr(): string {
         return `record { ${Object.entries(this._fields).map(([k, v]) => `${k}: ${v.name}`).join(', ')} }`;
     }
 }
@@ -194,7 +218,7 @@ export class FlagsClass extends RecordClass {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitFlags(this, this._fields, d);
     }
-    get name(): string {
+    get expr(): string {
         return `flags { ${this._flags.join(', ')} }`;
     }
 }
@@ -205,7 +229,7 @@ export class TupleClass extends Type<Array<any>> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitTuple(this, this._components, d);
     }
-    get name(): string {    
+    get expr(): string {
         return `tuple<${this._components.map((c) => c.name).join(', ')}>`;
     }
 }
@@ -216,10 +240,23 @@ export class VariantClass extends Type<Record<string, Type>> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitVariant(this, this._fields, d);
     }
-    get name(): string {
+    get expr(): string {
         return `variant { ${Object.entries(this._fields).map(([k, v]) => {
             return k + (v.name === '_' ? '' : `(${v.name})`);
         }).join(', ')} }`;
+    }
+}
+// `result<T, E>`, which jco represents like a variant of `ok` and `err`. A missing payload is `_`.
+export class ResultClass extends VariantClass {
+    constructor(ok: Type, err: Type) {
+        super({ ok, err });
+    }
+    get expr(): string {
+        const [ok, err] = [this._fields.ok, this._fields.err].map((t) => (t instanceof NullClass ? undefined : t.name));
+        if (err === undefined) {
+            return ok === undefined ? 'result' : `result<${ok}>`;
+        }
+        return `result<${ok ?? '_'}, ${err}>`;
     }
 }
 export class EnumClass extends Type<Array<string>> {
@@ -229,7 +266,7 @@ export class EnumClass extends Type<Array<string>> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitEnum(this, this._tags, d);
     }
-    get name(): string {
+    get expr(): string {
         return `enum { ${this._tags.join(', ')} }`;
     }
 }
@@ -249,7 +286,7 @@ export class RecClass extends Type<any> {
     public get_type() {
         return this._type;
     }
-    get name(): string {
+    get expr(): string {
         if (!this._type) {
             return `rec_${this._id}`;
         }
@@ -274,20 +311,43 @@ export class FuncClass extends Type<any> {
         }
         return 'func';
     }
-    get name(): string {
-        return `func(${this._args.map((a) => `${a[0]}: ${a[1].name}`).join(', ')}) -> (${this._ret.map((a) => a.name).join(', ')})`;
+    get expr(): string {
+        const ret = this._ret.length > 0 ? ` -> ${this._ret[0].name}` : '';
+        return `func(${this._args.map((a) => `${a[0]}: ${a[1].name}`).join(', ')})${ret}`;
+    }
+    // The name to show, as in WIT, e.g. `get-method` for `[method]request.get-method`. `key`,
+    // jco's name for it, stands in if the WIT name is unknown.
+    public displayName(key: string): string {
+        if (this.callKind === 'constructor') {
+            return 'constructor';
+        }
+        const name = this._witName.replace(/^\[[^\]]*\]/, '');
+        return name === '' ? kebabName(key) : name.slice(name.indexOf('.') + 1);
     }
 }
 export class ResourceClass extends Type<any> {
-    // `_interface` is the name of the interface that defines the resource.
+    // `_name` is jco's class name for the resource, e.g. `IncomingRequest`, and `_interface` the
+    // name of the interface that defines it.
     constructor(public readonly _name: string, public readonly _fields: Record<string, FuncClass>, public readonly _interface: string = '') {
         super();
     }
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitResource(this, d);
     }
-    get name(): string {
-        return `resource ${this._name}`;
+    get expr(): string {
+        return `resource ${this.witName}`;
+    }
+    // The resource's name in WIT, e.g. `incoming-request` or `XML`, to show. Its functions' WIT
+    // names include it, e.g. `[method]incoming-request.headers`; for a resource without any, jco's
+    // class name stands in.
+    get witName(): string {
+        for (const func of Object.values(this._fields)) {
+            const match = /^\[[^\]]*\](?:\[[^\]]*\])?([^.]+)/.exec(func._witName);
+            if (match) {
+                return match[1];
+            }
+        }
+        return kebabName(this._name);
     }
     public get_static_funcs(): Array<[string, FuncClass]> {
         return Object.entries(this._fields).filter(([_, f]) => f.callKind === 'static' || f.callKind === 'constructor');
@@ -298,7 +358,7 @@ export class ResourceClass extends Type<any> {
 }
 function resourceName(ty: RecClass): string {
     const resource = ty.get_type();
-    return resource instanceof ResourceClass ? resource._name : ty.name;
+    return resource instanceof ResourceClass ? resource.witName : ty.name;
 }
 export class OwnedClass extends Type<any> {
     constructor(public readonly _ty: RecClass) {
@@ -311,7 +371,7 @@ export class OwnedClass extends Type<any> {
         return this._ty.get_type() as ResourceClass;
     }
     // As in WIT, where an owned handle is just the resource name.
-    get name(): string {
+    get expr(): string {
         return resourceName(this._ty);
     }
 }
@@ -325,7 +385,7 @@ export class BorrowClass extends Type<any> {
     get resource(): ResourceClass {
         return this._ty.get_type() as ResourceClass;
     }
-    get name(): string {
+    get expr(): string {
         return `borrow<${resourceName(this._ty)}>`;
     }
 }
@@ -342,7 +402,7 @@ export class InterfaceClass extends Type<any> {
     public accept<D, R>(v: Visitor<D, R>, d: D): R {
         return v.visitInterface(this, d);
     }
-    get name(): string {
+    get expr(): string {
         return `interface ${this._name}`;
     }
     get isRoot(): boolean {
@@ -383,6 +443,15 @@ export function Flags(flags: Array<string>): FlagsClass {
 export function Tuple(components: Array<Type>): TupleClass {
     return new TupleClass(components);
 }
+export function Result(ok: Type, err: Type): ResultClass {
+    return new ResultClass(ok, err);
+}
+// Names a type its interface declares. Each declaration is a type of its own, so naming it
+// doesn't name others.
+export function Named<T extends Type>(name: string, ty: T): T {
+    ty._typeName = name;
+    return ty;
+}
 export function Enum(tags: Array<string>): EnumClass {
     return new EnumClass(tags);
 }
@@ -406,4 +475,16 @@ export function Owned(ty: RecClass): OwnedClass {
 }
 export function Borrow(ty: RecClass): BorrowClass {
     return new BorrowClass(ty);
+}
+const borrows = new WeakMap<ResourceClass, BorrowClass>();
+// `borrow<r>`, the type of a method's `self`.
+export function borrowOf(resource: ResourceClass): BorrowClass {
+    let borrow = borrows.get(resource);
+    if (!borrow) {
+        const rec = Rec();
+        rec.fill(resource);
+        borrow = Borrow(rec);
+        borrows.set(resource, borrow);
+    }
+    return borrow;
 }

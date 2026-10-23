@@ -104,7 +104,7 @@ export class ResourceTable extends LitElement {
       <td class="handle">${slot.handle ?? html`<span class="muted">host</span>`}</td>
       <td>
         ${this.renderId(instance)}
-        <div class="instance-type">${resource._name}${MOCK in instance.obj ? ' · mock' : ''}</div>
+        <div class="instance-type">${resource.witName}${MOCK in instance.obj ? ' · mock' : ''}</div>
       </td>
       <td><wa-tag size="s" variant=${STATE_VARIANTS[state]}>${state}</wa-tag>${renderHolders(instance)}</td>
       <td class="history">${renderHistory(instance)}${renderEarlier(slot)}</td>
@@ -135,7 +135,7 @@ export class ResourceTable extends LitElement {
     return html`<wa-dropdown @wa-select=${(e: CustomEvent<{ item: HTMLElement & { value: string } }>) =>
       this.useMethod(instance, e.detail.item.value)}>
       <button slot="trigger" class="instance-id" title="Call a method of ${instance.id}"><code>${instance.id}</code></button>
-      ${methods.map(([name]) => html`<wa-dropdown-item value=${name}><code>${name}</code></wa-dropdown-item>`)}
+      ${methods.map(([name, func]) => html`<wa-dropdown-item value=${name}><code>${func.displayName(name)}</code></wa-dropdown-item>`)}
     </wa-dropdown>`;
   }
 

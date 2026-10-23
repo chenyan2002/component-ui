@@ -92,11 +92,11 @@ impl<'a> Bindgen<'a> {
                 self.src.push_str("])");
             }
             TypeDefKind::Result(r) => {
-                self.src.push_str("IDL.Variant({'ok': ");
+                self.src.push_str("IDL.Result(");
                 self.pp_optional_ty(r.ok.as_ref());
-                self.src.push_str(", 'err': ");
+                self.src.push_str(", ");
                 self.pp_optional_ty(r.err.as_ref());
-                self.src.push_str("})");
+                self.src.push_str(")");
             }
             TypeDefKind::Record(r) => {
                 self.src.push_str("IDL.Record({ ");
@@ -202,11 +202,20 @@ impl<'a> Bindgen<'a> {
                         .or_insert_with(|| Bindgen::new(self.resolve));
                 }
                 kind => {
-                    let name = name.to_upper_camel_case();
-                    self.src.push_str(&format!("const {name} = "));
+                    let ident = name.to_upper_camel_case();
+                    self.src.push_str(&format!("const {ident} = "));
+                    // The type keeps its WIT name to show. An alias refers to its target, which
+                    // keeps its own.
+                    let named = !matches!(kind, TypeDefKind::Type(_));
+                    if named {
+                        self.src.push_str(&format!("IDL.Named('{name}', "));
+                    }
                     self.pp_ty_kind(kind, Some(iface_id));
+                    if named {
+                        self.src.push_str(")");
+                    }
                     self.src.push_str(";\n");
-                    self.defs.push(name);
+                    self.defs.push(ident);
                 }
             }
         }

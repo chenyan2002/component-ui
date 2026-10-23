@@ -342,7 +342,7 @@ class Parse extends IDL.Visitor<Draft, any> {
       const choices = instanceChoices(t, this.registry, this.giver);
       const instance = this.registry.get(id);
       if (!instance) {
-        throw new Error(choices.length > 0 ? 'Select an instance' : `No ${t._name} instances yet`);
+        throw new Error(choices.length > 0 ? 'Select an instance' : `No ${t.witName} instances yet`);
       }
       if (!choices.includes(instance)) {
         throw new Error(instance.state === 'live' ? `#${id} is held by the guest` : `#${id} was ${instance.fate}`);

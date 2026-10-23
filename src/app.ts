@@ -11,7 +11,7 @@ import './console';
 import { renderExports } from './exports-view';
 import { byImportName, HostResources, unversioned } from './host-resources';
 import { importTemplate } from './import-template';
-import { ResourceRegistry, usesResources } from './resources';
+import { clashingNames, ResourceRegistry, usesResources } from './resources';
 import './resource-table';
 
 const EXAMPLES: Array<[file: string, label: string]> = [
@@ -337,7 +337,7 @@ export class ComponentApp extends LitElement {
     try {
       // Each component instance has its own resource instances, including those its imports
       // hand out while it instantiates.
-      const registry = new ResourceRegistry();
+      const registry = new ResourceRegistry(clashingNames(s.component.imports, s.component.interfaces));
       const host = new HostResources(registry, s.component.imports);
       // Missing imports and mock resources ask in the console, and the guest waits for the answer.
       const dialogs = new ImportDialogs(registry, host, s.component.imports, (call) => this.consolePanel!.logImport(call));

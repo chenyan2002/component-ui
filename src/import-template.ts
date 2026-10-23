@@ -13,11 +13,6 @@ function jsIdent(name: string): string {
   return RESERVED.has(name) ? `${name}_` : name;
 }
 
-// The WIT name of a function, without the resource prefix, e.g. `get-method` for `[method]request.get-method`.
-function witName(key: string, func: WIT.FuncClass): string {
-  return func._witName.replace(/^\[[^\]]*\][^.]*\./, '') || key;
-}
-
 // `a: u32, b: u32` for a function's arguments, and ` -> u32` for its result, in WIT syntax.
 function witArgs(func: WIT.FuncClass): string {
   return func._args.map(([name, ty]) => `${name}: ${ty.name}`).join(', ');
@@ -40,7 +35,7 @@ function commented(lines: string[]): string {
 function funcTemplate(key: string, func: WIT.FuncClass): string {
   const name = jsIdent(key);
   return commented([
-    `// ${witName(key, func)}: func(${witArgs(func)})${witResult(func)}`,
+    `// ${func.displayName(key)}: func(${witArgs(func)})${witResult(func)}`,
     ...(name === key
       ? [`export function ${key}${jsArgs(func)} {`, '}']
       : [`function ${name}${jsArgs(func)} {`, '}', `export { ${name} as ${key} };`]),
@@ -52,7 +47,7 @@ function resourceTemplate(resource: WIT.ResourceClass): string {
     const prefix = func.callKind === 'static' ? 'static ' : '';
     const wit = func.callKind === 'constructor'
       ? `constructor(${witArgs(func)})`
-      : `${witName(key, func)}: ${prefix}func(${witArgs(func)})${witResult(func)}`;
+      : `${func.displayName(key)}: ${prefix}func(${witArgs(func)})${witResult(func)}`;
     return [
       `  // ${wit}`,
       `  ${prefix}${key}${jsArgs(func)} {`,
