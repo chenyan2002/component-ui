@@ -83,7 +83,8 @@ test('calculator: imports that fail to apply keep the dialog open, with the erro
 test('kv-store: instantiates with its Fastly imports answered in the console', async ({ page }) => {
   await loadExample(page, 'kv-store.wasm');
   await expect(page.locator('#importsCard .imports-title wa-badge')).toHaveText('21 interfaces');
-  await expect(funcCard(page, 'run')).toBeInViewport();
+  // The exports start in view, with the host resources they use.
+  await expect(page.locator('wa-details.interface').first()).toBeInViewport();
   await expect(page.locator('wa-details.resource', { hasText: 'request' })).not.toHaveAttribute('open');
   await expect(page.locator('.section-summary code', { hasText: 'fastly:compute/http-incoming@0.1.0' })).toBeVisible();
   // `body` is `pollable` renamed by a `use` in http-body, then used again by http-incoming.
@@ -107,15 +108,26 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
     'fastly:compute/async-io': 'export class Pollable { static newReady() { return new Pollable() } }',
   });
 
-  // `Request` and `Pollable` (as `body`) are imported, so their functions run on the stubs.
-  const request = resource(page, 'request');
-  await expect(request.locator('.section-summary wa-tag')).toHaveText('host resource');
+  // `Request` and `Pollable` (as `body`) are imported, so their functions run on the stubs. They
+  // show together, each named with the interface that defines it.
+  // They show first, collapsed. Names too long to fit show in full on hover.
+  const hostResources = page.locator('wa-details.interface').first();
+  await expect(hostResources.locator(':scope > .section-summary code')).toHaveText('host resources');
+  await expect(hostResources).not.toHaveAttribute('open');
+  await hostResources.locator(':scope > .section-summary').click();
+  await expect(hostResources.locator('wa-details.resource .section-summary code'))
+    .toHaveText(['fastly:compute/async-io/pollable@0.1.0', 'fastly:compute/http-req/request@0.1.0']);
+  await expect(hostResources.locator('wa-details.resource .section-summary code').first())
+    .toHaveAttribute('title', 'fastly:compute/async-io/pollable@0.1.0');
+  const request = resource(page, 'fastly:compute/http-req/request@0.1.0');
+  // The card says they are the host's, so each is tagged just as a resource.
+  await expect(request.locator('.section-summary wa-tag')).toHaveText('resource');
   await request.locator('.section-summary').click();
   await call(funcCard(request, 'new'));
   await expectCall(page, 'fastly:compute/http-req/request@0.1.0.new()', 'ok', 'ok(#request-1)');
   await expect(row(page, 'request-1').locator('td.handle')).toHaveText('host');
   await expect(row(page, 'request-1').locator('.instance-holders')).toHaveText('held by you');
-  const pollable = resource(page, 'pollable');
+  const pollable = resource(page, 'fastly:compute/async-io/pollable@0.1.0');
   await pollable.locator('.section-summary').click();
   await call(funcCard(pollable, 'new-ready'));
   await expectCall(page, 'fastly:compute/async-io/pollable@0.1.0.new-ready()', 'ok', '#pollable-2');
@@ -145,6 +157,22 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   await expect(importPrompt(page)).toBeVisible();
   await importPrompt(page).locator('wa-button', { hasText: 'Trap' }).click();
   await expectCall(page, 'fastly:compute/http-incoming@0.1.0.handle(#request-1, #pollable-2)', 'error', /^Trapped at /);
+});
+
+test('kv-store: a host resource function the UI calls asks in the call entry, not again under it', async ({ page }) => {
+  await loadExample(page, 'kv-store.wasm');
+  const hostResources = page.locator('wa-details.interface').first();
+  await hostResources.locator(':scope > .section-summary').click();
+  const pollable = resource(page, 'fastly:compute/async-io/pollable@0.1.0');
+  await pollable.locator('.section-summary').click();
+  // Without a stub for `Pollable`, `new-ready` asks for its result.
+  await call(funcCard(pollable, 'new-ready'));
+  const entry = callEntry(page, 'fastly:compute/async-io/pollable@0.1.0.new-ready()');
+  await expect(entry.locator('.import-prompt')).toBeVisible();
+  await expect(entry.locator('.log-call')).toHaveCount(1);
+  await entry.locator('.import-prompt wa-button', { hasText: 'Return' }).click();
+  await expectCall(page, 'fastly:compute/async-io/pollable@0.1.0.new-ready()', 'ok', '#pollable-1');
+  await expect(entry.locator('.log-import')).toHaveCount(0);
 });
 
 test('calculator: rejects invalid numbers without calling', async ({ page }) => {
@@ -241,7 +269,10 @@ test('wasi-http: renders the handler and its resources', async ({ page }) => {
   await expect(funcCard(page, 'handle')).toBeVisible();
   // Methods take the instance as `self`: a live one, or a new mock of the host resource.
   await expect(choices(picker(arg(funcCard(page, 'path-with-query'), 0)))).toHaveText(['New mock incoming-request']);
-  await expect(page.locator('.section-summary code', { hasText: 'response-outparam' })).toBeVisible();
+  // Host resources are collapsed until opened.
+  const hostResources = page.locator('wa-details.interface').first();
+  await hostResources.locator(':scope > .section-summary').click();
+  await expect(hostResources.locator('.section-summary code', { hasText: 'wasi:http/types/response-outparam@0.2.3' })).toBeVisible();
 });
 
 test('loading: upload, switching components and rejecting other files', async ({ page }) => {

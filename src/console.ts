@@ -201,13 +201,15 @@ export class ConsolePanel extends LitElement {
     `;
   }
 
-  private renderImport(entry: ImportEntry) {
+  // An import the UI called directly, e.g. a host resource's static, is the call it is under, so
+  // only its prompt and detail show there.
+  private renderImport(entry: ImportEntry, same = false) {
     return html`<div class="log-import ${entry.status}">
-      <div class="log-call">
+      ${same ? nothing : html`<div class="log-call">
         <span class="log-prompt">↳</span>
         <code>${entry.call}</code>
         ${!entry.output ? nothing : html`<span class="log-import-output">= <code>${entry.output}</code></span>`}
-      </div>
+      </div>`}
       ${entry.detail === undefined ? nothing : html`<div class="log-output"><pre>${entry.detail}</pre></div>`}
       ${entry.prompt ? this.renderPrompt(entry.prompt) : nothing}
     </div>`;
@@ -255,6 +257,9 @@ export class ConsolePanel extends LitElement {
       </div>`;
     }
     const waiting = entry.imports.some((i) => i.prompt);
+    // Matched by text: an import the guest makes with the same text as the export call it is
+    // under, e.g. of an interface both imported and exported, would be missed too.
+    const imports = entry.imports.filter((i) => i.call !== entry.call || i.prompt || i.detail !== undefined);
     const meta = waiting ? 'waiting for an import' : entry.elapsed === undefined ? entry.time : `${entry.time} · ${entry.elapsed} ms`;
     return html`<div class="log-entry ${entry.status}">
       <div class="log-call">
@@ -262,7 +267,9 @@ export class ConsolePanel extends LitElement {
         <code>${entry.call}</code>
         <span class=${waiting ? 'log-meta waiting' : 'log-meta'}>${meta}</span>
       </div>
-      ${entry.imports.length > 0 ? html`<div class="log-imports">${entry.imports.map((i) => this.renderImport(i))}</div>` : nothing}
+      ${imports.length > 0
+        ? html`<div class="log-imports">${imports.map((i) => this.renderImport(i, i.call === entry.call))}</div>`
+        : nothing}
       ${!entry.output
         ? nothing
         : html`<div class="log-output">
