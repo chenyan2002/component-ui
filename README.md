@@ -27,8 +27,7 @@ writing any glue code.
 ## Browser support
 
 Component UI requires [JavaScript Promise Integration (JSPI)](https://github.com/WebAssembly/js-promise-integration),
-which lets the guest suspend while you answer/mock an import. Use a recent Chrome or Edge; other
-browsers get a message instead of the app.
+which lets the guest suspend while you answer/mock an import.
 
 ## How it works
 
@@ -46,8 +45,6 @@ browsers get a message instead of the app.
    [Web Awesome](https://webawesome.com/), and is essentially an interpreter over WIT types.
 
 ## Development
-
-Requires Node.js 22.
 
 ```sh
 npm install
