@@ -42,11 +42,11 @@ function subform(content: Rendered[], { nested = true, flow = false } = {}): Ren
   return html`<div class=${classMap({ subform: true, nested, flow })}>${visible}</div>`;
 }
 
-// Types with a short control, which can share a row with others. Variants with a payload show it
-// below their cases, so they take a row of their own.
+// Types with a short control, which can share a row with others; a string's input stretches to fill
+// the rest of its row. Variants with a payload show it below their cases, so they take a row of their own.
 function isShort(t: IDL.Type): boolean {
-  return isNumber(t) || t instanceof IDL.BoolClass || t instanceof IDL.CharClass || t instanceof IDL.EnumClass
-    || t instanceof IDL.ResourceClass || t instanceof IDL.OwnedClass || t instanceof IDL.BorrowClass
+  return isNumber(t) || t instanceof IDL.BoolClass || t instanceof IDL.CharClass || t instanceof IDL.StringClass
+    || t instanceof IDL.EnumClass || t instanceof IDL.ResourceClass || t instanceof IDL.OwnedClass || t instanceof IDL.BorrowClass
     || (t instanceof IDL.VariantClass && Object.values(t._fields).every((ty) => ty instanceof IDL.NullClass));
 }
 
@@ -182,16 +182,24 @@ class Render extends IDL.Visitor<RenderData, Rendered> {
       ${instances.map((i, n) => html`<wa-option value=${i.id}>${labels[n]}</wa-option>`)}
     </wa-select>`;
   }
-  // An option is a variant of `none` and `some(T)`.
+  // Checked for `some(T)`. A short value goes right of the checkbox; others go below it.
   public visitOpt(_t: IDL.OptClass, ty: IDL.Type, { d, ctx }: RenderData): Rendered {
     const opt = d as OptDraft;
-    return html`
-      ${renderCases(opt, ['none', 'some'], opt.some ? 1 : 0, (index) => {
-        setSome(opt, ty, index === 1);
+    const short = isShort(ty);
+    const checkbox = html`<wa-checkbox
+      size="s"
+      class=${controlClass(opt)}
+      .checked=${live(opt.some)}
+      @change=${(e: Event) => {
+        opt.auto = false;
+        setSome(opt, ty, (e.target as HTMLInputElement).checked);
         ctx.update();
-      })}
-      ${opt.some ? subform([renderField(ty, opt.inner!, ctx)]) : nothing}
-    `;
+      }}
+    >${opt.some ? (short ? nothing : 'some') : 'none'}</wa-checkbox>`;
+    if (short) {
+      return html`<div class="opt">${checkbox}${opt.some ? renderField(ty, opt.inner!, ctx) : nothing}</div>`;
+    }
+    return html`${checkbox}${opt.some ? subform([renderField(ty, opt.inner!, ctx)]) : nothing}`;
   }
   public visitVec(t: IDL.VecClass, ty: IDL.Type, data: RenderData): Rendered {
     if (data.d.kind === 'bytes') {
@@ -416,7 +424,7 @@ export function renderField(t: IDL.Type, d: Draft, ctx: FormContext, label?: str
       </label>`
     : nothing;
   // Outside the label, which would otherwise pass its clicks on to the action.
-  return html`<div class=${classMap({ field: true, short: isShort(t) })}>
+  return html`<div class=${classMap({ field: true, short: isShort(t), stretch: t instanceof IDL.StringClass })}>
     ${action ? html`<div class="field-heading">${heading}${action}</div>` : heading}
     ${control}
     ${d.error ? html`<div class="field-error">${d.error}</div>` : nothing}

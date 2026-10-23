@@ -152,7 +152,7 @@ test('mock host resources stand in for the arguments a host would create', async
   await answerImport(page, '#borrowed-incoming-request-1.scheme()');
   await answerImport(page, '#borrowed-incoming-request-1.authority()');
   await answerImport(page, '#borrowed-incoming-request-1.path-with-query()', async (prompt) => {
-    await choose(picker(prompt), 'some');
+    await prompt.locator('wa-checkbox').click();
     await prompt.locator('wa-input input').fill('/');
   });
   await answerImport(page, '#borrowed-incoming-request-1.consume()', selectMock('incoming-body'));

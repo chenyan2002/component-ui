@@ -347,6 +347,26 @@ func-card.highlight {
   font-family: var(--wa-font-family-code);
   font-size: var(--wa-font-size-s);
 }
+/* An option's checkbox, and its value when it is short. */
+.field .opt {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--wa-space-xs);
+}
+/* As tall as the value's control, so it centers on it, above any error; also while unchecked, so
+   checking doesn't change the height. */
+.field .opt > wa-checkbox {
+  height: var(--wa-form-control-height);
+}
+.field .opt > wa-checkbox::part(base) {
+  margin-block: auto;
+}
+.field .opt > .field.stretch {
+  flex: 1;
+}
+.field > wa-checkbox {
+  align-self: flex-start;
+}
 .field wa-checkbox-group.flags {
   --gap: var(--wa-space-xs) var(--wa-space-m);
 }
@@ -400,6 +420,10 @@ wa-radio-group.result wa-radio[value='err']:state(checked) {
 }
 .flow > .field:not(.short) {
   flex-basis: 100%;
+}
+/* Strings fill the rest of the row, or wrap to the next if too little is left. */
+.flow > .field.stretch {
+  flex: 1 1 12rem;
 }
 .subform.nested {
   margin-top: var(--wa-space-2xs);
