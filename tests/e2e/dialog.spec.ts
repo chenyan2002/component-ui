@@ -24,7 +24,7 @@ const newMock = async (prompt: ReturnType<typeof importPrompt>) => {
 test('a missing host resource is mocked, and its calls ask for their results', async ({ page }) => {
   await loadResource(page);
   await call(funcCard(page, 'test-imports'));
-  const entry = callEntry(page, 'test-imports()');
+  const entry = callEntry(page, 'exports.test-imports()');
   await expect(entry.locator('.log-meta')).toHaveText('waiting for an import');
   // The guest is suspended, so other calls wait.
   await expect(funcCard(page, 'consume').locator('wa-button', { hasText: 'Call' })).toHaveAttribute('disabled');
@@ -32,21 +32,21 @@ test('a missing host resource is mocked, and its calls ask for their results', a
   // Constructors return a new mock and void methods return right away, without asking.
   await answerImport(page, '#borrowed-y-1.get-a()', s32('10'));
   await answerImport(page, '#borrowed-y-1.get-a()', s32('20'));
-  await answerImport(page, 'y.add(#y-1, 10)', newMock);
+  await answerImport(page, 'imports/y.add(#y-1, 10)', newMock);
   await answerImport(page, '#borrowed-y-2.get-a()', s32('30'));
   await answerImport(page, '#borrowed-y-3.get-a()', s32('1'));
   await answerImport(page, '#borrowed-y-4.get-a()', s32('2'));
   await answerImport(page, '#borrowed-y-3.get-a()', s32('10'));
   await answerImport(page, '#borrowed-y-4.get-a()', s32('20'));
-  await answerImport(page, 'y.add(#y-3, 20)', newMock);
-  await answerImport(page, 'y.add(#y-4, 30)', newMock);
+  await answerImport(page, 'imports/y.add(#y-3, 20)', newMock);
+  await answerImport(page, 'imports/y.add(#y-4, 30)', newMock);
   await answerImport(page, '#borrowed-y-5.get-a()', s32('30'));
   await answerImport(page, '#borrowed-y-6.get-a()', s32('50'));
   // The guest checks the values it reads back.
-  await expectCall(page, 'test-imports()', 'ok', 'ok');
+  await expectCall(page, 'exports.test-imports()', 'ok', 'ok');
   await expect(funcCard(page, 'consume').locator('wa-button', { hasText: 'Call' })).not.toHaveAttribute('disabled');
 
-  await expect(entry.locator('.log-import').first().locator('.log-call')).toHaveText(/new y\(10\)\s*=\s*#y-1/);
+  await expect(entry.locator('.log-import').first().locator('.log-call')).toHaveText(/new imports\/y\(10\)\s*=\s*#y-1/);
   await expect(entry.locator('.log-import', { hasText: '#borrowed-y-1.set-a(20)' }).locator('.log-import-output')).toHaveCount(0);
   await expect(row(page, 'y-2').locator('.instance-type')).toHaveText('y · mock');
   await expect(page.locator('resource-table tr.resource-row wa-tag'))
@@ -63,18 +63,18 @@ test('an import returns instances the host owns, not those the guest holds', asy
   await answerImport(page, '#borrowed-y-1.get-a()', s32('10'));
   await answerImport(page, '#borrowed-y-1.get-a()', s32('20'));
   // The guest moved y-1 into the call, so the host can hand it back.
-  await answerImport(page, 'y.add(#y-1, 10)', returns(['New mock y', '#y-1'], '#y-1'));
+  await answerImport(page, 'imports/y.add(#y-1, 10)', returns(['New mock y', '#y-1'], '#y-1'));
   await answerImport(page, '#borrowed-y-1.get-a()', s32('30'));
   await answerImport(page, '#borrowed-y-2.get-a()', s32('1'));
   await answerImport(page, '#borrowed-y-3.get-a()', s32('2'));
   await answerImport(page, '#borrowed-y-2.get-a()', s32('10'));
   await answerImport(page, '#borrowed-y-3.get-a()', s32('20'));
   // The guest still holds y-3, and dropped y-1.
-  await answerImport(page, 'y.add(#y-2, 20)', returns(['New mock y', '#y-2'], 'New mock y'));
-  await answerImport(page, 'y.add(#y-3, 30)', returns(['New mock y', '#y-2', '#y-3'], 'New mock y'));
+  await answerImport(page, 'imports/y.add(#y-2, 20)', returns(['New mock y', '#y-2'], 'New mock y'));
+  await answerImport(page, 'imports/y.add(#y-3, 30)', returns(['New mock y', '#y-2', '#y-3'], 'New mock y'));
   await answerImport(page, '#borrowed-y-4.get-a()', s32('30'));
   await answerImport(page, '#borrowed-y-5.get-a()', s32('50'));
-  await expectCall(page, 'test-imports()', 'ok', 'ok');
+  await expectCall(page, 'exports.test-imports()', 'ok', 'ok');
   await expect(page.locator('resource-table tr.resource-row wa-tag'))
     .toHaveText(['dropped', 'moved', 'moved', 'dropped', 'dropped']);
 });
@@ -99,12 +99,12 @@ test('Trap fails the import, and with it the call', async ({ page }) => {
   await loadResource(page);
   await call(funcCard(page, 'test-imports'));
   await answerImport(page, '#borrowed-y-1.get-a()', undefined, 'Trap');
-  await expectCall(page, 'test-imports()', 'error', /Trapped at #borrowed-y-1\.get-a\(\)/);
-  await expect(callEntry(page, 'test-imports()').locator('.log-import.error')).toContainText('#borrowed-y-1.get-a()');
+  await expectCall(page, 'exports.test-imports()', 'error', /Trapped at #borrowed-y-1\.get-a\(\)/);
+  await expect(callEntry(page, 'exports.test-imports()').locator('.log-import.error')).toContainText('#borrowed-y-1.get-a()');
   await expect(importPrompt(page)).toHaveCount(0);
   // Like a trap in the guest, it leaves the instance unusable.
   await call(funcCard(page, 'test-imports'));
-  await expectCall(page, 'test-imports()', 'error', /cannot enter component instance/);
+  await expectCall(page, 'exports.test-imports()', 'error', /cannot enter component instance/);
 });
 
 test('mock host resources stand in for the arguments a host would create', async ({ page }) => {
@@ -160,9 +160,9 @@ test('mock host resources stand in for the arguments a host would create', async
 
   // The guest builds a real response with the shim, and hands it to the mock outparam: the
   // host can't handle a mock, so that call shows in the console, with the response it sends.
-  await expectCall(page, 'handle(#incoming-request-1, #response-outparam-2)', 'ok', '');
-  const set = callEntry(page, 'handle(#incoming-request-1, #response-outparam-2)')
-    .locator('.log-import', { hasText: 'response-outparam.set(#response-outparam-2' });
+  await expectCall(page, 'wasi:http/incoming-handler@0.2.3.handle(#incoming-request-1, #response-outparam-2)', 'ok', '');
+  const set = callEntry(page, 'wasi:http/incoming-handler@0.2.3.handle(#incoming-request-1, #response-outparam-2)')
+    .locator('.log-import', { hasText: 'wasi:http/types/response-outparam@0.2.3.set(#response-outparam-2' });
   await expect(set.locator('.log-call')).toContainText('#outgoing-response-7');
   await expect(set.locator('.log-output pre')).toHaveText('HTTP 200\ncontent-length: 30\n\nHello, wasi:http/proxy world!\n');
   await expect(row(page, 'incoming-request-1').locator('.instance-type')).toHaveText('incoming-request · mock');

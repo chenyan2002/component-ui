@@ -2,7 +2,7 @@ import * as WIT from './wit';
 import { LogEntry } from './console';
 import { MOCK } from './dialog';
 import { MockFactory } from './draft';
-import { HostResources } from './host-resources';
+import { HostResources, qualified, qualifiedResource } from './host-resources';
 import { argHandles, ownedHandles, ResourceRegistry, returnedType, thrownType } from './resources';
 import { formatArgs, formatHandle, formatResult, formatThrown } from './wave';
 
@@ -103,18 +103,18 @@ function resolveCall(ctx: ExportsContext, target: CallTarget, name: string, func
   switch (target.type) {
     case 'func': {
       const mod = exportsOf(ctx, target.iface);
-      return { label: `${shown}(${argList})`, invoke: () => mod[name](...args) };
+      return { label: `${qualified(target.iface._name, shown)}(${argList})`, invoke: () => mod[name](...args) };
     }
     case 'constructor': {
       const cls = resourceClass(ctx, target.iface, target.resource);
-      return { label: `new ${target.resource.witName}(${argList})`, invoke: () => new cls(...args) };
+      return { label: `new ${qualifiedResource(target.resource)}(${argList})`, invoke: () => new cls(...args) };
     }
     case 'static': {
       const cls = resourceClass(ctx, target.iface, target.resource);
       if (typeof cls[name] !== 'function') {
         throw new Error(`${target.resource.witName}.${shown} is not implemented`);
       }
-      return { label: `${target.resource.witName}.${shown}(${argList})`, invoke: () => cls[name](...args) };
+      return { label: `${qualifiedResource(target.resource)}.${shown}(${argList})`, invoke: () => cls[name](...args) };
     }
     case 'method': {
       const [self, ...rest] = args;

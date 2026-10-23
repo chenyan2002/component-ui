@@ -15,7 +15,7 @@ test('stdout and stderr appear in the console', async ({ page }) => {
   await expect(streamEntries(page, 'stdout')).toHaveText(['Hello, Ada!\nsecond line']);
 
   // The stream the host handed to the guest for stdout is a host resource held by the guest.
-  const stdout = page.locator('resource-table tr.resource-row', { hasText: 'wasi:cli/stdout.get-stdout()' });
+  const stdout = page.locator('resource-table tr.resource-row', { hasText: 'wasi:cli/stdout@0.2.9.get-stdout()' });
   await expect(page.locator('.resource-pane')).toBeVisible();
   await expect(stdout).toHaveCount(1);
   await expect(stdout.locator('.instance-type')).toHaveText('output-stream');
@@ -27,5 +27,5 @@ test('stdout and stderr appear in the console', async ({ page }) => {
   await arg(warn, 0).locator('input').fill('disk almost full');
   await call(warn);
   await expect(streamEntries(page, 'stderr')).toHaveText(['warning: disk almost full']);
-  await expect(page.locator('resource-table tr.resource-row', { hasText: 'wasi:cli/stderr.get-stderr()' })).toHaveCount(1);
+  await expect(page.locator('resource-table tr.resource-row', { hasText: 'wasi:cli/stderr@0.2.9.get-stderr()' })).toHaveCount(1);
 });

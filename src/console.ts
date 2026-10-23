@@ -68,10 +68,30 @@ type Entry = CallEntry | StreamEntry | ImportEntry;
 export class ConsolePanel extends LitElement {
   @state() accessor entries: Entry[] = [];
   @query('.console') accessor list!: HTMLElement;
+  @query('.console-log') accessor content!: HTMLElement;
+  // Whether the console keeps its end in view as it grows: until the user scrolls up, and again
+  // once they scroll back down or a new entry is added.
+  private follow = true;
+  // Where the console last scrolled itself, to tell its own scrolls from the user's.
+  private scrolledTo = 0;
+  // Entries grow after they render, e.g. as the fields of a prompt render, so follow their size.
+  private readonly resizes = new ResizeObserver(() => this.scrollToEnd());
 
   // Render into the light DOM so the global stylesheet applies.
   protected createRenderRoot() {
     return this;
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    if (this.hasUpdated) {
+      this.resizes.observe(this.content);
+    }
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this.resizes.disconnect();
   }
 
   public clear() {
@@ -81,6 +101,7 @@ export class ConsolePanel extends LitElement {
   public logCall(call: string): LogEntry {
     const started = performance.now();
     const entry: CallEntry = { kind: 'call', call, time: new Date().toLocaleTimeString(), status: 'pending', imports: [] };
+    this.follow = true;
     this.entries = [...this.entries, entry];
     const finish = (status: CallEntry['status'], output: string) => {
       Object.assign(entry, { status, output, elapsed: Math.round(performance.now() - started) });
@@ -96,6 +117,7 @@ export class ConsolePanel extends LitElement {
   public logImport(call: string): ImportLog {
     const entry: ImportEntry = { kind: 'import', call, status: 'pending' };
     const parent = [...this.entries].reverse().find((e): e is CallEntry => e.kind === 'call' && e.status === 'pending');
+    this.follow = true;
     if (parent) {
       parent.imports.push(entry);
       this.requestUpdate();
@@ -127,17 +149,39 @@ export class ConsolePanel extends LitElement {
       last.text += text;
       this.requestUpdate();
     } else {
+      this.follow = true;
       this.entries = [...this.entries, { kind: 'stream', stream, text }];
     }
   }
 
+  protected firstUpdated() {
+    this.resizes.observe(this.content);
+  }
+
   protected updated(_changed: PropertyValues) {
-    this.list.scrollTop = this.list.scrollHeight;
+    this.scrollToEnd();
     // A new prompt takes the focus, so the answer can be typed right away.
     const prompt = this.querySelector<HTMLElement>('.import-prompt:not([data-focused])');
     if (prompt) {
       prompt.dataset.focused = '';
-      prompt.querySelector<HTMLElement>('input, select')?.focus();
+      // The console scrolls itself; focusing mustn't scroll the prompt to the middle.
+      prompt.querySelector<HTMLElement>('input, select')?.focus({ preventScroll: true });
+    }
+  }
+
+  private scrollToEnd() {
+    if (this.follow) {
+      this.list.scrollTop = this.list.scrollHeight;
+      this.scrolledTo = this.list.scrollTop;
+    }
+  }
+
+  // Follows the end only while it is in view, so that scrolling up to read stops following. The
+  // event for the console's own scroll may come after the content grew, which isn't the user's.
+  private onScroll() {
+    const { scrollTop, scrollHeight, clientHeight } = this.list;
+    if (scrollTop !== this.scrolledTo) {
+      this.follow = scrollHeight - scrollTop - clientHeight < 4;
     }
   }
 
@@ -147,10 +191,12 @@ export class ConsolePanel extends LitElement {
         <span class="panel-title"><wa-icon name="terminal"></wa-icon> Console</span>
         <wa-button size="s" appearance="plain" @click=${() => this.clear()}>Clear</wa-button>
       </div>
-      <div class="console">
-        ${this.entries.length === 0
-          ? html`<div class="console-empty">Call a function to see results here.</div>`
-          : this.entries.map((entry) => this.renderEntry(entry))}
+      <div class="console" @scroll=${() => this.onScroll()}>
+        <div class="console-log">
+          ${this.entries.length === 0
+            ? html`<div class="console-empty">Call a function to see results here.</div>`
+            : this.entries.map((entry) => this.renderEntry(entry))}
+        </div>
       </div>
     `;
   }

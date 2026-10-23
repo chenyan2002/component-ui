@@ -46,8 +46,8 @@ test('calculator: imports are answered in the console, or implemented in JavaScr
     await call(card);
   };
   await add();
-  await answerImport(page, 'docs:adder/add.add(2, 3)', (prompt) => prompt.locator('input').fill('5'));
-  await expectCall(page, 'eval-expression(add, 2, 3)', 'ok', '5');
+  await answerImport(page, 'docs:adder/add@0.1.0.add(2, 3)', (prompt) => prompt.locator('input').fill('5'));
+  await expectCall(page, 'docs:calculator/calculate@0.1.0.eval-expression(add, 2, 3)', 'ok', '5');
 
   // The dialog shows example code, which takes effect once applied.
   const dialog = await openImports(page);
@@ -60,7 +60,7 @@ test('calculator: imports are answered in the console, or implemented in JavaScr
   await expect(dialog.locator('.imports-pending')).toHaveCount(0);
   await add();
   await expect(callEntries(page).last().locator('.log-import')).toHaveCount(0);
-  await expectCall(page, 'eval-expression(add, 2, 3)', 'ok', '5');
+  await expectCall(page, 'docs:calculator/calculate@0.1.0.eval-expression(add, 2, 3)', 'ok', '5');
   // Nothing involves resources, so the resource table stays collapsed.
   await expect(page.locator('.resource-pane')).toBeHidden();
 });
@@ -112,13 +112,13 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   await expect(request.locator('.section-summary wa-tag')).toHaveText('host resource');
   await request.locator('.section-summary').click();
   await call(funcCard(request, 'new'));
-  await expectCall(page, 'request.new()', 'ok', 'ok(#request-1)');
+  await expectCall(page, 'fastly:compute/http-req/request@0.1.0.new()', 'ok', 'ok(#request-1)');
   await expect(row(page, 'request-1').locator('td.handle')).toHaveText('host');
   await expect(row(page, 'request-1').locator('.instance-holders')).toHaveText('held by you');
   const pollable = resource(page, 'pollable');
   await pollable.locator('.section-summary').click();
   await call(funcCard(pollable, 'new-ready'));
-  await expectCall(page, 'pollable.new-ready()', 'ok', '#pollable-2');
+  await expectCall(page, 'fastly:compute/async-io/pollable@0.1.0.new-ready()', 'ok', '#pollable-2');
 
   const setMethod = funcCard(request, 'set-method');
   await choose(picker(arg(setMethod, 0)), 'request-1');
@@ -144,7 +144,7 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   // The guest goes on to the next import; failing it fails the call.
   await expect(importPrompt(page)).toBeVisible();
   await importPrompt(page).locator('wa-button', { hasText: 'Trap' }).click();
-  await expectCall(page, 'handle(#request-1, #pollable-2)', 'error', /^Trapped at /);
+  await expectCall(page, 'fastly:compute/http-incoming@0.1.0.handle(#request-1, #pollable-2)', 'error', /^Trapped at /);
 });
 
 test('calculator: rejects invalid numbers without calling', async ({ page }) => {
@@ -163,8 +163,8 @@ test('calculator: rejects invalid numbers without calling', async ({ page }) => 
   await arg(card, 1).locator('input').fill('40');
   await arg(card, 2).locator('input').fill('2');
   await call(card);
-  await answerImport(page, 'docs:adder/add.add(40, 2)', (prompt) => prompt.locator('input').fill('42'));
-  await expectCall(page, 'eval-expression(add, 40, 2)', 'ok', '42');
+  await answerImport(page, 'docs:adder/add@0.1.0.add(40, 2)', (prompt) => prompt.locator('input').fill('42'));
+  await expectCall(page, 'docs:calculator/calculate@0.1.0.eval-expression(add, 40, 2)', 'ok', '42');
 });
 
 test('calculator: Random fills empty fields and keeps typed ones', async ({ page }) => {
@@ -178,7 +178,7 @@ test('calculator: Random fills empty fields and keeps typed ones', async ({ page
   }
   await expect(callEntries(page)).toHaveCount(2);
   await expect(callEntries(page).locator(':scope > .log-call code'))
-    .toHaveText([/^eval-expression\(add, 5, \d+\)$/, /^eval-expression\(add, 5, \d+\)$/]);
+    .toHaveText([/^docs:calculator\/calculate@0\.1\.0\.eval-expression\(add, 5, \d+\)$/, /^docs:calculator\/calculate@0\.1\.0\.eval-expression\(add, 5, \d+\)$/]);
   // The generated values are shown in the form, marked as generated.
   await expect(arg(card, 2).locator('wa-number-input')).toHaveClass(/\bauto\b/);
   await expect(arg(card, 2).locator('input')).not.toHaveValue('');
@@ -197,7 +197,7 @@ test.describe('variants', () => {
 
     await choose(picker(arg(card, 0)), 'b');
     await call(card);
-    await expectCall(page, 'roundtrip-enum(b)', 'ok', 'b');
+    await expectCall(page, 'test:variants/test.roundtrip-enum(b)', 'ok', 'b');
   });
 
   test('Random builds valid nested values', async ({ page }) => {
@@ -226,11 +226,11 @@ test.describe('variants', () => {
     await choose(picker(arg(card, 1)), 'ok');
     await choose(picker(arg(card, 2)), 'a');
     await call(card);
-    await expectCall(page, 'variant-enums(false, ok, a)', 'error', /^wasm trap/);
+    await expectCall(page, 'test:variants/test.variant-enums(false, ok, a)', 'error', /^wasm trap/);
     await expect(streamEntries(page, 'stderr').last()).toContainText('Assertion failed');
 
     await call(funcCard(page, 'invert-bool'));
-    await expectCall(page, 'invert-bool(false)', 'error', /cannot enter component instance/);
+    await expectCall(page, 'test:variants/test.invert-bool(false)', 'error', /cannot enter component instance/);
   });
 });
 

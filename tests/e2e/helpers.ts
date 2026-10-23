@@ -90,7 +90,7 @@ export function row(page: Page, id: string): Locator {
   return page.locator(`resource-table tr.resource-row[data-id="${id}"]`);
 }
 
-// What happened to the current instance of a row, e.g. `→ moved into consume(#x-1)`.
+// What happened to the current instance of a row, e.g. `→ moved into exports.consume(#x-1)`.
 export function fate(row: Locator): Locator {
   return row.locator(':scope > td.history > .instance-fate');
 }

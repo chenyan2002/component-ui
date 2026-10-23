@@ -79,8 +79,13 @@ npm run build:bindgen
   invalid async code for them, so they can't wait on an import prompt.
 - Imports called during instantiation can't prompt.
 - A real host object's method that receives a mock argument isn't routed to a prompt, so it may still fail in the host code.
-- jco merges incompatible versions (e.g., 0.2.0 and 0.3.0) into one unversioned import, so a prompt can show the wrong form
-  for the other version.
+- Calls are shown with their versioned interface, e.g. `wasi:http/types/fields@0.2.3.from-list(…)`,
+  but the version isn't always the one the guest imported:
+  - Semver-compatible versions of an interface (e.g., `wasi:io/streams@0.2.0` and `@0.2.3`) are
+    merged into the newest one, so calls through either show as `@0.2.3`.
+  - jco merges incompatible versions (e.g., 0.2.0 and 0.3.0) into one unversioned import, so
+    a call can't be told apart by version: it is shown with, and a prompt asks for, the types
+    of the first version that has the function, which may be the wrong form for the other.
 - jco's async imports hang on failure; the loader patches jco's output to rethrow, which may need updating when jco changes.
 - While a call is waiting on an import, other calls are disabled, since the component instance
   can't be re-entered.

@@ -36,6 +36,27 @@ export function unversioned(pkg: string): string {
   return pkg.replace(/@[^/]*$/, '');
 }
 
+function isWorldLevel(iface: string): boolean {
+  return iface === '' || iface === WIT.ROOT_INTERFACE;
+}
+
+// A function of an interface as the console shows it, e.g. `wasi:cli/stdout@0.2.3.get-stdout`;
+// functions at the world level have no interface.
+export function qualified(iface: string, name: string): string {
+  return isWorldLevel(iface) ? name : `${iface}.${name}`;
+}
+
+// A resource as the console shows it, under the interface that defines it and followed by its
+// version, e.g. `wasi:http/types/fields@0.2.3`.
+export function qualifiedResource(resource: WIT.ResourceClass): string {
+  const iface = resource._interface;
+  if (isWorldLevel(iface)) {
+    return resource.witName;
+  }
+  const name = unversioned(iface);
+  return `${name}/${resource.witName}${iface.slice(name.length)}`;
+}
+
 // Imported interfaces by unversioned name, as jco keys imports: it gives all versions of an
 // interface one import object. The bindgen already merges semver-compatible versions, e.g.
 // `wasi:io/streams@0.2.0` into `@0.2.3`, so a name only has several for incompatible ones.
@@ -101,7 +122,8 @@ export class HostResources {
           return value;
         }
         if (!wrapped.has(key)) {
-          const func = ifaces.map((iface) => ownFunc(iface._fields, key)).find((f) => f !== undefined);
+          const iface = ifaces.find((iface) => ownFunc(iface._fields, key) !== undefined);
+          const func = iface && ownFunc(iface._fields, key);
           // One resource per version of the interface.
           const resources = ifaces.flatMap((iface) => iface.get_resources()).filter((r) => r._name === key);
           if (!func) {
@@ -109,7 +131,7 @@ export class HostResources {
             resources.forEach((resource) => this.classes.set(resource, value));
           }
           wrapped.set(key, func
-            ? this.wrapFunc(func, value, (args) => `${name}.${func.displayName(key)}(${this.format(func, args)})`)
+            ? this.wrapFunc(func, value, (args) => `${qualified(iface!._name, func.displayName(key))}(${this.format(func, args)})`)
             : resources.length > 0 ? this.wrapClass(resources[0], value) : value);
         }
         return wrapped.get(key);
@@ -136,7 +158,7 @@ export class HostResources {
         const ctor = ownFunc(fields, 'constructor');
         const construct = () => Reflect.construct(target, args, newTarget);
         return ctor
-          ? this.observe(ctor, args, construct, () => `new ${resource.witName}(${this.format(ctor, args)})`, resource)
+          ? this.observe(ctor, args, construct, () => `new ${qualifiedResource(resource)}(${this.format(ctor, args)})`, resource)
           : construct();
       },
       get: (target, key, receiver) => {
@@ -146,7 +168,7 @@ export class HostResources {
           return value;
         }
         if (!statics.has(key)) {
-          statics.set(key, this.wrapFunc(func, value.bind(target), (args) => `${resource.witName}.${func.displayName(key)}(${this.format(func, args)})`));
+          statics.set(key, this.wrapFunc(func, value.bind(target), (args) => `${qualifiedResource(resource)}.${func.displayName(key)}(${this.format(func, args)})`));
         }
         return statics.get(key);
       },
