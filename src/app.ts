@@ -201,7 +201,7 @@ export class ComponentApp extends LitElement {
             ${keyed(s.id, html`
               ${s.component.customImports.length > 0 ? this.renderImports(s) : nothing}
               <div class=${classMap({ exports: true, searching: this.search.trim() !== '' })} @wa-show=${this.onToggle} @wa-hide=${this.onToggle}>
-                ${s.status === 'ready' ? this.renderExportsToolbar() : nothing}
+                ${this.renderExportsToolbar(s)}
                 ${keyed(s.generation, this.renderExportsArea(s))}
               </div>
             `)}
@@ -222,27 +222,8 @@ export class ComponentApp extends LitElement {
   // Calls to imports ask in the console by default. The dialog implements them in JavaScript
   // instead, and restarts the component with them; it stays open if that fails.
   private renderImports(s: Session) {
-    const count = s.component.customImports.length;
-    const implemented = Object.entries(s.appliedCode).filter(([pkg, code]) => code.trim() !== '' && code !== s.templates[pkg]).length;
     const pending = s.component.customImports.some((pkg) => (s.importCode[pkg] ?? '') !== (s.appliedCode[pkg] ?? ''));
-    return html`<div id="importsCard" class="imports-card">
-      <div class="card-title">
-        <span class="imports-title">
-          Imports
-          <wa-badge variant="neutral" appearance="filled" pill>${count} interface${count === 1 ? '' : 's'}</wa-badge>
-          ${implemented > 0 ? html`<wa-tag size="s" variant="brand">${implemented} in JavaScript</wa-tag>` : nothing}
-        </span>
-        <span class="muted">
-          Calls to imports ask for their results in the console. Implement them in JavaScript
-          instead; the functions you leave out still ask.
-        </span>
-      </div>
-      <wa-button id="editImportsButton" appearance="outlined" size="s" @click=${() => (this.editingImports = true)}>
-        <wa-icon slot="start" name="code"></wa-icon>
-        Implement in JavaScript
-      </wa-button>
-    </div>
-    <wa-dialog
+    return html`<wa-dialog
       id="importsDialog"
       class="imports-dialog"
       label="Implement imports in JavaScript"
@@ -301,10 +282,14 @@ export class ComponentApp extends LitElement {
     }
   }
 
-  private renderExportsToolbar() {
+  // Searching and collapsing need the exports; the imports can be edited, e.g. to fix them, once
+  // instantiation failed too.
+  private renderExportsToolbar(s: Session) {
+    const ready = s.status === 'ready';
     return html`<div class="exports-toolbar">
       <wa-input
         size="s"
+        ?disabled=${!ready}
         placeholder="Search functions"
         aria-label="Search functions"
         with-clear
@@ -313,11 +298,26 @@ export class ComponentApp extends LitElement {
       >
         <wa-icon slot="start" name="magnifying-glass"></wa-icon>
       </wa-input>
-      <wa-button size="s" appearance="outlined" @click=${() => this.toggleInterfaces()}>
+      <wa-button size="s" appearance="outlined" ?disabled=${!ready} @click=${() => this.toggleInterfaces()}>
         <wa-icon slot="start" name=${this.interfacesOpen ? 'angles-up' : 'angles-down'}></wa-icon>
         ${this.interfacesOpen ? 'Collapse all' : 'Expand all'}
       </wa-button>
+      ${s.component.customImports.length > 0 ? this.renderStubButton(s) : nothing}
     </div>`;
+  }
+
+  // Calls to imports ask in the console unless implemented in JavaScript, which the badge counts.
+  private renderStubButton(s: Session) {
+    const count = s.component.customImports.length;
+    const implemented = Object.entries(s.appliedCode).filter(([pkg, code]) => code.trim() !== '' && code !== s.templates[pkg]).length;
+    const title = `Implement the ${count} imported interface${count === 1 ? '' : 's'} in JavaScript; `
+      + `the functions you leave out ask for their results in the console`
+      + (implemented > 0 ? ` (${implemented} in JavaScript)` : '');
+    return html`<wa-button id="editImportsButton" size="s" appearance="outlined" title=${title} @click=${() => (this.editingImports = true)}>
+      <wa-icon slot="start" name="code"></wa-icon>
+      JS Stub
+      ${implemented > 0 ? html`<wa-badge class="implemented" variant="brand" pill>${implemented}</wa-badge>` : nothing}
+    </wa-button>`;
   }
 
   private interfaceSections() {

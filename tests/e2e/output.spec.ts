@@ -4,7 +4,7 @@ import { arg, call, expectCall, funcCard, loadExample, streamEntries } from './h
 test('stdout and stderr appear in the console', async ({ page }) => {
   await loadExample(page, 'printer.wasm');
   // Every WASI interface it imports is provided by the shim.
-  await expect(page.locator('#importsCard')).toHaveCount(0);
+  await expect(page.locator('#editImportsButton')).toHaveCount(0);
   // The exports don't involve resources: the resource table shows once the guest gets one.
   await expect(page.locator('.resource-pane')).toBeHidden();
 

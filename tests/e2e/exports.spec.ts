@@ -4,7 +4,7 @@ import { arg, funcCard, loadExample, resource } from './helpers';
 test('collapse and expand all interfaces', async ({ page }) => {
   await loadExample(page, 'calculator.wasm');
   const interfaces = page.locator('wa-details.interface');
-  const toggle = page.locator('.exports-toolbar wa-button');
+  const toggle = page.locator('.exports-toolbar wa-button', { hasText: /(Collapse|Expand) all/ });
   await expect(toggle).toHaveText('Collapse all');
 
   await toggle.click();

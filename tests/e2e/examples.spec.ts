@@ -35,9 +35,9 @@ test('a browser without JSPI gets a message instead of the app', async ({ page }
 test('calculator: imports are answered in the console, or implemented in JavaScript', async ({ page }) => {
   // It instantiates right away, with no imports in JavaScript yet.
   await loadExample(page, 'calculator.wasm');
-  const imports = page.locator('#importsCard');
+  const implemented = page.locator('#editImportsButton wa-badge.implemented');
   await expect(page.locator('#importsDialog')).not.toHaveAttribute('open');
-  await expect(imports.locator('.imports-title wa-tag')).toHaveCount(0);
+  await expect(implemented).toHaveCount(0);
   const add = async () => {
     const card = funcCard(page, 'eval-expression');
     await choose(picker(arg(card, 0)), 'add');
@@ -56,7 +56,7 @@ test('calculator: imports are answered in the console, or implemented in JavaScr
   await expect(dialog.locator('.imports-pending')).toHaveText('Not applied yet');
   await dialog.locator('#applyImportsButton').click();
   await expect(dialog).not.toHaveAttribute('open');
-  await expect(imports.locator('.imports-title wa-tag')).toHaveText('1 in JavaScript');
+  await expect(implemented).toHaveText('1');
   await expect(dialog.locator('.imports-pending')).toHaveCount(0);
   await add();
   await expect(callEntries(page).last().locator('.log-import')).toHaveCount(0);
@@ -82,7 +82,7 @@ test('calculator: imports that fail to apply keep the dialog open, with the erro
 
 test('kv-store: instantiates with its Fastly imports answered in the console', async ({ page }) => {
   await loadExample(page, 'kv-store.wasm');
-  await expect(page.locator('#importsCard .imports-title wa-badge')).toHaveText('21 interfaces');
+  await expect(page.locator('#editImportsButton')).toHaveAttribute('title', /^Implement the 21 imported interfaces /);
   // The exports start in view, with the host resources they use.
   await expect(page.locator('wa-details.interface').first()).toBeInViewport();
   await expect(page.locator('wa-details.resource', { hasText: 'request' })).not.toHaveAttribute('open');
@@ -96,7 +96,7 @@ test('kv-store: instantiates with its Fastly imports answered in the console', a
 
 test('record-imports: instantiates with the Fastly interfaces it wraps', async ({ page }) => {
   await loadExample(page, 'record_imports.wasm');
-  await expect(page.locator('#importsCard .imports-title wa-badge')).toHaveText('22 interfaces');
+  await expect(page.locator('#editImportsButton')).toHaveAttribute('title', /^Implement the 7 imported interfaces /);
   await expect(page.locator('.section-summary code', { hasText: 'wrapped-fastly:compute/http-req@0.1.0' })).toBeVisible();
   // Every card renders its signature; a type that failed to resolve leaves one blank.
   const cards = page.locator('func-card');
@@ -294,7 +294,7 @@ test('loading: upload, switching components and rejecting other files', async ({
   // Switching components replaces the workspace and clears the console.
   await page.locator('#preselectedWasmFile').selectOption('calculator.wasm');
   await expect(page.locator('#componentName')).toHaveText('Calculator');
-  await expect(page.locator('#importsCard')).toBeVisible();
+  await expect(page.locator('#editImportsButton')).toBeVisible();
   await expect(callEntries(page)).toHaveCount(0);
 
   await page.locator('#wasmFileInput').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hi') });

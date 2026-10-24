@@ -140,33 +140,6 @@ pre {
 }
 
 /* Imports */
-.card-title {
-  display: flex;
-  flex-direction: column;
-  font-weight: var(--wa-font-weight-semibold);
-}
-.card-title .muted {
-  font-weight: var(--wa-font-weight-normal);
-}
-.imports-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--wa-space-m);
-  flex-shrink: 0;
-  padding: var(--wa-space-m) var(--wa-space-l);
-  background: var(--wa-color-surface-default);
-  border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
-  border-radius: var(--wa-border-radius-l);
-}
-.imports-card wa-button {
-  flex-shrink: 0;
-}
-.imports-title {
-  display: flex;
-  align-items: center;
-  gap: var(--wa-space-s);
-}
 /* It shows in the top layer; out of the flow, the pane doesn't make room for it. */
 .imports-dialog {
   position: absolute;
