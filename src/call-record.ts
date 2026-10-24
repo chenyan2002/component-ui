@@ -18,7 +18,7 @@ export interface CallRecord {
   // The function's WIT name, without the resource's, e.g. `headers` for
   // `[method]fields.headers`; `constructor` for a constructor and `drop` for a drop.
   func: string;
-  // The instance a method is called on or a drop drops, e.g. `#borrowed-x-1`.
+  // The instance a method is called on or a drop drops, e.g. `#borrow-x-1`.
   self?: string;
   // The arguments in WAVE, one per parameter; a method's `self` isn't one.
   args: string[];

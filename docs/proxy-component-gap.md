@@ -41,42 +41,57 @@ need to be valid WAVE.
 
 ## Value encoding
 
-Both tools write [WAVE](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-wave).
-component-ui's writer is [`src/wave.ts`](../src/wave.ts) and has no parser; values are entered
-through forms. proxy-component uses the fork's writer and parser (`crates/wasm-wave/src/writer.rs`).
+Both tools read and write [WAVE](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-wave)
+with the same writer and parser: component-ui calls the fork's wasm-wave from
+[`crates/bindgen`](../crates/bindgen) ([`src/wave.ts`](../src/wave.ts)). Escaping, floats, and
+the omission of `none` record fields therefore match, e.g. `"it\'s"`, `1000000000000000000000`,
+`{a: 1}` for `{a: 1, b: none}`.
+
+### Unknown record fields are ignored
+
+wasm-wave reads a record without checking for fields the record type doesn't have: as a
+`record { x: s32, label: option<string> }`, `{x: 1, y: 2}` reads as `{x: 1}`, and
+`{x: 1, lable: some("a")}` as `{x: 1}`, with `label` none. This comes from upstream wasm-wave
+(`to_wasm_record` in `crates/wasm-wave/src/ast.rs`), not the fork, so both tools behave alike.
+A misspelled field is dropped silently instead of rejected, and for an optional field the value
+quietly becomes `none`, so hand-written WAVE, e.g. an agent's answers or a hand-edited trace,
+may not mean what it says. [`tests/node/wave.test.ts`](../tests/node/wave.test.ts) asserts the
+current behavior under a `FIXME`, so a fix in wasm-wave shows up there as a failing test.
+
+### Handle labels
+
+Each tool chooses its handle labels itself. Both write an owned handle as `#x-1` and a borrowed
+one as `#borrow-x-1`, and read only what they write: the label must name the handle's resource,
+and have the `borrow-` prefix exactly for a borrow.
 
 | | component-ui | proxy-component |
 |---|---|---|
 | Owned handle | `#x-1` | `#x-1` |
-| Borrowed handle | `#borrowed-x-1` | `#borrow-x-1` |
+| Borrowed handle | `#borrow-x-1` | `#borrow-x-1` |
+| Reading `#x-1` as a borrow, `#borrow-x-1` as an owned handle, or `#y-1` for an `x` | a parse error | a panic, `invalid handle label` (the `ToRust` impls in `src/traits/wave.rs`) |
 | Handle of a host resource | numbered in creation order, from 1, never reused; `host-` prefix when the guest exports a resource of the same name | its handle index, which is reused after a drop |
 | Handle of a guest resource | its handle index in jco's table | its handle index in the instrumented component's table; whether the two agree is unverified |
-| Record field set to `none` | written, `{a: none}` | omitted; all `none` gives `{:}` |
-| Quotes in strings and chars | only the enclosing quote is escaped | both are escaped, e.g. `"it\'s"` |
-| Other escapes | control characters as `\u{…}` | control characters as `\u{…}`, plus whatever Rust's `char::escape_debug` escapes, e.g. combining marks (U+0301) and U+200B, U+FEFF |
-| Floats | JS `Number#toString`, which uses exponents (`1e21`, `1e-7`) | Rust `Display`, which never does (`1000000000000000000000`, `0.0000001`) |
-| `f32` | shortest decimal that reads back as the same `f32` | the same, via Rust `Display` for `f32` |
-| NaN, infinities, `-0` | `nan`, `inf`, `-inf`, `-0` | the same |
-| `option<option<T>>`, results, flags, enums, variants, keywords | | the same: `some(none)`, `ok`/`err(v)`, `{a, b}`, `%`-prefixed keywords |
+| A new mock instance | `#mock`, when read | none; replay creates one for each owned label it hasn't seen |
 | Futures, streams, error-context | not supported | not supported |
 
-The fork also accepts input that component-ui never writes, e.g. exponents in floats. A shared
-parser would need to accept both tools' output.
+Besides the labels proxy-component reads, component-ui reads `#mock`, and ids with the `host-`
+prefix, e.g. `#host-y-1`; proxy-component would reject both.
 
 ## Function names
 
 | | component-ui (console labels) | proxy-component (trace `method`) |
 |---|---|---|
 | Function | `wasi:cli/stdout@0.2.0.get-stdout` | `wasi:cli/stdout.get-stdout` |
-| Method | `#borrowed-x-1.method(…)`; the receiver isn't an argument | `[method]ns:pkg/iface/x.method`; `self` is the first argument |
+| Method | `#borrow-x-1.method(…)`; the receiver isn't an argument | `[method]ns:pkg/iface/x.method`; `self` is the first argument |
 | Constructor | `new ns:pkg/iface/x@1.0.0(…)` | `[constructor]ns:pkg/iface/x.new` (Rust's constructor name) |
 | Static | `ns:pkg/iface/x@1.0.0.func(…)` | `ns:pkg/iface/x.func`, without a `[static]` prefix |
 | World-level function | `func(…)` | not supported |
 | Drop | `drop #x-1` | not recorded |
 
-component-ui's labels are text for display, not structured records. A call's interface,
-function and arguments aren't kept separately ([`src/calls.ts`](../src/calls.ts),
-[`src/dialog.ts`](../src/dialog.ts)).
+component-ui logs each call as a record ([`src/call-record.ts`](../src/call-record.ts)) with its
+interface (versioned), resource, function name and WAVE arguments apart, and `self` apart from
+the arguments; the labels above are made from it. A proxy-component name could be made from a
+record too, but not the other way: proxy-component's names lose versions.
 
 proxy-component builds names from the generated Rust module paths and converts them back to
 kebab case (`src/codegen/util.rs`, `wit_func_name`), which loses information:
@@ -101,11 +116,10 @@ kebab case (`src/codegen/util.rs`, `wit_func_name`), which loses information:
 
 ## What closing the gap would take
 
-1. One WAVE writer and parser for both tools. If component-ui calls the fork's wasm-wave from
-   [`crates/bindgen`](../crates/bindgen), both get the same escaping and float formatting
-   without copying Rust's rules into TypeScript. This is planned independently of interop.
-2. Structured call records in component-ui (interface, resource, kind, function, WAVE
-   arguments, result) instead of label text, so a trace can be written from them.
+1. Done: one WAVE writer and parser for both tools (see [Value encoding](#value-encoding)).
+2. Done: structured call records in component-ui ([`src/call-record.ts`](../src/call-record.ts)),
+   with the interface, resource, kind, function and WAVE arguments of each call, so a trace
+   can be written from them.
 3. A component-ui recorder that writes the four entry types with proxy-component's names,
    including WASI calls.
 4. A component-ui replayer that answers imports from a trace in order, WASI included, and

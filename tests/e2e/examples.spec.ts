@@ -150,7 +150,7 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   await arg(getMethod, 1).locator('input').fill('10');
   await call(getMethod);
   // A `u64` is a `bigint`, shown as a number.
-  await expectCall(page, '#borrowed-request-1.get-method(10)', 'ok', 'ok("POST")');
+  await expectCall(page, '#borrow-request-1.get-method(10)', 'ok', 'ok("POST")');
 
   // The guest accepts them; imports the stubs leave out ask for their results.
   const handle = funcCard(page, 'handle');

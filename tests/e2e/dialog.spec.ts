@@ -30,24 +30,24 @@ test('a missing host resource is mocked, and its calls ask for their results', a
   await expect(funcCard(page, 'consume').locator('wa-button', { hasText: 'Call' })).toHaveAttribute('disabled');
 
   // Constructors return a new mock and void methods return right away, without asking.
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('10'));
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('20'));
+  await answerImport(page, '#borrow-y-1.get-a()', s32('10'));
+  await answerImport(page, '#borrow-y-1.get-a()', s32('20'));
   await answerImport(page, 'imports/y.add(#y-1, 10)', newMock);
-  await answerImport(page, '#borrowed-y-2.get-a()', s32('30'));
-  await answerImport(page, '#borrowed-y-3.get-a()', s32('1'));
-  await answerImport(page, '#borrowed-y-4.get-a()', s32('2'));
-  await answerImport(page, '#borrowed-y-3.get-a()', s32('10'));
-  await answerImport(page, '#borrowed-y-4.get-a()', s32('20'));
+  await answerImport(page, '#borrow-y-2.get-a()', s32('30'));
+  await answerImport(page, '#borrow-y-3.get-a()', s32('1'));
+  await answerImport(page, '#borrow-y-4.get-a()', s32('2'));
+  await answerImport(page, '#borrow-y-3.get-a()', s32('10'));
+  await answerImport(page, '#borrow-y-4.get-a()', s32('20'));
   await answerImport(page, 'imports/y.add(#y-3, 20)', newMock);
   await answerImport(page, 'imports/y.add(#y-4, 30)', newMock);
-  await answerImport(page, '#borrowed-y-5.get-a()', s32('30'));
-  await answerImport(page, '#borrowed-y-6.get-a()', s32('50'));
+  await answerImport(page, '#borrow-y-5.get-a()', s32('30'));
+  await answerImport(page, '#borrow-y-6.get-a()', s32('50'));
   // The guest checks the values it reads back.
   await expectCall(page, 'exports.test-imports()', 'ok', 'ok');
   await expect(funcCard(page, 'consume').locator('wa-button', { hasText: 'Call' })).not.toHaveAttribute('disabled');
 
   await expect(entry.locator('.log-import').first().locator('.log-call')).toHaveText(/new imports\/y\(10\)\s*=\s*#y-1/);
-  await expect(entry.locator('.log-import', { hasText: '#borrowed-y-1.set-a(20)' }).locator('.log-import-output')).toHaveCount(0);
+  await expect(entry.locator('.log-import', { hasText: '#borrow-y-1.set-a(20)' }).locator('.log-import-output')).toHaveCount(0);
   await expect(row(page, 'y-2').locator('.instance-type')).toHaveText('y · mock');
   await expect(page.locator('resource-table tr.resource-row wa-tag'))
     .toHaveText(['moved', 'dropped', 'moved', 'moved', 'dropped', 'dropped']);
@@ -60,20 +60,20 @@ test('an import returns instances the host owns, not those the guest holds', asy
     await expect(choices(picker(prompt))).toHaveText(offered);
     await choose(picker(prompt), { label: pick });
   };
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('10'));
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('20'));
+  await answerImport(page, '#borrow-y-1.get-a()', s32('10'));
+  await answerImport(page, '#borrow-y-1.get-a()', s32('20'));
   // The guest moved y-1 into the call, so the host can hand it back.
   await answerImport(page, 'imports/y.add(#y-1, 10)', returns(['New mock y', '#y-1'], '#y-1'));
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('30'));
-  await answerImport(page, '#borrowed-y-2.get-a()', s32('1'));
-  await answerImport(page, '#borrowed-y-3.get-a()', s32('2'));
-  await answerImport(page, '#borrowed-y-2.get-a()', s32('10'));
-  await answerImport(page, '#borrowed-y-3.get-a()', s32('20'));
+  await answerImport(page, '#borrow-y-1.get-a()', s32('30'));
+  await answerImport(page, '#borrow-y-2.get-a()', s32('1'));
+  await answerImport(page, '#borrow-y-3.get-a()', s32('2'));
+  await answerImport(page, '#borrow-y-2.get-a()', s32('10'));
+  await answerImport(page, '#borrow-y-3.get-a()', s32('20'));
   // The guest still holds y-3, and dropped y-1.
   await answerImport(page, 'imports/y.add(#y-2, 20)', returns(['New mock y', '#y-2'], 'New mock y'));
   await answerImport(page, 'imports/y.add(#y-3, 30)', returns(['New mock y', '#y-2', '#y-3'], 'New mock y'));
-  await answerImport(page, '#borrowed-y-4.get-a()', s32('30'));
-  await answerImport(page, '#borrowed-y-5.get-a()', s32('50'));
+  await answerImport(page, '#borrow-y-4.get-a()', s32('30'));
+  await answerImport(page, '#borrow-y-5.get-a()', s32('50'));
   await expectCall(page, 'exports.test-imports()', 'ok', 'ok');
   await expect(page.locator('resource-table tr.resource-row wa-tag'))
     .toHaveText(['dropped', 'moved', 'moved', 'dropped', 'dropped']);
@@ -88,19 +88,19 @@ test('a partial stub only asks for what it leaves out', async ({ page }) => {
     '}',
   ].join('\n'));
   await call(funcCard(page, 'test-imports'));
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('10'));
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('20'));
+  await answerImport(page, '#borrow-y-1.get-a()', s32('10'));
+  await answerImport(page, '#borrow-y-1.get-a()', s32('20'));
   // `Y.add` is implemented, so it doesn't ask; its result is a real `Y`.
-  await answerImport(page, '#borrowed-y-2.get-a()', s32('30'));
+  await answerImport(page, '#borrow-y-2.get-a()', s32('30'));
   await expect(row(page, 'y-2').locator('.instance-type')).toHaveText('y');
 });
 
 test('Trap fails the import, and with it the call', async ({ page }) => {
   await loadResource(page);
   await call(funcCard(page, 'test-imports'));
-  await answerImport(page, '#borrowed-y-1.get-a()', undefined, 'Trap');
-  await expectCall(page, 'exports.test-imports()', 'error', /Trapped at #borrowed-y-1\.get-a\(\)/);
-  await expect(callEntry(page, 'exports.test-imports()').locator('.log-import.error')).toContainText('#borrowed-y-1.get-a()');
+  await answerImport(page, '#borrow-y-1.get-a()', undefined, 'Trap');
+  await expectCall(page, 'exports.test-imports()', 'error', /Trapped at #borrow-y-1\.get-a\(\)/);
+  await expect(callEntry(page, 'exports.test-imports()').locator('.log-import.error')).toContainText('#borrow-y-1.get-a()');
   await expect(importPrompt(page)).toHaveCount(0);
   // Like a trap in the guest, it leaves the instance unusable.
   await call(funcCard(page, 'test-imports'));
@@ -121,11 +121,11 @@ test('mock host resources stand in for the arguments a host would create', async
     await choose(picker(prompt), 'ok');
     await choose(picker(prompt, 1), { label: `New mock ${resource}` });
   };
-  await answerImport(page, '#borrowed-incoming-request-1.headers()', async (prompt) => {
+  await answerImport(page, '#borrow-incoming-request-1.headers()', async (prompt) => {
     await expect(chosen(picker(prompt))).toHaveText('New mock fields');
   });
   // Items are added and removed one by one. A `list<u8>` is typed as text, sent as UTF-8, or as hex.
-  await answerImport(page, '#borrowed-fields-3.entries()', async (prompt) => {
+  await answerImport(page, '#borrow-fields-3.entries()', async (prompt) => {
     const add = prompt.locator('wa-button', { hasText: 'Add item' });
     await add.click();
     await add.click();
@@ -148,15 +148,15 @@ test('mock host resources stand in for the arguments a host would create', async
     await bytes.fill('0x68,0x69');
   });
   await expect(page.locator('.log-import').filter({ hasText: 'entries()' }).locator('.log-import-output code')).toHaveText('[("x-id", [104, 105])]');
-  await answerImport(page, '#borrowed-incoming-request-1.method()', (prompt) => choose(picker(prompt), 'get'));
-  await answerImport(page, '#borrowed-incoming-request-1.scheme()');
-  await answerImport(page, '#borrowed-incoming-request-1.authority()');
-  await answerImport(page, '#borrowed-incoming-request-1.path-with-query()', async (prompt) => {
+  await answerImport(page, '#borrow-incoming-request-1.method()', (prompt) => choose(picker(prompt), 'get'));
+  await answerImport(page, '#borrow-incoming-request-1.scheme()');
+  await answerImport(page, '#borrow-incoming-request-1.authority()');
+  await answerImport(page, '#borrow-incoming-request-1.path-with-query()', async (prompt) => {
     await prompt.locator('wa-checkbox').click();
     await prompt.locator('wa-input input').fill('/');
   });
-  await answerImport(page, '#borrowed-incoming-request-1.consume()', selectMock('incoming-body'));
-  await answerImport(page, '#borrowed-incoming-body-4.stream()', selectMock('input-stream'));
+  await answerImport(page, '#borrow-incoming-request-1.consume()', selectMock('incoming-body'));
+  await answerImport(page, '#borrow-incoming-body-4.stream()', selectMock('input-stream'));
 
   // The guest builds a real response with the shim, and hands it to the mock outparam: the
   // host can't handle a mock, so that call shows in the console, with the response it sends.

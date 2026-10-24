@@ -112,8 +112,8 @@ test('calls on resources are recorded with their resource and instance', async (
   assert.equal(instance.id, 'x-1');
   assert.deepEqual(s.records, [
     { kind: 'export', callKind: 'constructor', iface: 'exports', resource: 'x', func: 'constructor', args: ['5'], label: 'new exports/x(5)' },
-    { kind: 'export', callKind: 'method', iface: 'exports', resource: 'x', func: 'get-a', self: '#borrowed-x-1', args: [], label: '#borrowed-x-1.get-a()' },
+    { kind: 'export', callKind: 'method', iface: 'exports', resource: 'x', func: 'get-a', self: '#borrow-x-1', args: [], label: '#borrow-x-1.get-a()' },
     { kind: 'export', callKind: 'drop', iface: 'exports', resource: 'x', func: 'drop', self: '#x-1', args: [], label: 'drop #x-1' },
   ]);
-  assert.deepEqual(s.lines, ['new exports/x(5) -> #x-1', '#borrowed-x-1.get-a() -> 5', 'drop #x-1 -> dropped']);
+  assert.deepEqual(s.lines, ['new exports/x(5) -> #x-1', '#borrow-x-1.get-a() -> 5', 'drop #x-1 -> dropped']);
 });

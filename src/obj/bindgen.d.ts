@@ -14,5 +14,6 @@ export type * as WasiIoError029 from './interfaces/wasi-io-error.js'; // import 
 export type * as WasiIoPoll029 from './interfaces/wasi-io-poll.js'; // import wasi:io/poll@0.2.9
 export type * as WasiIoStreams029 from './interfaces/wasi-io-streams.js'; // import wasi:io/streams@0.2.9
 export type * as WasiRandomInsecureSeed029 from './interfaces/wasi-random-insecure-seed.js'; // import wasi:random/insecure-seed@0.2.9
+export * as wave from './interfaces/local-bindgen-wave.js'; // export local:bindgen/wave
 export function generateAst(component: Uint8Array): string;
 export type Result<T, E> = { tag: 'ok', val: T } | { tag: 'err', val: E };

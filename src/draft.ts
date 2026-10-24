@@ -288,6 +288,9 @@ function parseInteger(bits: number, signed: boolean, text: string): number | big
   return toInteger(bits, signed, BigInt(trimmed));
 }
 
+// Floats that are no numbers, as WAVE writes them.
+const SPECIAL_FLOATS = new Map([['nan', NaN], ['inf', Infinity], ['-inf', -Infinity]]);
+
 // Converts a draft into the JS value jco expects. Invalid drafts get an `error`
 // and yield INVALID; every field is visited so all errors show at once.
 class Parse extends IDL.Visitor<Draft, any> {
@@ -326,6 +329,10 @@ class Parse extends IDL.Visitor<Draft, any> {
   public visitFixedFloat(_t: IDL.FixedFloatClass, d: Draft): any {
     return this.leaf(d, () => {
       const text = (d as TextDraft).text.trim();
+      const special = SPECIAL_FLOATS.get(text);
+      if (special !== undefined) {
+        return special;
+      }
       const value = Number(text);
       if (text === '' || Number.isNaN(value)) {
         throw new Error(`Expected a number, got "${text}"`);
