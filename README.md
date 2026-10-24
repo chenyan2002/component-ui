@@ -63,6 +63,13 @@ npx playwright install chromium
 npm test
 ```
 
+The core also runs headless in Node, without the UI. [`tests/node`](tests/node) checks that, and
+needs a Node with JSPI.
+
+```sh
+npm run test:node
+```
+
 ### Rebuilding the bindgen component
 
 `src/obj` is checked in, so this is only needed after changing `crates/bindgen`. It requires
@@ -76,7 +83,7 @@ npm run build:bindgen
 ## Known limitations
 
 - Exported resource constructors and static functions are called synchronously, as jco emits
-  invalid async code for them, so they can't wait on an import prompt.
+  invalid async code for them, so they can't wait on an import prompt. (waiting for a new jco release)
 - Imports called during instantiation can't prompt.
 - A real host object's method that receives a mock argument isn't routed to a prompt, so it may still fail in the host code.
 - Calls are shown with their versioned interface, e.g. `wasi:http/types/fields@0.2.3.from-list(…)`,
@@ -86,7 +93,7 @@ npm run build:bindgen
   - jco merges incompatible versions (e.g., 0.2.0 and 0.3.0) into one unversioned import, so
     a call can't be told apart by version: it is shown with, and a prompt asks for, the types
     of the first version that has the function, which may be the wrong form for the other.
-- jco's async imports hang on failure; the loader patches jco's output to rethrow, which may need updating when jco changes.
+- jco's async imports hang on failure; the loader patches jco's output to rethrow, which may need updating when jco changes. (waiting for a new jco release)
 - While a call is waiting on an import, other calls are disabled, since the component instance
   can't be re-entered.
 - jco doesn't expose the handle index of a host-implemented resource, so the resource table shows

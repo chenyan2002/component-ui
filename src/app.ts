@@ -3,7 +3,8 @@ import { customElement, query, state } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { keyed } from 'lit/directives/keyed.js';
 import { live } from 'lit/directives/live.js';
-import { instantiate, JSPI_SUPPORTED, loadComponent, LoadedComponent, readWasm } from './loader';
+import { instantiate, JSPI_SUPPORTED, loadComponent, LoadedComponent } from './loader';
+import { browserPlatform, readWasm } from './platform-browser';
 import { CallActivity, ExportsContext } from './calls';
 import { ImportDialogs } from './dialog';
 import { ConsolePanel } from './console';
@@ -360,7 +361,7 @@ export class ComponentApp extends LitElement {
     this.loading = true;
     this.loadError = undefined;
     try {
-      const component = await loadComponent(await readWasm(file));
+      const component = await loadComponent(browserPlatform, await readWasm(file));
       if (id !== this.loadCounter) {
         return;
       }
@@ -404,7 +405,7 @@ export class ComponentApp extends LitElement {
       // Missing imports and mock resources ask in the console, and the guest waits for the answer.
       const dialogs = new ImportDialogs(registry, host, s.component.imports, (call) => this.consolePanel!.logImport(call));
       s.appliedCode = { ...code };
-      const exports = await instantiate(s.component.transpiled, s.appliedCode, {
+      const exports = await instantiate(browserPlatform, s.component.transpiled, s.appliedCode, {
         stdout: (text) => this.consolePanel?.print('stdout', text),
         stderr: (text) => this.consolePanel?.print('stderr', text),
       }, {

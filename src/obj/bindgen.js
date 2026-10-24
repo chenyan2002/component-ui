@@ -4084,10 +4084,22 @@ function _guardTrap(componentIdx, fn, convertsRangeErrors = false) {
   };
 }
 
-const base64Compile = str => WebAssembly.compile(Uint8Array.from(atob(str), b => b.charCodeAt(0)));
+const base64Compile = str => WebAssembly.compile(
+typeof Buffer !== 'undefined'
+? Buffer.from(str, 'base64')
+: Uint8Array.from(atob(str), b => b.charCodeAt(0))
+);
 
 
-const fetchCompile = url => fetch(url).then(WebAssembly.compileStreaming);
+const isNode = typeof process !== 'undefined' && process.versions && process.versions.node;
+let _fs;
+async function fetchCompile (url) {
+  if (isNode) {
+    _fs = _fs || await import('node:fs/promises');
+    return WebAssembly.compile(await _fs.readFile(url));
+  }
+  return fetch(url).then(WebAssembly.compileStreaming);
+}
 
 const symbolCabiDispose = Symbol.for('cabiDispose');
 

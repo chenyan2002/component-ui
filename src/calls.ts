@@ -1,5 +1,5 @@
 import * as WIT from './wit';
-import { LogEntry } from './console';
+import { LogEntry } from './log';
 import { MOCK } from './dialog';
 import { MockFactory } from './draft';
 import { HostResources, qualified, qualifiedResource } from './host-resources';

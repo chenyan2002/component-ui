@@ -6,4 +6,4 @@ cd "$(dirname "$0")/.."
 
 cargo build --release --lib --target wasm32-wasip2 --manifest-path crates/bindgen/Cargo.toml
 rm -rf src/obj
-npx jco transpile crates/bindgen/target/wasm32-wasip2/release/bindgen.wasm --no-nodejs-compat --out-dir src/obj
+npx jco transpile crates/bindgen/target/wasm32-wasip2/release/bindgen.wasm --out-dir src/obj

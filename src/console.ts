@@ -1,38 +1,10 @@
 import { html, LitElement, nothing, PropertyValues } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
-import * as WIT from './wit';
-import { Draft, MockFactory } from './draft';
 import { FormContext, renderField, typeName } from './form';
-import { ResourceRegistry } from './resources';
+import { ImportLog, ImportPrompt, LogEntry } from './log';
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-export interface LogEntry {
-  // `text` is the formatted result, in WAVE; empty for a function without one.
-  result(text: string): void;
-  // A string is a formatted error, e.g. the `err` of a `result`.
-  error(err: unknown): void;
-}
-
-// The form asking the user for the return value of an import the guest called.
-export interface ImportPrompt {
-  type: WIT.Type;
-  draft: Draft;
-  registry: ResourceRegistry;
-  mock: MockFactory;
-  // Returns the value in the draft, unless it is invalid.
-  answer(): void;
-  random(): void;
-  trap(): void;
-}
-
-export interface ImportLog extends LogEntry {
-  // Shows the prompt until the import gets a result or an error.
-  ask(prompt: ImportPrompt): void;
-  // A result shown below the call rather than after it, e.g. an HTTP response.
-  detail(text: string): void;
 }
 
 // An import the guest called, under the call that made it, if any.

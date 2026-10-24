@@ -20,5 +20,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  /* Node-only; type-checked with Node's types by tests/tsconfig.json, which imports it */
+  "exclude": ["src/platform-node.ts"]
 }

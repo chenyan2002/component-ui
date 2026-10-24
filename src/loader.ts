@@ -3,6 +3,7 @@ import { filesystem, sockets } from '@bytecodealliance/preview2-shim';
 import { WASIShim } from '@bytecodealliance/preview2-shim/instantiation';
 import * as WIT from './wit';
 import { generateAst } from './obj/bindgen';
+import { Platform } from './platform';
 
 export type Transpiled = Awaited<ReturnType<typeof generate>>;
 
@@ -99,27 +100,6 @@ function wasiImports(output: ComponentOutput): Record<string, unknown> {
   }).getImportObject();
 }
 
-export async function importFromSource(code: BlobPart): Promise<any> {
-  const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
-  try {
-    return await import(/* @vite-ignore */ url);
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-export async function readWasm(file: string | File): Promise<Uint8Array> {
-  if (file instanceof File) {
-    return new Uint8Array(await file.arrayBuffer());
-  }
-  const url = new URL(import.meta.env.BASE_URL + file, window.location.origin);
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch ${file}: ${response.status} ${response.statusText}`);
-  }
-  return new Uint8Array(await response.arrayBuffer());
-}
-
 // jco's async (JSPI) import trampolines answer a failed import with a promise that never
 // settles, leaving the guest suspended forever; its sync ones rethrow, as these now do.
 function rethrowAsyncImportErrors(transpiled: Transpiled) {
@@ -129,8 +109,8 @@ function rethrowAsyncImportErrors(transpiled: Transpiled) {
   file[1] = new TextEncoder().encode(js.replace(failed, '$1throw err;'));
 }
 
-export async function loadComponent(component: Uint8Array): Promise<LoadedComponent> {
-  const binding = await importFromSource(generateAst(component));
+export async function loadComponent(platform: Platform, component: Uint8Array): Promise<LoadedComponent> {
+  const binding = await platform.importModule(generateAst(component));
   const { exports: interfaces, imports }: Record<'exports' | 'imports', WIT.InterfaceClass[]> = binding.Factory({ IDL: WIT });
   const transpiled = await generate(component, {
     name: TRANSPILED_NAME,
@@ -170,6 +150,7 @@ export interface ImportHooks {
 }
 
 export async function instantiate(
+  platform: Platform,
   transpiled: Transpiled,
   customImportCode: Record<string, string>,
   output: ComponentOutput,
@@ -180,9 +161,9 @@ export async function instantiate(
   for (const pkg of transpiled.imports) {
     const mod = isWasi(pkg)
       ? complete(pkg, wasi[unversioned(pkg)] as object, true)
-      : complete(pkg, await importFromSource(customImportCode[pkg] ?? ''), false);
+      : complete(pkg, await platform.importModule(customImportCode[pkg] ?? ''), false);
     imports[pkg] = wrap(pkg, mod);
   }
-  const mod = await importFromSource(fileBytes(transpiled, `${TRANSPILED_NAME}.js`));
+  const mod = await platform.importModule(fileBytes(transpiled, `${TRANSPILED_NAME}.js`));
   return mod.instantiate((core: string) => WebAssembly.compile(fileBytes(transpiled, core)), imports);
 }

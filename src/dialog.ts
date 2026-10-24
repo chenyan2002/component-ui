@@ -1,5 +1,5 @@
 import * as WIT from './wit';
-import { ImportLog } from './console';
+import { ImportLog } from './log';
 import { initDraft, INVALID, MockFactory, parseDraft, randomize } from './draft';
 import { byImportName, HostResources, ownFunc, qualified, qualifiedResource, unversioned } from './host-resources';
 import { stubMissingImports } from './loader';
