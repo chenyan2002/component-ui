@@ -145,12 +145,12 @@ export function formatValue(registry: ResourceRegistry, t: WIT.Type, value: any)
   }
 }
 
-// Formats call arguments, which have the types of the function's parameters.
-export function formatArgs(registry: ResourceRegistry, func: WIT.FuncClass | undefined, args: any[]): string {
+// Formats each call argument, which has the type of the function's parameter.
+export function formatArgList(registry: ResourceRegistry, func: WIT.FuncClass | undefined, args: any[]): string[] {
   return args.map((arg, i) => {
     const ty = func?._args[i]?.[1];
     return ty ? formatValue(registry, ty, arg) : `${arg}`;
-  }).join(', ');
+  });
 }
 
 // Formats what a call returned: the value of the function's result type, empty if it has none.

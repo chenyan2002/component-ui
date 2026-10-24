@@ -1,6 +1,6 @@
 import * as WIT from './wit';
+import { Callee, describeCall, unversioned } from './call-record';
 import { dispose, Instance, involvesResources, ownedHandles, ResourceRegistry, returnedType, thrownType } from './resources';
-import { formatArgs, formatHandle } from './wave';
 
 // Hooks are installed on a host object once; they report to the component instance that
 // last received it, in case the host shares an object between instances.
@@ -29,32 +29,6 @@ function define(obj: object, key: PropertyKey, value: unknown) {
 // A function of an interface or resource; field names like `constructor` aren't inherited.
 export function ownFunc(fields: Record<string, WIT.FuncClass>, key: string): WIT.FuncClass | undefined {
   return Object.prototype.hasOwnProperty.call(fields, key) ? fields[key] : undefined;
-}
-
-// `wasi:cli/stdout@0.2.0` → `wasi:cli/stdout`.
-export function unversioned(pkg: string): string {
-  return pkg.replace(/@[^/]*$/, '');
-}
-
-function isWorldLevel(iface: string): boolean {
-  return iface === '' || iface === WIT.ROOT_INTERFACE;
-}
-
-// A function of an interface as the console shows it, e.g. `wasi:cli/stdout@0.2.3.get-stdout`;
-// functions at the world level have no interface.
-export function qualified(iface: string, name: string): string {
-  return isWorldLevel(iface) ? name : `${iface}.${name}`;
-}
-
-// A resource as the console shows it, under the interface that defines it and followed by its
-// version, e.g. `wasi:http/types/fields@0.2.3`.
-export function qualifiedResource(resource: WIT.ResourceClass): string {
-  const iface = resource._interface;
-  if (isWorldLevel(iface)) {
-    return resource.witName;
-  }
-  const name = unversioned(iface);
-  return `${name}/${resource.witName}${iface.slice(name.length)}`;
 }
 
 // Imported interfaces by unversioned name, as jco keys imports: it gives all versions of an
@@ -131,7 +105,7 @@ export class HostResources {
             resources.forEach((resource) => this.classes.set(resource, value));
           }
           wrapped.set(key, func
-            ? this.wrapFunc(func, value, (args) => `${qualified(iface!._name, func.displayName(key))}(${this.format(func, args)})`)
+            ? this.wrapFunc(func, value, (args) => this.label({ callKind: 'func', iface: iface!._name }, func, key, args))
             : resources.length > 0 ? this.wrapClass(resources[0], value) : value);
         }
         return wrapped.get(key);
@@ -158,7 +132,7 @@ export class HostResources {
         const ctor = ownFunc(fields, 'constructor');
         const construct = () => Reflect.construct(target, args, newTarget);
         return ctor
-          ? this.observe(ctor, args, construct, () => `new ${qualifiedResource(resource)}(${this.format(ctor, args)})`, resource)
+          ? this.observe(ctor, args, construct, () => this.label({ callKind: 'constructor', resource }, ctor, 'constructor', args), resource)
           : construct();
       },
       get: (target, key, receiver) => {
@@ -168,7 +142,7 @@ export class HostResources {
           return value;
         }
         if (!statics.has(key)) {
-          statics.set(key, this.wrapFunc(func, value.bind(target), (args) => `${qualifiedResource(resource)}.${func.displayName(key)}(${this.format(func, args)})`));
+          statics.set(key, this.wrapFunc(func, value.bind(target), (args) => this.label({ callKind: 'static', resource }, func, key, args)));
         }
         return statics.get(key);
       },
@@ -197,7 +171,7 @@ export class HostResources {
         const host = observers.get(obj);
         const call = () => method.apply(this, args);
         return host
-          ? host.observe(func, args, call, () => `${formatHandle(host.registry, obj, instance.resource, true)}.${func.displayName(name)}(${host.format(func, args)})`)
+          ? host.observe(func, args, call, () => host.label({ callKind: 'method', resource: instance.resource, self: obj }, func, name, args))
           : call();
       });
     }
@@ -243,7 +217,8 @@ export class HostResources {
     return result;
   }
 
-  private format(func: WIT.FuncClass, args: any[]): string {
-    return formatArgs(this.registry, func, args);
+  // How the console shows an import call, for the origins and fates of instances.
+  private label(callee: Callee, func: WIT.FuncClass, key: string, args: any[]): string {
+    return describeCall(this.registry, 'import', callee, func, key, args).label;
   }
 }

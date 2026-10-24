@@ -10,7 +10,8 @@ import { ImportDialogs } from './dialog';
 import { ConsolePanel } from './console';
 import './console';
 import { renderExports, search } from './exports-view';
-import { byImportName, HostResources, unversioned } from './host-resources';
+import { unversioned } from './call-record';
+import { byImportName, HostResources } from './host-resources';
 import { importTemplate } from './import-template';
 import { clashingNames, ResourceRegistry, usesResources } from './resources';
 import './resource-table';
@@ -440,7 +441,7 @@ export class ComponentApp extends LitElement {
     if (!isWasm(file)) {
       const err = new Error(`${file.name} is not a .wasm file.`);
       if (this.session) {
-        this.consolePanel?.logCall(`load ${file.name}`).error(err);
+        this.consolePanel?.logAction(`load ${file.name}`).error(err);
       } else {
         this.loadError = { title: 'Unsupported file', err };
       }

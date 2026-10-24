@@ -1,15 +1,16 @@
 import * as WIT from './wit';
+import { CallRecord, Callee, describeCall, describeDrop } from './call-record';
 import { LogEntry } from './log';
 import { MOCK } from './dialog';
 import { MockFactory } from './draft';
-import { HostResources, qualified, qualifiedResource } from './host-resources';
+import { HostResources } from './host-resources';
 import { argHandles, ownedHandles, ResourceRegistry, returnedType, thrownType } from './resources';
-import { formatArgs, formatHandle, formatResult, formatThrown } from './wave';
+import { formatHandle, formatResult, formatThrown } from './wave';
 
 export interface ExportsContext {
   // Exports of the instantiated component, as returned by jco's `instantiate`.
   exports: any;
-  log(call: string): LogEntry;
+  log(call: CallRecord): LogEntry;
   registry: ResourceRegistry;
   host: HostResources;
   activity: CallActivity;
@@ -54,11 +55,6 @@ export type CallTarget =
   // Methods take the instance (`self`) as their first argument.
   | { type: 'method'; resource: WIT.ResourceClass };
 
-interface Call {
-  label: string;
-  invoke(): any;
-}
-
 function exportsOf(ctx: ExportsContext, iface: WIT.InterfaceClass): any {
   return iface.isRoot ? ctx.exports : ctx.exports[iface._name];
 }
@@ -96,29 +92,39 @@ function errorText(ctx: ExportsContext, func: WIT.FuncClass, err: unknown): unkn
   return err;
 }
 
-function resolveCall(ctx: ExportsContext, target: CallTarget, name: string, func: WIT.FuncClass, args: any[]): Call {
-  // Labels show the WIT name; `name` is jco's.
-  const shown = func.displayName(name);
-  const argList = formatArgs(ctx.registry, func, target.type === 'method' ? args.slice(1) : args);
+function callee(target: CallTarget, args: any[]): Callee {
+  switch (target.type) {
+    case 'func':
+      return { callKind: 'func', iface: target.iface._name };
+    case 'constructor':
+    case 'static':
+      return { callKind: target.type, resource: target.resource };
+    case 'method':
+      return { callKind: 'method', resource: target.resource, self: args[0] };
+  }
+}
+
+// The call of `name`, jco's name for `func`, with `args`, as a function to invoke.
+function resolveCall(ctx: ExportsContext, target: CallTarget, name: string, func: WIT.FuncClass, args: any[]): () => any {
   switch (target.type) {
     case 'func': {
       const mod = exportsOf(ctx, target.iface);
-      return { label: `${qualified(target.iface._name, shown)}(${argList})`, invoke: () => mod[name](...args) };
+      return () => mod[name](...args);
     }
     case 'constructor': {
       const cls = resourceClass(ctx, target.iface, target.resource);
-      return { label: `new ${qualifiedResource(target.resource)}(${argList})`, invoke: () => new cls(...args) };
+      return () => new cls(...args);
     }
     case 'static': {
       const cls = resourceClass(ctx, target.iface, target.resource);
       if (typeof cls[name] !== 'function') {
-        throw new Error(`${target.resource.witName}.${shown} is not implemented`);
+        throw new Error(`${target.resource.witName}.${func.displayName(name)} is not implemented`);
       }
-      return { label: `${qualifiedResource(target.resource)}.${shown}(${argList})`, invoke: () => cls[name](...args) };
+      return () => cls[name](...args);
     }
     case 'method': {
       const [self, ...rest] = args;
-      return { label: `${formatHandle(ctx.registry, self, target.resource, true)}.${shown}(${argList})`, invoke: () => self[name](...rest) };
+      return () => self[name](...rest);
     }
   }
 }
@@ -141,22 +147,23 @@ async function run(ctx: ExportsContext, target: CallTarget, name: string, func: 
       registry.add(resource, obj, 'new mock', false);
     }
   }
-  let resolved: Call;
+  const toHost = callsHost(ctx, target, args);
+  const record = describeCall(registry, toHost ? 'host' : 'export', callee(target, args), func, name, funcArgs);
+  let invoke: () => any;
   try {
-    resolved = resolveCall(ctx, target, name, func, args);
+    invoke = resolveCall(ctx, target, name, func, args);
   } catch (err) {
-    ctx.log(name).error(err);
+    ctx.log(record).error(err);
     return;
   }
   const owned = func._args.flatMap(([_, type], i) => ownedHandles(type, funcArgs[i]).map(([_, obj]) => obj));
-  const fate = `moved into ${resolved.label}`;
-  const toHost = callsHost(ctx, target, args);
-  const entry = ctx.log(resolved.label);
+  const fate = `moved into ${record.label}`;
+  const entry = ctx.log(record);
   // Owned host objects change hands as the call starts, before the guest can use them.
   registry.transfer(owned, fate, toHost ? 'host' : 'guest');
   let result: any;
   try {
-    result = await (toHost ? ctx.host.callDirect(resolved.invoke) : resolved.invoke());
+    result = await (toHost ? ctx.host.callDirect(invoke) : invoke());
   } catch (err) {
     registry.settle(fate);
     entry.error(errorText(ctx, func, err));
@@ -166,18 +173,18 @@ async function run(ctx: ExportsContext, target: CallTarget, name: string, func: 
   // Settle moved arguments first: returned resources may reuse their handle indices.
   registry.settle(fate);
   if (target.type === 'constructor') {
-    registry.add(target.resource, result, resolved.label, !toHost);
+    registry.add(target.resource, result, record.label, !toHost);
   } else {
     const type = returnedType(func);
     for (const [resource, obj] of type ? ownedHandles(type, result) : []) {
-      registry.add(resource, obj, resolved.label, !toHost);
+      registry.add(resource, obj, record.label, !toHost);
     }
   }
   entry.result(target.type === 'constructor' ? formatHandle(registry, result, target.resource) : formatResult(registry, func, result));
 }
 
 export function drop(ctx: ExportsContext, instance: string) {
-  const entry = ctx.log(`drop #${instance}`);
+  const entry = ctx.log(describeDrop(ctx.registry.instance(instance)!));
   try {
     ctx.registry.drop(instance);
     entry.result('dropped');

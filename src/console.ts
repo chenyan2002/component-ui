@@ -1,5 +1,6 @@
 import { html, LitElement, nothing, PropertyValues } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
+import { CallRecord } from './call-record';
 import { FormContext, renderField, typeName } from './form';
 import { ImportLog, ImportPrompt, LogEntry } from './log';
 
@@ -11,15 +12,18 @@ function errorText(err: unknown): string {
 interface ImportEntry {
   kind: 'import';
   call: string;
+  record: CallRecord;
   status: 'pending' | 'ok' | 'error';
   output?: string;
   detail?: string;
   prompt?: ImportPrompt;
 }
 
+// A call the UI made, or something else it did, e.g. loading a file, which has no record.
 interface CallEntry {
   kind: 'call';
   call: string;
+  record?: CallRecord;
   time: string;
   status: 'pending' | 'ok' | 'error';
   output?: string;
@@ -73,9 +77,18 @@ export class ConsolePanel extends LitElement {
     this.entries = [];
   }
 
-  public logCall(call: string): LogEntry {
+  public logCall(record: CallRecord): LogEntry {
+    return this.addCall(record.label, record);
+  }
+
+  // Logs something the UI did that isn't a call, e.g. failing to load a file.
+  public logAction(text: string): LogEntry {
+    return this.addCall(text);
+  }
+
+  private addCall(call: string, record?: CallRecord): LogEntry {
     const started = performance.now();
-    const entry: CallEntry = { kind: 'call', call, time: new Date().toLocaleTimeString(), status: 'pending', imports: [] };
+    const entry: CallEntry = { kind: 'call', call, record, time: new Date().toLocaleTimeString(), status: 'pending', imports: [] };
     this.follow = true;
     this.entries = [...this.entries, entry];
     const finish = (status: CallEntry['status'], output: string) => {
@@ -89,8 +102,8 @@ export class ConsolePanel extends LitElement {
   }
 
   // Logs an import the guest called, under the pending call it happened in.
-  public logImport(call: string): ImportLog {
-    const entry: ImportEntry = { kind: 'import', call, status: 'pending' };
+  public logImport(record: CallRecord): ImportLog {
+    const entry: ImportEntry = { kind: 'import', call: record.label, record, status: 'pending' };
     const parent = [...this.entries].reverse().find((e): e is CallEntry => e.kind === 'call' && e.status === 'pending');
     this.follow = true;
     if (parent) {
@@ -242,9 +255,10 @@ export class ConsolePanel extends LitElement {
       </div>`;
     }
     const waiting = entry.imports.some((i) => i.prompt);
-    // Matched by text: an import the guest makes with the same text as the export call it is
-    // under, e.g. of an interface both imported and exported, would be missed too.
-    const imports = entry.imports.filter((i) => i.call !== entry.call || i.prompt || i.detail !== undefined);
+    // A call of the UI's to the host may reach an import: a mock's, which asks, or the host
+    // effect of one. Only its prompt and detail show; the call itself is already shown.
+    const isCall = (i: ImportEntry) => entry.record?.kind === 'host' && i.call === entry.call;
+    const imports = entry.imports.filter((i) => !isCall(i) || i.prompt || i.detail !== undefined);
     const meta = waiting ? 'waiting for an import' : entry.elapsed === undefined ? entry.time : `${entry.time} · ${entry.elapsed} ms`;
     return html`<div class="log-entry ${entry.status}">
       <div class="log-call">
@@ -253,7 +267,7 @@ export class ConsolePanel extends LitElement {
         <span class=${waiting ? 'log-meta waiting' : 'log-meta'}>${meta}</span>
       </div>
       ${imports.length > 0
-        ? html`<div class="log-imports">${imports.map((i) => this.renderImport(i, i.call === entry.call))}</div>`
+        ? html`<div class="log-imports">${imports.map((i) => this.renderImport(i, isCall(i)))}</div>`
         : nothing}
       ${!entry.output
         ? nothing

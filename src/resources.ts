@@ -181,6 +181,10 @@ export class ResourceRegistry extends EventTarget {
     return this.instanceOf(obj)?.id;
   }
 
+  public instance(id: string): Instance | undefined {
+    return this.byId.get(id);
+  }
+
   // Table rows by handle index; instances without one come last, in creation order.
   public rows(): Slot[] {
     const position = (slot: Slot) => slot.handle ?? Infinity;
