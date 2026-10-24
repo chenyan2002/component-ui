@@ -8,7 +8,7 @@ import { CallActivity, ExportsContext } from './calls';
 import { ImportDialogs } from './dialog';
 import { ConsolePanel } from './console';
 import './console';
-import { renderExports } from './exports-view';
+import { renderExports, search } from './exports-view';
 import { byImportName, HostResources, unversioned } from './host-resources';
 import { importTemplate } from './import-template';
 import { clashingNames, ResourceRegistry, usesResources } from './resources';
@@ -21,6 +21,7 @@ const EXAMPLES: Array<[file: string, label: string]> = [
   ['wasi-http.wasm', 'WASI HTTP'],
   ['printer.wasm', 'Printer'],
   ['kv-store.wasm', 'KV Store'],
+  ['record_imports.wasm', 'Record Imports'],
 ];
 
 // Example implementations of the imports of the bundled examples, to start editing from.
@@ -75,6 +76,9 @@ export class ComponentApp extends LitElement {
   @query('.component-pane') accessor componentPane!: HTMLElement | null;
   // Whether the dialog implementing imports in JavaScript is open.
   @state() accessor editingImports = false;
+  // What the exports are filtered by, and whether any of their interfaces is expanded.
+  @state() accessor search = '';
+  @state() accessor interfacesOpen = true;
 
   // Guards against a slow load finishing after a newer one has started.
   private loadCounter = 0;
@@ -196,12 +200,15 @@ export class ComponentApp extends LitElement {
           <section slot="start" class="pane component-pane">
             ${keyed(s.id, html`
               ${s.component.customImports.length > 0 ? this.renderImports(s) : nothing}
-              <div class="exports">${keyed(s.generation, this.renderExportsArea(s))}</div>
+              <div class=${classMap({ exports: true, searching: this.search.trim() !== '' })} @wa-show=${this.onToggle} @wa-hide=${this.onToggle}>
+                ${s.status === 'ready' ? this.renderExportsToolbar() : nothing}
+                ${keyed(s.generation, this.renderExportsArea(s))}
+              </div>
             `)}
           </section>
           <aside slot="end" class="pane resource-pane" ?hidden=${!resources}>
             ${s.status === 'ready'
-              ? html`<resource-table .ctx=${s.ctx!}></resource-table>`
+              ? html`<resource-table .ctx=${s.ctx!} .clearSearch=${() => this.clearSearch()}></resource-table>`
               : html`<div class="muted placeholder">Resource instances appear here once the component is instantiated.</div>`}
           </aside>
         </wa-split-panel>
@@ -290,8 +297,62 @@ export class ComponentApp extends LitElement {
       case 'failed':
         return this.renderError('Instantiation failed', s.error);
       case 'ready':
-        return renderExports(s.ctx!, s.component.interfaces);
+        return renderExports(s.ctx!, s.component.interfaces, search(this.search));
     }
+  }
+
+  private renderExportsToolbar() {
+    return html`<div class="exports-toolbar">
+      <wa-input
+        size="s"
+        placeholder="Search functions"
+        aria-label="Search functions"
+        with-clear
+        .value=${live(this.search)}
+        @input=${(e: Event) => this.onSearch((e.target as HTMLInputElement).value)}
+      >
+        <wa-icon slot="start" name="magnifying-glass"></wa-icon>
+      </wa-input>
+      <wa-button size="s" appearance="outlined" @click=${() => this.toggleInterfaces()}>
+        <wa-icon slot="start" name=${this.interfacesOpen ? 'angles-up' : 'angles-down'}></wa-icon>
+        ${this.interfacesOpen ? 'Collapse all' : 'Expand all'}
+      </wa-button>
+    </div>`;
+  }
+
+  private interfaceSections() {
+    return [...(this.componentPane?.querySelectorAll('wa-details.interface') ?? [])] as Array<HTMLElement & { open: boolean }>;
+  }
+
+  private toggleInterfaces() {
+    const open = !this.interfacesOpen;
+    this.interfaceSections().forEach((d) => (d.open = open));
+    this.interfacesOpen = open;
+  }
+
+  // Follows the interfaces opened or closed one at a time. The events come from the resource
+  // sections and the selects of the cards as well, which don't change it.
+  private onToggle = () => {
+    this.interfacesOpen = this.interfaceSections().some((d) => d.open);
+  };
+
+  // Expands the sections with matches, e.g. collapsed resources.
+  private async onSearch(text: string) {
+    this.search = text;
+    await this.updateComplete;
+    this.openMatches();
+  }
+
+  private clearSearch() {
+    this.search = '';
+    return this.updateComplete;
+  }
+
+  private openMatches() {
+    if (this.search.trim() === '') {
+      return;
+    }
+    this.componentPane?.querySelectorAll<HTMLElement & { open: boolean }>('.exports wa-details:has(func-card:not([hidden]))').forEach((d) => (d.open = true));
   }
 
   private async load(file: string | File, name: string) {
@@ -304,6 +365,7 @@ export class ComponentApp extends LitElement {
         return;
       }
       this.consolePanel?.clear();
+      this.search = '';
       // The editors start with the example code, or a commented-out template, but the component
       // starts without any, so calling an import asks in the console.
       const ifaces = byImportName(component.imports);
@@ -357,6 +419,7 @@ export class ComponentApp extends LitElement {
       s.ctx = { exports, log: (call) => this.consolePanel!.logCall(call), registry, host, activity, mocks: dialogs };
       s.status = 'ready';
       s.generation++;
+      this.interfacesOpen = true;
     } catch (err) {
       console.error(err);
       s.status = 'failed';
@@ -367,6 +430,7 @@ export class ComponentApp extends LitElement {
       // Applied imports close the dialog; show the beginning of the exports.
       this.editingImports = false;
       await this.updateComplete;
+      this.openMatches();
       this.componentPane?.scrollTo({ top: 0 });
     }
   }

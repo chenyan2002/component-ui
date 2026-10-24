@@ -40,6 +40,8 @@ function renderEarlier(slot: Slot) {
 @customElement('resource-table')
 export class ResourceTable extends LitElement {
   @property({ attribute: false }) accessor ctx!: ExportsContext;
+  // Clears the search of the exports, which may hide the card of a method, once it re-rendered.
+  @property({ attribute: false }) accessor clearSearch: () => Promise<unknown> = async () => {};
 
   private readonly onContextChange = () => this.requestUpdate();
 
@@ -145,6 +147,9 @@ export class ResourceTable extends LitElement {
       target.type === 'method' && target.resource === instance.resource && n === name);
     if (!card) {
       return;
+    }
+    if (card.hidden) {
+      await this.clearSearch();
     }
     card.selectSelf(instance.id);
     for (let section = card.closest('wa-details'); section; section = section.parentElement?.closest('wa-details') ?? null) {

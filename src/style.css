@@ -204,6 +204,18 @@ pre {
 .interface {
   background: var(--wa-color-surface-default);
 }
+.exports-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--wa-space-s);
+}
+.exports-toolbar wa-input {
+  flex: 1;
+}
+/* While searching, the sections without a function to show. */
+.exports.searching :is(wa-details, .func-grid):not(:has(func-card:not([hidden]))) {
+  display: none;
+}
 .interface::part(content) {
   display: flex;
   flex-direction: column;
@@ -514,6 +526,8 @@ resource-table {
 .log-entry.stream pre {
   flex: 1;
   margin: 0;
+  max-height: 3lh;
+  overflow-y: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

@@ -94,6 +94,15 @@ test('kv-store: instantiates with its Fastly imports answered in the console', a
   await expect(cards.locator('.sig-name')).toHaveCount(await cards.count());
 });
 
+test('record-imports: instantiates with the Fastly interfaces it wraps', async ({ page }) => {
+  await loadExample(page, 'record_imports.wasm');
+  await expect(page.locator('#importsCard .imports-title wa-badge')).toHaveText('22 interfaces');
+  await expect(page.locator('.section-summary code', { hasText: 'wrapped-fastly:compute/http-req@0.1.0' })).toBeVisible();
+  // Every card renders its signature; a type that failed to resolve leaves one blank.
+  const cards = page.locator('func-card');
+  await expect(cards.locator('.sig-name')).toHaveCount(await cards.count());
+});
+
 test('kv-store: host resources created in the UI are passed to handle', async ({ page }) => {
   await loadExample(page, 'kv-store.wasm');
   await applyImports(page, {

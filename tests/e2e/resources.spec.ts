@@ -117,6 +117,15 @@ test('a freed index is reused by any resource, and Clear freed removes freed row
   await call(getA);
   await expectCall(page, '#borrowed-z-1.get-a()', 'ok', '2');
 
+  // A method hidden by the search of the exports clears the search to show its card.
+  const search = page.locator('.exports-toolbar wa-input input');
+  await search.fill('num-dropped');
+  await expect(getA).toBeHidden();
+  await row(page, 'z-1').locator('button.instance-id').click();
+  await page.locator('wa-dropdown-item', { hasText: 'get-a' }).click();
+  await expect(search).toHaveValue('');
+  await expect(getA).toBeInViewport();
+
   await construct(page, 'z', '3');
   await row(page, 'z-2').locator('wa-button', { hasText: 'Drop' }).click();
   await expect(page.locator('resource-table .panel-title')).toContainText('1 live · 1 freed');

@@ -76,6 +76,9 @@ export class ConsolePanel extends LitElement {
   private scrolledTo = 0;
   // Entries grow after they render, e.g. as the fields of a prompt render, so follow their size.
   private readonly resizes = new ResizeObserver(() => this.scrollToEnd());
+  // Whether the last stream entry, which shows a few lines at a time, scrolls to its end once it
+  // renders: when it is new, or when it grew and wasn't scrolled up to read.
+  private streamFollow = false;
 
   // Render into the light DOM so the global stylesheet applies.
   protected createRenderRoot() {
@@ -146,10 +149,13 @@ export class ConsolePanel extends LitElement {
     // Consecutive writes to the same stream share an entry.
     const last = this.entries[this.entries.length - 1];
     if (last?.kind === 'stream' && last.stream === stream) {
+      const pre = this.querySelector<HTMLElement>('.log-entry.stream:last-child pre');
+      this.streamFollow ||= !pre || pre.scrollHeight - pre.scrollTop - pre.clientHeight < 4;
       last.text += text;
       this.requestUpdate();
     } else {
       this.follow = true;
+      this.streamFollow = true;
       this.entries = [...this.entries, { kind: 'stream', stream, text }];
     }
   }
@@ -159,6 +165,13 @@ export class ConsolePanel extends LitElement {
   }
 
   protected updated(_changed: PropertyValues) {
+    if (this.streamFollow) {
+      this.streamFollow = false;
+      const pre = this.querySelector<HTMLElement>('.log-entry.stream:last-child pre');
+      if (pre) {
+        pre.scrollTop = pre.scrollHeight;
+      }
+    }
     this.scrollToEnd();
     // A new prompt takes the focus, so the answer can be typed right away.
     const prompt = this.querySelector<HTMLElement>('.import-prompt:not([data-focused])');
