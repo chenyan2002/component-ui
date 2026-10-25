@@ -429,6 +429,26 @@ export function parseDraft(t: IDL.Type, d: Draft, registry: ResourceRegistry, mo
   return t.accept(new Parse(registry, mock, giver), d);
 }
 
+// The errors `parseDraft` left on a draft and the drafts it contains.
+export function draftErrors(d: Draft | undefined): string[] {
+  if (!d) {
+    return [];
+  }
+  const own = d.error ? [d.error] : [];
+  switch (d.kind) {
+    case 'opt':
+      return own.concat(d.some ? draftErrors(d.inner) : []);
+    case 'list':
+      return own.concat(d.items.flatMap(draftErrors));
+    case 'fields':
+      return own.concat(d.fields.flatMap(draftErrors));
+    case 'case':
+      return own.concat(draftErrors(d.payload));
+    default:
+      return own;
+  }
+}
+
 // Parses all arguments, or returns undefined if any of them is invalid.
 export function parseArgs(types: IDL.Type[], drafts: Draft[], registry: ResourceRegistry, mock?: MockFactory): any[] | undefined {
   const values = types.map((t, i) => parseDraft(t, drafts[i], registry, mock));

@@ -29,6 +29,29 @@ writing any glue code.
 Component UI requires [JavaScript Promise Integration (JSPI)](https://github.com/WebAssembly/js-promise-integration),
 which lets the guest suspend while you answer/mock an import.
 
+## Command line
+
+The same engine runs without the UI, e.g. for an agent to debug a component. Calls are written
+as the console shows them, with [WAVE](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-wave)
+arguments, and run in order on one instance:
+
+```sh
+npm run build:cli
+node dist-cli/component-ui.mjs inspect public/calculator.wasm
+node dist-cli/component-ui.mjs call public/calculator.wasm \
+  'docs:calculator/calculate@0.1.0.eval-expression(add, 1, 2)' \
+  --answer 'docs:adder/add@0.1.0.add = 3'
+```
+
+Imports that aren't implemented, with `--imports <pkg>=<file.js>`, are answered from `--answer`
+and `--answers <file>`, one per line, in the order the guest calls them. Each answer names its
+import, and optionally its arguments, e.g. `docs:adder/add@0.1.0.add(1, 2) = 3`, so an answer
+for a different call stops the run instead of answering it; `= !trap` traps the guest, and
+`#mock` is a new mock of a host resource. A run stops at the first import without an answer,
+with the type of value it expects, and exits with 2; the agent adds the answer and runs again.
+`--json` prints the events as JSON lines. The CLI needs Node 23 or later, and restarts itself
+with `--experimental-wasm-jspi` where that is needed.
+
 ## How it works
 
 1. **WIT → type AST.** [`crates/bindgen`](crates/bindgen) is a Rust component built on

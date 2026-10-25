@@ -51,12 +51,22 @@ export function qualified(iface: string, name: string): string {
 // A resource as the console shows it, under the interface that defines it and followed by its
 // version, e.g. `wasi:http/types/fields@0.2.3`.
 export function qualifiedResource(resource: WIT.ResourceClass): string {
-  const iface = resource._interface;
+  return resourceName(resource._interface, resource.witName);
+}
+
+function resourceName(iface: string, resource: string): string {
   if (isWorldLevel(iface)) {
-    return resource.witName;
+    return resource;
   }
   const name = unversioned(iface);
-  return `${name}/${resource.witName}${iface.slice(name.length)}`;
+  return `${name}/${resource}${iface.slice(name.length)}`;
+}
+
+// What a call is to, as its label shows it without the arguments, e.g. `#borrow-x-1.get-a` for
+// `#borrow-x-1.get-a()`, and for a method also of any instance, e.g. `exports/x.get-a`.
+export function calleesOf(record: CallRecord): string[] {
+  const callee = record.label.slice(0, record.label.length - `(${record.args.join(', ')})`.length);
+  return record.callKind === 'method' ? [callee, `${resourceName(record.iface, record.resource!)}.${record.func}`] : [callee];
 }
 
 // Describes a call of `func`, jco's `key` on the callee, with `args`. Made before the call

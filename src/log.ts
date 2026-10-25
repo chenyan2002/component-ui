@@ -13,12 +13,15 @@ export interface LogEntry {
 
 // Asks for the return value of an import the guest called.
 export interface ImportPrompt {
+  // The import, and the type of the value it returns.
+  func: WIT.FuncClass;
   type: WIT.Type;
   draft: Draft;
   registry: ResourceRegistry;
   mock: MockFactory;
-  // Returns the value in the draft, unless it is invalid.
-  answer(): void;
+  // Returns the value in `draft`, by default the prompt's own, unless it is invalid; whether it
+  // was valid. The errors are on the draft.
+  answer(draft?: Draft): boolean;
   random(): void;
   trap(): void;
 }

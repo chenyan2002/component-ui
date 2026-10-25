@@ -1,6 +1,9 @@
 {
   "name": "component-ui",
   "private": true,
+  "bin": {
+    "component-ui": "dist-cli/component-ui.mjs"
+  },
   "version": "0.0.0",
   "type": "module",
   "scripts": {
@@ -10,7 +13,8 @@
     "build:bindgen": "scripts/build-bindgen.sh",
     "preview": "vite preview",
     "test": "playwright test",
-    "test:node": "node scripts/build-node-tests.mjs && node --experimental-wasm-jspi --test 'tests/node/.build/*.test.mjs'"
+    "build:cli": "node scripts/build-node.mjs cli",
+    "test:node": "node scripts/build-node.mjs cli tests && node --experimental-wasm-jspi --test 'tests/node/.build/*.test.mjs'"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

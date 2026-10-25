@@ -9,7 +9,7 @@ import { Platform } from './platform';
 // `@bytecodealliance/preview2-shim`, whose in-memory filesystem and sockets, output callbacks
 // and per-instance state suit a debugger. Its Node build exits the process on `wasi:cli/exit`,
 // shares the host's environment and writes straight to stdout. Bundles for Node must resolve
-// the shim to its browser build; see `scripts/build-node-tests.mjs`. The guest's imports wait
+// the shim to its browser build; see `scripts/build-node.mjs`. The guest's imports wait
 // on prompts with JSPI, which Node 23 enables with `--experimental-wasm-jspi`.
 
 let moduleDir: string | undefined;

@@ -385,6 +385,13 @@ class ToDraft extends WIT.Visitor<number, Draft> {
   }
 }
 
+// The text as wasm-wave writes the value it reads, e.g. `{x: 1}` for `{ x : 1 , y: none }`, to
+// compare values. Throws if the text isn't WAVE of the type.
+export function canonicalWave(t: WIT.Type, text: string): string {
+  const nodes = typeNodesOf(t);
+  return wave.format(nodes, wave.parse(nodes, text));
+}
+
 // Reads a value of the type as the draft a user would enter, so that `parseDraft` turns it into
 // the JS value: instances are checked and mocks created as for the UI's input. Throws if the
 // text isn't WAVE of the type.

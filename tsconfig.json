@@ -21,6 +21,6 @@
     "noUncheckedSideEffectImports": true
   },
   "include": ["src"],
-  /* Node-only; type-checked with Node's types by tests/tsconfig.json, which imports it */
-  "exclude": ["src/platform-node.ts"]
+  /* Node-only; type-checked with Node's types by tests/tsconfig.json */
+  "exclude": ["src/platform-node.ts", "src/cli.ts"]
 }

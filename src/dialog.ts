@@ -205,14 +205,15 @@ export class ImportDialogs implements MockFactory {
     return new Promise((resolve, reject) => {
       const draft = initDraft(type);
       line.ask({
+        func,
         type,
         draft,
         registry: this.registry,
         mock: this,
-        answer: () => {
-          const value = parseDraft(type, draft, this.registry, this, 'host');
+        answer: (given = draft) => {
+          const value = parseDraft(type, given, this.registry, this, 'host');
           if (value === INVALID) {
-            return;
+            return false;
           }
           if (isResult && value.tag === 'err') {
             reject(Object.assign(new Error(formatValue(this.registry, type, value)), { payload: value.val }));
@@ -221,6 +222,7 @@ export class ImportDialogs implements MockFactory {
           }
           // After the host wrapper registers returned resources, so they show by id.
           queueMicrotask(() => line.result(formatValue(this.registry, type, value)));
+          return true;
         },
         random: () => randomize(type, draft, this.registry, this, 'host'),
         trap: () => {
