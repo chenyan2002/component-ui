@@ -82,11 +82,11 @@ test('an import without an implementation waits for its answer', async () => {
   assert.deepEqual(s.records, [
     {
       kind: 'export', callKind: 'func', iface: 'docs:calculator/calculate@0.1.0', func: 'eval-expression', args: ['add', '1', '2'],
-      label: 'docs:calculator/calculate@0.1.0.eval-expression(add, 1, 2)',
+      callee: 'docs:calculator/calculate@0.1.0.eval-expression', label: 'docs:calculator/calculate@0.1.0.eval-expression(add, 1, 2)',
     },
     {
       kind: 'import', callKind: 'func', iface: 'docs:adder/add@0.1.0', func: 'add', args: ['1', '2'],
-      label: 'docs:adder/add@0.1.0.add(1, 2)',
+      callee: 'docs:adder/add@0.1.0.add', label: 'docs:adder/add@0.1.0.add(1, 2)',
     },
   ]);
 });
@@ -111,9 +111,19 @@ test('calls on resources are recorded with their resource and instance', async (
   drop(s.ctx, instance.id);
   assert.equal(instance.id, 'x-1');
   assert.deepEqual(s.records, [
-    { kind: 'export', callKind: 'constructor', iface: 'exports', resource: 'x', func: 'constructor', args: ['5'], label: 'new exports/x(5)' },
-    { kind: 'export', callKind: 'method', iface: 'exports', resource: 'x', func: 'get-a', self: '#borrow-x-1', args: [], label: '#borrow-x-1.get-a()' },
-    { kind: 'export', callKind: 'drop', iface: 'exports', resource: 'x', func: 'drop', self: '#x-1', args: [], label: 'drop #x-1' },
+    {
+      kind: 'export', callKind: 'constructor', iface: 'exports', resource: 'x', func: 'constructor', args: ['5'],
+      callee: 'new exports/x', label: 'new exports/x(5)',
+    },
+    // A method's instance is its first argument.
+    {
+      kind: 'export', callKind: 'method', iface: 'exports', resource: 'x', func: 'get-a', self: '#borrow-x-1', args: ['#borrow-x-1'],
+      callee: 'exports/x.get-a', label: 'exports/x.get-a(#borrow-x-1)',
+    },
+    {
+      kind: 'export', callKind: 'drop', iface: 'exports', resource: 'x', func: 'drop', self: '#x-1', args: [],
+      callee: 'drop', label: 'drop #x-1',
+    },
   ]);
-  assert.deepEqual(s.lines, ['new exports/x(5) -> #x-1', '#borrow-x-1.get-a() -> 5', 'drop #x-1 -> dropped']);
+  assert.deepEqual(s.lines, ['new exports/x(5) -> #x-1', 'exports/x.get-a(#borrow-x-1) -> 5', 'drop #x-1 -> dropped']);
 });

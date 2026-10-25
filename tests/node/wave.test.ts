@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import * as WIT from '../../src/wit';
 import { INVALID, NEW_MOCK, parseDraft, TextDraft } from '../../src/draft';
 import { ResourceRegistry } from '../../src/resources';
-import { formatValue, parseWave } from '../../src/wave';
+import { canonicalWave, formatValue, parseWave } from '../../src/wave';
 
 // WAVE is written and read by crates/bindgen, with proxy-component's wasm-wave.
 
@@ -39,6 +39,7 @@ test('values are written as proxy-component writes them', () => {
   assert.equal(format(WIT.U64, 2n ** 64n - 1n), '18446744073709551615');
   assert.equal(format(WIT.S64, -(2n ** 63n)), '-9223372036854775808');
   assert.equal(format(WIT.Vec(WIT.U8), new Uint8Array([1, 2])), '[1, 2]');
+  assert.equal(format(WIT.Vec(WIT.U16), [77, 73]), '[77, 73]');
   assert.equal(format(WIT.Opt(WIT.Opt(WIT.U32)), { tag: 'some', val: null }), 'some(none)');
   assert.equal(format(WIT.Result(WIT.Null, WIT.String), { tag: 'ok' }), 'ok');
   assert.equal(format(WIT.Result(WIT.Null, WIT.String), { tag: 'err', val: 'x' }), 'err("x")');
@@ -141,4 +142,39 @@ test('labels of resources whose names look like prefixes', () => {
   assert.equal(id(WIT.Owned(hostY), '#host-y-1'), 'host-y-1');
   assert.equal(id(WIT.Owned(y), '#host-y-1'), 'host-y-1');
   assert.equal(id(WIT.Borrow(y), '#borrow-host-y-1'), 'host-y-1');
+});
+
+test('#mock-y-2 is a new mock, which is to get the id y-2', () => {
+  const y = WIT.Rec();
+  y.fill(WIT.Resource('Y', {}, 'imports'));
+  const mockX = WIT.Rec();
+  mockX.fill(WIT.Resource('MockX', {}, 'imports'));
+  const id = (t: WIT.Type, text: string) => (parseWave(t, text) as TextDraft).text;
+  assert.equal(id(WIT.Owned(y), '#mock-y-2'), NEW_MOCK);
+  assert.equal(id(WIT.Owned(y), '#mock'), NEW_MOCK);
+  // Of a resource named `mock-x`, `#mock-x-1` is an instance, and `#mock-mock-x-1` a new mock.
+  assert.equal(id(WIT.Owned(mockX), '#mock-x-1'), 'mock-x-1');
+  assert.equal(id(WIT.Owned(mockX), '#mock-mock-x-1'), NEW_MOCK);
+  // The id must be one of the resource's.
+  assert.throws(() => parseWave(WIT.Owned(y), '#mock-x-1'), /Expected a handle like #y-1/);
+});
+
+test('a list<u8> of text shows as b"…", and reads back', () => {
+  const bytes = WIT.Vec(WIT.U8);
+  const encode = (text: string) => new TextEncoder().encode(text);
+  // Text, with tabs, newlines and NULs, which strings in WAVE escape.
+  assert.equal(format(bytes, encode('MISS\0')), String.raw`b"MISS\u{0}"`);
+  assert.equal(format(bytes, encode('say "hi"\n')), String.raw`b"say \"hi\"\n"`);
+  assert.equal(format(WIT.Tuple([bytes, WIT.Opt(WIT.U32)]), [encode('a'), null]), '(b"a", none)');
+  // Anything else is a list: other control characters, bytes that aren't UTF-8, and no bytes.
+  assert.equal(format(bytes, new Uint8Array([27, 91])), '[27, 91]');
+  assert.equal(format(bytes, new Uint8Array([0xff, 0x41])), '[255, 65]');
+  assert.equal(format(bytes, new Uint8Array([])), '[]');
+  assert.deepEqual(parse(bytes, String.raw`b"MISS\u{0}"`), encode('MISS\0'));
+  assert.deepEqual(parse(bytes, 'b"é"'), encode('é'));
+  // `b"…"` is only bytes outside strings, and where a value starts.
+  assert.equal(parse(WIT.String, '"b\\"x"'), 'b"x');
+  assert.deepEqual(parse(WIT.Tuple([bytes, WIT.String]), '(b"(", "b\\"")'), [encode('('), 'b"']);
+  assert.throws(() => parseWave(WIT.String, 'b"x"'));
+  assert.equal(canonicalWave(bytes, 'b"hi"'), '[104, 105]');
 });

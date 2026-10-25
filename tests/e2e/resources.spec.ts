@@ -48,7 +48,7 @@ test('owned arguments are moved and returned resources take their handle index',
   const getA = funcCard(resource(page, 'x'), 'get-a');
   await choose(picker(arg(getA, 0)), 'x-1');
   await call(getA);
-  await expectCall(page, '#borrow-x-1.get-a()', 'ok', '6');
+  await expectCall(page, 'exports/x.get-a(#borrow-x-1)', 'ok', '6');
 
   const consume = worldFunc(page, 'consume');
   await choose(picker(arg(consume, 0)), 'x-1');
@@ -80,7 +80,7 @@ test('borrowed arguments stay live, and Drop runs the destructor', async ({ page
   const getA = funcCard(resource(page, 'z'), 'get-a');
   await choose(picker(arg(getA, 0)), 'z-3');
   await call(getA);
-  await expectCall(page, '#borrow-z-3.get-a()', 'ok', '5');
+  await expectCall(page, 'exports/z.get-a(#borrow-z-3)', 'ok', '5');
 
   // The component counts destructor calls.
   const numDropped = funcCard(resource(page, 'z'), 'num-dropped');
@@ -115,7 +115,7 @@ test('a freed index is reused by any resource, and Clear freed removes freed row
   await expect(getA).toBeInViewport();
   await expect(picker(arg(getA, 0))).toHaveJSProperty('value', 'z-1');
   await call(getA);
-  await expectCall(page, '#borrow-z-1.get-a()', 'ok', '2');
+  await expectCall(page, 'exports/z.get-a(#borrow-z-1)', 'ok', '2');
 
   // A method hidden by the search of the exports clears the search to show its card.
   const search = page.locator('.exports-toolbar wa-input input');

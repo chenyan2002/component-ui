@@ -1,14 +1,14 @@
 import * as WIT from './wit';
-import { CallRecord, qualified, qualifiedResource } from './call-record';
+import { CallRecord, callTypes, qualified, qualifiedResource } from './call-record';
 import { call, CallActivity, CallTarget, ExportsContext } from './calls';
 import { ImportDialogs } from './dialog';
-import { Draft, draftErrors, INVALID, parseDraft } from './draft';
+import { draftErrors, Giver, INVALID, instanceChoices, parseDraft } from './draft';
 import { HostResources } from './host-resources';
 import { ImportLog, ImportPrompt, LogEntry } from './log';
 import { instantiate, LoadedComponent, loadComponent } from './loader';
 import { Platform } from './platform';
-import { clashingNames, ResourceRegistry } from './resources';
-import { parseWave } from './wave';
+import { clashingNames, Instance, resourcesOf, ResourceRegistry } from './resources';
+import { canonicalWave, parseWave } from './wave';
 
 // Runs a component without the UI, for frontends like the CLI: calls written as the console shows
 // them, events for what happens, and answers to the imports that ask from an `AnswerSource`.
@@ -17,28 +17,63 @@ import { parseWave } from './wave';
 export type DriverEvent =
   | { type: 'call'; record: CallRecord }
   | { type: 'result'; record: CallRecord; text: string }
-  | { type: 'error'; record: CallRecord; text: string }
+  // `failed` unless the call returned the `err` of a `result`, e.g. when it trapped.
+  | { type: 'error'; record: CallRecord; text: string; failed: boolean }
   // A result shown apart from the call, e.g. the HTTP response of a WASI HTTP handler.
   | { type: 'detail'; record: CallRecord; text: string }
   | { type: 'output'; stream: 'stdout' | 'stderr'; text: string }
   // An import is waiting for an answer, a value of the type `expects`.
-  | { type: 'ask'; record: CallRecord; expects: string };
+  | { type: 'ask'; record: CallRecord; expects: string }
+  // An import got an answer.
+  | { type: 'answer'; record: CallRecord; answer: Answer }
+  // An instance was registered, e.g. a mock an import returned.
+  | { type: 'instance'; instance: Instance };
 
-// An answer to an import: a value, or a trap of the guest.
-export type Answer = { kind: 'value'; draft: Draft } | { kind: 'trap' };
+// An answer to an import: a value in WAVE, or none to trap the guest, or a hole, to answer
+// later, which stops the run. `source` is where it came from, e.g. `answers.txt:3` or `default`,
+// and `note` says more, e.g. which instances the happy path passed over for a mock.
+export interface Answer {
+  source: string;
+  value?: string;
+  hole?: boolean;
+  note?: string;
+  // What the answers file wrote along with it: the comments before it and after it, and whether
+  // it gave the arguments.
+  comments?: string[];
+  comment?: string;
+  pinned?: boolean;
+}
+
+// What a divergence error asks the user to do.
+export const RESTART = 'The guest\'s calls changed here, e.g. after an earlier answer was edited: remove this line and the ones after it, and run again';
+
+// The instances of a resource, e.g. `instances of x: #x-1 (from new exports/x(5)), or #mock`, up to
+// `max` of them.
+export function listInstances(resource: WIT.ResourceClass, instances: Instance[], mock: boolean, max = Infinity): string {
+  const listed = instances.slice(0, max).map((i) => `#${i.id} (from ${i.origin})`);
+  const more = instances.length > max ? [`and ${instances.length - max} more`] : [];
+  return `instances of ${resource.witName}: ${[...listed, ...more].join(', ')}${mock ? ', or #mock' : ''}`;
+}
+
+// What an answer source can ask about the instances an answer could return.
+export interface AnswerContext {
+  // The instances the host could return, as the UI's instance picker offers them.
+  choices(resource: WIT.ResourceClass): Instance[];
+  canMock(resource: WIT.ResourceClass): boolean;
+}
 
 // Answers the imports that ask, in the order the guest calls them, with a value of the type
 // `func` returns. Returns undefined when it has no answer, and throws when it can't answer, e.g.
 // as its next answer is for another import; either stops the run.
 export interface AnswerSource {
-  answer(record: CallRecord, func: WIT.FuncClass): Answer | undefined;
+  answer(record: CallRecord, func: WIT.FuncClass, context: AnswerContext): Answer | undefined;
 }
 
 // Why a run stopped before all its calls finished, at the import `record`: it had no answer, or
 // one that failed, e.g. for another import.
 export interface Stopped {
   record: CallRecord;
-  expects: string;
+  func: WIT.FuncClass;
   unanswered: boolean;
   reason: string;
 }
@@ -64,10 +99,23 @@ export function splitCall(text: string): [string, string] {
   return [text.slice(0, open).trim(), text.trimEnd().slice(open + 1, -1)];
 }
 
+// Adds the functions of a resource, e.g. `new exports/x`, `exports/x.add` and `exports/x.get-a`;
+// constructors and statics only with the interface they are called through.
+function addResource(map: Map<string, Callable>, iface: WIT.InterfaceClass | undefined, resource: WIT.ResourceClass) {
+  const name = qualifiedResource(resource);
+  for (const [key, func] of Object.entries(resource._fields)) {
+    const callKind = func.callKind;
+    if (callKind === 'method') {
+      map.set(`${name}.${func.displayName(key)}`, { target: { type: 'method', resource }, key, func });
+    } else if (iface && (callKind === 'constructor' || callKind === 'static')) {
+      map.set(callKind === 'constructor' ? `new ${name}` : `${name}.${func.displayName(key)}`, { target: { type: callKind, iface, resource }, key, func });
+    }
+  }
+}
+
 // The callables of the exports by callee, as the console shows them: functions, e.g.
-// `docs:calc/calc@0.1.0.eval`, and the constructors and statics of resources, e.g.
-// `new exports/x` and `exports/x.add`, including the imported resources the exports use.
-// Methods are called on an instance instead, e.g. `#borrow-x-1.get-a`.
+// `docs:calc/calc@0.1.0.eval`, and the functions of resources, e.g. `new exports/x` and
+// `exports/x.get-a`, including the imported resources the exports use.
 function callables(interfaces: WIT.InterfaceClass[]): Map<string, Callable> {
   const map = new Map<string, Callable>();
   const seen = new Set<WIT.ResourceClass>();
@@ -75,16 +123,9 @@ function callables(interfaces: WIT.InterfaceClass[]): Map<string, Callable> {
     for (const [key, func] of Object.entries(iface._fields)) {
       map.set(qualified(iface._name, func.displayName(key)), { target: { type: 'func', iface }, key, func });
     }
-    for (const resource of iface.get_resources()) {
-      if (seen.has(resource)) {
-        continue;
-      }
+    for (const resource of iface.get_resources().filter((r) => !seen.has(r))) {
       seen.add(resource);
-      for (const [key, func] of resource.get_static_funcs()) {
-        const type = func.callKind as 'constructor' | 'static';
-        const callee = type === 'constructor' ? `new ${qualifiedResource(resource)}` : `${qualifiedResource(resource)}.${func.displayName(key)}`;
-        map.set(callee, { target: { type, iface, resource }, key, func });
-      }
+      addResource(map, iface, resource);
     }
   }
   return map;
@@ -93,13 +134,21 @@ function callables(interfaces: WIT.InterfaceClass[]): Map<string, Callable> {
 export class Driver {
   public readonly component: LoadedComponent;
   public readonly registry: ResourceRegistry;
+  // Whether a call the UI made failed other than by returning an `err`, e.g. by trapping.
+  public failed = false;
   private readonly callables: Map<string, Callable>;
   private ctx!: ExportsContext;
+  private dialogs!: ImportDialogs;
   private stopped?: (stopped: Stopped) => void;
+
+  // The answers whose `#mock-x-2` say which ids their new mocks are to get, to check once the
+  // imports return, with the type of value they return.
+  private readonly expected = new Map<CallRecord, { answer: Answer; type: WIT.Type; func: WIT.FuncClass }>();
 
   private constructor(component: LoadedComponent, private readonly onEvent: (event: DriverEvent) => void, private readonly answers: AnswerSource) {
     this.component = component;
     this.registry = new ResourceRegistry(clashingNames(component.imports, component.interfaces));
+    this.registry.onInstance = (instance) => this.onEvent({ type: 'instance', instance });
     this.callables = callables(component.interfaces);
   }
 
@@ -117,30 +166,35 @@ export class Driver {
   private async instantiate(platform: Platform, importCode: Record<string, string>) {
     const { component, registry } = this;
     const host = new HostResources(registry, component.imports);
-    const dialogs = new ImportDialogs(registry, host, component.imports, (record) => this.logImport(record));
+    this.dialogs = new ImportDialogs(registry, host, component.imports, (record) => this.logImport(record));
     const exports = await instantiate(platform, component.transpiled, importCode, {
       stdout: (text) => this.onEvent({ type: 'output', stream: 'stdout', text }),
       stderr: (text) => this.onEvent({ type: 'output', stream: 'stderr', text }),
     }, {
-      complete: (pkg, mod, wasi) => dialogs.complete(pkg, mod, wasi),
+      complete: (pkg, mod, wasi) => this.dialogs.complete(pkg, mod, wasi),
       wrap: (pkg, mod) => host.wrap(pkg, mod),
     });
-    this.ctx = { exports, log: (record) => this.logCall(record), registry, host, activity: new CallActivity(), mocks: dialogs };
+    this.ctx = { exports, log: (record) => this.logCall(record), registry, host, activity: new CallActivity(), mocks: this.dialogs };
   }
 
-  // The functions the console shows calls to, e.g. `new exports/x`, and what they are.
-  public callees(): Array<[string, WIT.FuncClass]> {
-    return [...this.callables].map(([callee, { func }]) => [callee, func]);
+  // The instances that could be passed as a handle of the resource, by the UI to a call or by
+  // the host in an answer, as the UI's instance picker offers them.
+  public choices(resource: WIT.ResourceClass, giver: Giver): Instance[] {
+    return instanceChoices(resource, this.registry, giver);
   }
 
-  // Runs a call written as the console shows it, e.g. `exports.add(1, #borrow-x-1)`. Returns
+  public canMock(resource: WIT.ResourceClass): boolean {
+    return this.dialogs.canMock(resource);
+  }
+
+  // Runs a call written as the console shows it, e.g. `exports/x.get-a(#borrow-x-1)`. Returns
   // what stopped it, if an import's answer did; then the guest stays suspended in the call.
   public async run(text: string): Promise<Stopped | undefined> {
     const [callee, argText] = splitCall(text);
-    const { target, key, func, self } = this.resolve(callee);
-    const args = this.parseArgs(func, argText);
+    const { target, key, func } = this.resolve(callee);
+    const args = this.parseArgs(func, target.type === 'func' ? undefined : target.resource, argText);
     const stopped = new Promise<Stopped>((resolve) => (this.stopped = resolve));
-    const done = call(this.ctx, target, key, func, self === undefined ? args : [self, ...args]).then(() => undefined);
+    const done = call(this.ctx, target, key, func, args).then(() => undefined);
     try {
       return await Promise.race([done, stopped]);
     } finally {
@@ -148,31 +202,26 @@ export class Driver {
     }
   }
 
-  private resolve(callee: string): Callable & { self?: object } {
+  private resolve(callee: string): Callable {
     const found = this.callables.get(callee);
     if (found) {
       return found;
     }
-    // A method, on an instance written as a borrow, e.g. `#borrow-x-1.get-a`.
-    const method = /^#borrow-([^.]+)\.(.+)$/.exec(callee);
-    const instance = method && this.registry.instance(method[1]);
-    if (method && instance) {
-      const entry = instance.resource.get_method_funcs().find(([key, func]) => func.displayName(key) === method[2]);
-      if (!entry) {
-        throw new Error(`${qualifiedResource(instance.resource)} has no method ${method[2]}`);
-      }
-      return { target: { type: 'method', resource: instance.resource }, key: entry[0], func: entry[1], self: instance.obj };
-    }
+    // Methods of the host resources the exports don't use, but whose instances the UI holds.
+    const runtime = new Map<string, Callable>();
+    this.registry.resources().forEach((resource) => addResource(runtime, undefined, resource));
+    const method = runtime.get(callee);
     if (method) {
-      throw new Error(`No instance #${method[1]}`);
+      return method;
     }
     const name = callee.slice(callee.lastIndexOf('.') + 1);
-    const similar = [...this.callables.keys()].filter((c) => c.endsWith(`.${name}`) || c === name || c.endsWith(` ${name}`));
+    const similar = [...this.callables.keys(), ...runtime.keys()].filter((c) => c.endsWith(`.${name}`) || c === name || c.endsWith(` ${name}`));
     throw new Error(`No export ${callee}${similar.length > 0 ? `; did you mean ${similar.join(', ')}?` : ''}`);
   }
 
-  private parseArgs(func: WIT.FuncClass, text: string): any[] {
-    const types = func._args.map(([_, ty]) => ty);
+  // The arguments, as written, of a call to `func`, a method of `resource` if given.
+  private parseArgs(func: WIT.FuncClass, resource: WIT.ResourceClass | undefined, text: string): any[] {
+    const types = callTypes(func, resource);
     if (types.length === 0) {
       if (text.trim() !== '') {
         throw new Error('The function takes no arguments');
@@ -180,28 +229,79 @@ export class Driver {
       return [];
     }
     const tuple = WIT.Tuple(types);
-    const draft = parseWave(tuple, `(${text})`);
-    const value = parseDraft(tuple, draft, this.registry, this.ctx.mocks, 'ui');
+    let value: any = INVALID;
+    let errors: string[];
+    try {
+      const draft = parseWave(tuple, `(${text})`);
+      value = parseDraft(tuple, draft, this.registry, this.ctx.mocks, 'ui');
+      errors = draftErrors(draft);
+    } catch (err) {
+      errors = [errorText(err)];
+    }
     if (value === INVALID) {
-      throw new Error(draftErrors(draft).join('; '));
+      throw new Error(['Invalid arguments: ' + errors.join('; '), ...this.instancesFor(types, 'ui')].join('; '));
     }
     return value;
+  }
+
+  // The instances that could be passed as handles in values of the types, one line per resource,
+  // e.g. `instances of x: #x-1 (from new exports/x(5))`; none for a resource with none to choose.
+  public instancesFor(types: WIT.Type[], giver: Giver): string[] {
+    return resourcesOf(types).flatMap((resource) => {
+      const choices = this.choices(resource, giver);
+      return choices.length === 0 ? [] : [listInstances(resource, choices, giver === 'host' && this.canMock(resource))];
+    });
   }
 
   private logCall(record: CallRecord): LogEntry {
     this.onEvent({ type: 'call', record });
     return {
       result: (text) => this.onEvent({ type: 'result', record, text }),
-      error: (err) => this.onEvent({ type: 'error', record, text: errorText(err) }),
+      // calls.ts formats the `err` a call returns, and passes other errors, e.g. traps, as they are.
+      error: (err) => {
+        const failed = typeof err !== 'string';
+        if (failed && record.kind !== 'import') {
+          this.failed = true;
+        }
+        this.onEvent({ type: 'error', record, text: errorText(err), failed });
+      },
     };
   }
 
   private logImport(record: CallRecord): ImportLog {
+    const log = this.logCall(record);
     return {
-      ...this.logCall(record),
+      ...log,
+      result: (text) => {
+        log.result(text);
+        this.checkMocks(record, text);
+      },
       detail: (text) => this.onEvent({ type: 'detail', record, text }),
       ask: (prompt) => this.ask(record, prompt),
     };
+  }
+
+  // Stops the run if the new mocks of an answer, e.g. `#mock-x-2`, didn't get the ids it says.
+  private checkMocks(record: CallRecord, result: string) {
+    const expected = this.expected.get(record);
+    if (!expected) {
+      return;
+    }
+    this.expected.delete(record);
+    const { answer, type } = expected;
+    const value = answer.value!.replace(/#mock-/g, '#');
+    let same: boolean;
+    try {
+      same = canonicalWave(type, value) === canonicalWave(type, result);
+    } catch {
+      same = value === result;
+    }
+    if (!same) {
+      this.stopped?.({
+        record, func: expected.func, unanswered: false,
+        reason: `${answer.source}: the guest got ${result}, not ${value}, as the new mocks got other ids. ${RESTART}.`,
+      });
+    }
   }
 
   // Answers an import that asks, or stops the run, leaving the guest waiting. Answers once the
@@ -213,20 +313,42 @@ export class Driver {
   }
 
   private answer(record: CallRecord, prompt: ImportPrompt) {
-    const stop = (unanswered: boolean, reason: string) => this.stopped?.({ record, expects: prompt.type.name, unanswered, reason });
+    const stop = (unanswered: boolean, reason: string) => this.stopped?.({ record, func: prompt.func, unanswered, reason });
     let answer: Answer | undefined;
     try {
-      answer = this.answers.answer(record, prompt.func);
+      answer = this.answers.answer(record, prompt.func, {
+        choices: (resource) => this.choices(resource, 'host'),
+        canMock: (resource) => this.canMock(resource),
+      });
     } catch (err) {
       stop(false, errorText(err));
       return;
     }
     if (!answer) {
       stop(true, `No answer for ${record.label}`);
-    } else if (answer.kind === 'trap') {
+      return;
+    }
+    if (answer.hole) {
+      stop(true, `${answer.source} is still to be answered`);
+      return;
+    }
+    this.onEvent({ type: 'answer', record, answer });
+    if (answer.value !== undefined && /#mock-/.test(answer.value)) {
+      this.expected.set(record, { answer, type: prompt.type, func: prompt.func });
+    }
+    if (answer.value === undefined) {
       prompt.trap();
-    } else if (!prompt.answer(answer.draft)) {
-      stop(false, `Invalid answer for ${record.label}: ${draftErrors(answer.draft).join('; ')}`);
+      return;
+    }
+    let draft;
+    try {
+      draft = parseWave(prompt.type, answer.value);
+    } catch (err) {
+      stop(false, `${answer.source}: ${answer.value} is no ${prompt.type.name}: ${errorText(err)}`);
+      return;
+    }
+    if (!prompt.answer(draft)) {
+      stop(false, [`${answer.source}: invalid answer for ${record.label}: ${draftErrors(draft).join('; ')}`, ...this.instancesFor([prompt.type], 'host')].join('; '));
     }
   }
 }

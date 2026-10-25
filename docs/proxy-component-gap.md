@@ -77,20 +77,34 @@ and have the `borrow-` prefix exactly for a borrow.
 Besides the labels proxy-component reads, component-ui reads `#mock`, and ids with the `host-`
 prefix, e.g. `#host-y-1`; proxy-component would reject both.
 
+### `#mock-<id>`
+
+component-ui's answers files write a new mock as `#mock-<id>`, e.g. `#mock-y-2` for a new mock
+that is to get the id `y-2`, and read it as a new mock, checking it gets that id. Like `#mock`,
+it's an extension of WAVE's handle labels, which proxy-component doesn't read.
+
+### `b"…"` for bytes
+
+component-ui shows a `list<u8>` of text as `b"…"`, e.g. `b"MISS\u{0}"` for `[77, 73, 83, 83, 0]`,
+in the console, the CLI and the arguments of call records, and reads it back. That isn't WAVE:
+proxy-component, like wasm-wave, writes and reads only the list. Text here is valid UTF-8 without
+control characters other than tabs, newlines and NULs. A trace for proxy-component would have to
+write the list.
+
 ## Function names
 
 | | component-ui (console labels) | proxy-component (trace `method`) |
 |---|---|---|
 | Function | `wasi:cli/stdout@0.2.0.get-stdout` | `wasi:cli/stdout.get-stdout` |
-| Method | `#borrow-x-1.method(…)`; the receiver isn't an argument | `[method]ns:pkg/iface/x.method`; `self` is the first argument |
+| Method | `ns:pkg/iface/x@1.0.0.method(#borrow-x-1, …)`; `self` is the first argument | `[method]ns:pkg/iface/x.method`; `self` is the first argument |
 | Constructor | `new ns:pkg/iface/x@1.0.0(…)` | `[constructor]ns:pkg/iface/x.new` (Rust's constructor name) |
 | Static | `ns:pkg/iface/x@1.0.0.func(…)` | `ns:pkg/iface/x.func`, without a `[static]` prefix |
 | World-level function | `func(…)` | not supported |
 | Drop | `drop #x-1` | not recorded |
 
 component-ui logs each call as a record ([`src/call-record.ts`](../src/call-record.ts)) with its
-interface (versioned), resource, function name and WAVE arguments apart, and `self` apart from
-the arguments; the labels above are made from it. A proxy-component name could be made from a
+interface (versioned), resource, function name and arguments apart, a method's `self` first, as in
+proxy-component; the labels above are made from it. A proxy-component name could be made from a
 record too, but not the other way: proxy-component's names lose versions.
 
 proxy-component builds names from the generated Rust module paths and converts them back to
@@ -113,6 +127,19 @@ kebab case (`src/codegen/util.rs`, `wit_func_name`), which loses information:
   how proxy-component's replay creates mocked resources from owned labels in `ExportArgs`.
 - **`wasi:cli/exit`.** proxy-component special-cases it during replay. component-ui treats it
   as an ordinary shim call.
+
+## component-ui's answers files
+
+component-ui's CLI writes a run as an answers file (see the [README](../README.md#command-line)):
+`> call` lines for the export calls, and after each, the answers its imports got, in order,
+`import(args) = value`. That is close to proxy-component's trace: a call line for `ExportArgs`,
+an answer line for an `ImportArgs` and its `ImportRet`. The differences:
+
+- An answers file records only the imports that ask for answers: not those implemented in
+  JavaScript, those without a result, or WASI, which proxy-component records too.
+- It doesn't record export results (`ExportRet`), but writes them as comments.
+- Its names, handles and values differ as above: versioned interfaces, `#mock` and `#mock-<id>`,
+  `b"…"`, and comments, e.g. where instances came from.
 
 ## What closing the gap would take
 

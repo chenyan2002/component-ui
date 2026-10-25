@@ -12,16 +12,42 @@ import { ResourceRegistry, thrownType } from './resources';
 //
 // Types and values cross into bindgen as lists of nodes, which refer to the nodes they contain
 // by index; a type or value is the last of its nodes.
+//
+// Values are shown with one extension of WAVE: a `list<u8>` of text shows as `b"…"`, e.g.
+// `b"MISS\u{0}"` for `[77, 73, 83, 83, 0]`, and reads back as the list. Text is valid UTF-8
+// without control characters other than tabs, newlines and NULs; other bytes show as a list.
 
-// The type nodes of each type, which don't change.
+// For showing values, a `list<u8>` is written as a variant of these cases, its text as a string
+// or its bytes as a list, which `showBytes` then rewrites to `b"…"` or the list.
+const TEXT_BYTES = 'component-ui-text-bytes';
+const RAW_BYTES = 'component-ui-raw-bytes';
+
+function showBytes(text: string): string {
+  return text
+    .replace(new RegExp(`${TEXT_BYTES}\\(("(?:[^"\\\\]|\\\\.)*")\\)`, 'g'), 'b$1')
+    .replace(new RegExp(`${RAW_BYTES}\\((\\[[0-9, ]*\\])\\)`, 'g'), '$1');
+}
+
+function textOf(bytes: Uint8Array): string | undefined {
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return bytes.length > 0 && !/[\u0001-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(text) ? text : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// The type nodes of each type, which don't change: as WAVE, and for showing values.
 const typeNodes = new WeakMap<WIT.Type, TypeNode[]>();
+const shownTypeNodes = new WeakMap<WIT.Type, TypeNode[]>();
 
-function typeNodesOf(t: WIT.Type): TypeNode[] {
-  let nodes = typeNodes.get(t);
+function typeNodesOf(t: WIT.Type, shown = false): TypeNode[] {
+  const cache = shown ? shownTypeNodes : typeNodes;
+  let nodes = cache.get(t);
   if (!nodes) {
     nodes = [];
-    t.accept(new ToTypeNodes(nodes), null);
-    typeNodes.set(t, nodes);
+    t.accept(new ToTypeNodes(nodes, shown), null);
+    cache.set(t, nodes);
   }
   return nodes;
 }
@@ -33,7 +59,7 @@ function payloadType(t: WIT.Type): WIT.Type | undefined {
 
 // Appends the nodes of a type, those it contains first, and returns its index.
 class ToTypeNodes extends WIT.Visitor<null, number> {
-  constructor(private readonly nodes: TypeNode[]) {
+  constructor(private readonly nodes: TypeNode[], private readonly shown: boolean) {
     super();
   }
   public visitType<T>(t: WIT.Type<T>, _d: null): number {
@@ -61,7 +87,12 @@ class ToTypeNodes extends WIT.Visitor<null, number> {
     return this.push({ tag: 'option', val: this.child(ty) });
   }
   public visitVec(_t: WIT.VecClass, ty: WIT.Type, _d: null): number {
-    return this.push({ tag: 'list', val: this.child(ty) });
+    const list = this.push({ tag: 'list', val: this.child(ty) });
+    if (!this.shown || !isBytes(ty)) {
+      return list;
+    }
+    const text = this.push({ tag: 'string' });
+    return this.push({ tag: 'variant', val: [[TEXT_BYTES, text], [RAW_BYTES, list]] });
   }
   public visitRecord(_t: WIT.RecordClass, fields: Record<string, WIT.Type>, _d: null): number {
     return this.push({ tag: 'record', val: Object.entries(fields).map(([name, ty]) => [name, this.child(ty)]) });
@@ -125,7 +156,7 @@ function integer(bits: number, signed: boolean, v: any): number | bigint {
 // Appends the nodes of a JS value of the type, those it contains first, and returns its index.
 // A value that doesn't match the type throws, rather than be converted as jco would.
 class ToValueNodes extends WIT.Visitor<any, number> {
-  constructor(private readonly registry: ResourceRegistry, private readonly nodes: ValueNode[]) {
+  constructor(private readonly registry: ResourceRegistry, private readonly nodes: ValueNode[], private readonly shown: boolean) {
     super();
   }
   public visitType<T>(t: WIT.Type<T>, _v: any): number {
@@ -158,8 +189,13 @@ class ToValueNodes extends WIT.Visitor<any, number> {
   }
   public visitVec(_t: WIT.VecClass, ty: WIT.Type, v: any): number {
     // Lists of numbers may be typed arrays, e.g. a `Uint8Array` for `list<u8>`.
-    const items = Array.from(this.check(v, typeof v?.length === 'number') as ArrayLike<any>, (item) => ty.accept(this, item));
-    return this.push({ tag: 'list', val: new Uint32Array(items) });
+    const values = Array.from(this.check(v, typeof v?.length === 'number') as ArrayLike<any>);
+    const text = this.shown && isBytes(ty) ? textOf(Uint8Array.from(values, (b) => integer(8, false, b) as number)) : undefined;
+    if (text !== undefined) {
+      return this.push({ tag: 'variant', val: [TEXT_BYTES, this.push({ tag: 'string', val: text })] });
+    }
+    const list = this.push({ tag: 'list', val: new Uint32Array(values.map((item) => ty.accept(this, item))) });
+    return this.shown && isBytes(ty) ? this.push({ tag: 'variant', val: [RAW_BYTES, list] }) : list;
   }
   public visitRecord(_t: WIT.RecordClass, fields: Record<string, WIT.Type>, v: any): number {
     const values = Object.entries(fields).map(([name, ty]) => ty.accept(this, v[WIT.jsFieldName(name)]));
@@ -227,8 +263,8 @@ export function formatValue(registry: ResourceRegistry, t: WIT.Type, value: any)
   }
   try {
     const nodes: ValueNode[] = [];
-    t.accept(new ToValueNodes(registry, nodes), value);
-    return wave.format(typeNodesOf(t), nodes);
+    t.accept(new ToValueNodes(registry, nodes, true), value);
+    return showBytes(wave.format(typeNodesOf(t, true), nodes));
   } catch {
     // A value that doesn't match its type, e.g. from an import implemented in JavaScript.
     return `<invalid ${t.name}>`;
@@ -265,7 +301,8 @@ function isIdOf(id: string, resource: WIT.ResourceClass): boolean {
   return [id, id.replace(/^host-/, '')].some((rest) => rest.startsWith(name) && /^\d+$/.test(rest.slice(name.length)));
 }
 
-// The label of a mock, which no instance id can be: ids end in a number.
+// The label of a new mock, which no instance id can be: ids end in a number. `#mock-x-2` is also
+// a new mock, which is to get the id `x-2`.
 const MOCK_LABEL = 'mock';
 
 function floatText(v: number): string {
@@ -355,10 +392,12 @@ class ToDraft extends WIT.Visitor<number, Draft> {
     return this.handle(i, t.resource, true);
   }
   // Selects the instance by its id. As in proxy-component, the label names the resource, and
-  // has the `borrow-` prefix exactly for a borrow: `#x-1`, or `#borrow-x-1`. `#mock` is a new mock.
+  // has the `borrow-` prefix exactly for a borrow: `#x-1`, or `#borrow-x-1`.
+  // `#mock` is a new mock, and so is `#mock-x-2`, which says the id it is to get, `x-2`; whether
+  // it does is for the caller to check (see src/driver.ts).
   private handle(i: number, resource: WIT.ResourceClass, borrowed = false): Draft {
     const label = this.node(i, 'handle');
-    if (label === MOCK_LABEL) {
+    if (label === MOCK_LABEL || (label.startsWith(`${MOCK_LABEL}-`) && !isIdOf(label, resource) && isIdOf(label.slice(MOCK_LABEL.length + 1), resource))) {
       return this.text(NEW_MOCK);
     }
     const prefix = borrowed ? 'borrow-' : '';
@@ -385,17 +424,70 @@ class ToDraft extends WIT.Visitor<number, Draft> {
   }
 }
 
+const ESCAPES: Record<string, string> = { '\\': '\\', '"': '"', "'": "'", t: '\t', n: '\n', r: '\r' };
+
+// The end of the string or char literal starting at `start`, just past its closing quote.
+function literalEnd(text: string, start: number): number {
+  const quote = text[start];
+  for (let i = start + 1; i < text.length; i++) {
+    if (text[i] === '\\') {
+      i++;
+    } else if (text[i] === quote) {
+      return i + 1;
+    }
+  }
+  throw new Error(`Unclosed ${quote} at ${start}`);
+}
+
+// The value of a WAVE string literal, e.g. `"a\u{0}"`.
+function unescape(literal: string): string {
+  return literal.slice(1, -1).replace(/\\(u\{([0-9a-fA-F]{1,6})\}|.)/g, (match, escape: string, hex?: string) => {
+    if (hex !== undefined) {
+      return String.fromCodePoint(parseInt(hex, 16));
+    }
+    if (!(escape in ESCAPES)) {
+      throw new Error(`Invalid escape ${match}`);
+    }
+    return ESCAPES[escape];
+  });
+}
+
+// Rewrites each `b"…"` to the list of its UTF-8 bytes, e.g. `b"hi"` to `[104, 105]`, so wasm-wave
+// can read what `formatValue` shows.
+export function expandBytes(text: string): string {
+  let out = '';
+  for (let i = 0; i < text.length;) {
+    const c = text[i];
+    const bytes = c === 'b' && text[i + 1] === '"' && !/[a-zA-Z0-9%-]/.test(text[i - 1] ?? '');
+    if (c === '/' && text[i + 1] === '/') {
+      // A comment, to the end of the line.
+      const end = text.indexOf('\n', i);
+      out += text.slice(i, end < 0 ? text.length : end);
+      i = end < 0 ? text.length : end;
+    } else if (bytes || c === '"' || c === "'") {
+      const start = bytes ? i + 1 : i;
+      const end = literalEnd(text, start);
+      out += bytes ? `[${new TextEncoder().encode(unescape(text.slice(start, end))).join(', ')}]` : text.slice(i, end);
+      i = end;
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
+}
+
 // The text as wasm-wave writes the value it reads, e.g. `{x: 1}` for `{ x : 1 , y: none }`, to
 // compare values. Throws if the text isn't WAVE of the type.
 export function canonicalWave(t: WIT.Type, text: string): string {
   const nodes = typeNodesOf(t);
-  return wave.format(nodes, wave.parse(nodes, text));
+  return wave.format(nodes, wave.parse(nodes, expandBytes(text)));
 }
 
 // Reads a value of the type as the draft a user would enter, so that `parseDraft` turns it into
 // the JS value: instances are checked and mocks created as for the UI's input. Throws if the
 // text isn't WAVE of the type.
 export function parseWave(t: WIT.Type, text: string): Draft {
-  const nodes = wave.parse(typeNodesOf(t), text);
+  const nodes = wave.parse(typeNodesOf(t), expandBytes(text));
   return t.accept(new ToDraft(nodes), nodes.length - 1);
 }

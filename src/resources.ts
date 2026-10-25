@@ -84,6 +84,8 @@ export function clashingNames(imports: WIT.InterfaceClass[], exports: WIT.Interf
 export class ResourceRegistry extends EventTarget {
   // Called for each new host-implemented instance, to observe what the guest does with it.
   public onHostInstance?: (instance: Instance) => void;
+  // Called for each new instance, guest- or host-implemented.
+  public onInstance?: (instance: Instance) => void;
 
   // `clashing` names resources both sides implement, from `clashingNames`.
   constructor(private readonly clashing: ReadonlySet<string> = new Set()) {
@@ -153,6 +155,7 @@ export class ResourceRegistry extends EventTarget {
     if (holders) {
       this.onHostInstance?.(instance);
     }
+    this.onInstance?.(instance);
     this.changed();
     return instance;
   }
@@ -344,6 +347,44 @@ class HasResource extends WIT.Visitor<Set<WIT.RecClass>, boolean> {
 }
 
 const hasResource = new HasResource();
+
+// The resources whose handles a value of the type can contain, e.g. `x` for `option<borrow<x>>`.
+class ResourcesOf extends WIT.Visitor<Set<WIT.Type>, WIT.ResourceClass[]> {
+  public visitType<T>(_t: WIT.Type<T>, _seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return [];
+  }
+  public visitResource(t: WIT.ResourceClass, _seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return [t];
+  }
+  public visitOpt(_t: WIT.OptClass, ty: WIT.Type, seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return ty.accept(this, seen);
+  }
+  public visitVec(_t: WIT.VecClass, ty: WIT.Type, seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return ty.accept(this, seen);
+  }
+  public visitRecord(_t: WIT.RecordClass, fields: Record<string, WIT.Type>, seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return Object.values(fields).flatMap((ty) => ty.accept(this, seen));
+  }
+  public visitTuple(_t: WIT.TupleClass, components: WIT.Type[], seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return components.flatMap((ty) => ty.accept(this, seen));
+  }
+  public visitVariant(_t: WIT.VariantClass, fields: Record<string, WIT.Type>, seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return Object.values(fields).flatMap((ty) => ty.accept(this, seen));
+  }
+  public visitRec(t: WIT.RecClass, ty: WIT.Type, seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    if (seen.has(t)) {
+      return [];
+    }
+    seen.add(t);
+    return ty.accept(this, seen);
+  }
+}
+
+export function resourcesOf(types: WIT.Type[]): WIT.ResourceClass[] {
+  const visitor = new ResourcesOf();
+  const seen = new Set<WIT.Type>();
+  return [...new Set(types.flatMap((ty) => ty.accept(visitor, seen)))];
+}
 
 // Whether calling the function can pass resource handles either way.
 export function involvesResources(func: WIT.FuncClass): boolean {
