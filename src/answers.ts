@@ -1,6 +1,7 @@
 import * as WIT from './wit';
 import { CallRecord } from './call-record';
-import { Answer, AnswerContext, AnswerSource, listInstances, RESTART } from './driver';
+import { Answer, AnswerContext, DefaultsLevel, happyValue, RESTART } from './answering';
+import { AnswerSource } from './driver';
 import { answeredValue, CallEntry, CallLog, ImportEntry, isOwnCall } from './call-log';
 import { canonicalWave, mapHandles } from './wave';
 
@@ -34,9 +35,6 @@ import { canonicalWave, mapHandles } from './wave';
 //
 // The file is followed strictly: a run whose calls differ from it stops at the first line that
 // doesn't match. Past the last answer, the imports get the happy path (see `happyValue`).
-
-export type DefaultsLevel = 'none' | 'careful' | 'eager';
-export const DEFAULTS_LEVELS: DefaultsLevel[] = ['none', 'careful', 'eager'];
 
 interface LineBase {
   // Where it was written, e.g. `answers.txt:3`, for messages.
@@ -204,64 +202,6 @@ function sameArgs(func: WIT.FuncClass, written: string, record: CallRecord): boo
   }
 }
 
-function payloadType(t: WIT.Type): WIT.Type | undefined {
-  return t instanceof WIT.NullClass ? undefined : t;
-}
-
-// The happy path's answer of the type, with notes on the instances it passed over, if there is an
-// obvious answer at the level:
-// - `ok` for a `result`, with the happy path of its payload, and tuples and records of those;
-// - a new mock for a handle when the UI's instance picker would offer no other instance, or the
-//   only instance if there is one and the resource can't be mocked;
-// - at `eager`, also a new mock when the picker would offer instances, which the notes list.
-// Other values, e.g. numbers, options and lists, are for the user to choose.
-export function happyValue(t: WIT.Type, context: AnswerContext, level: DefaultsLevel): { value: string; notes: string[] } | undefined {
-  const notes = new Map<WIT.ResourceClass, string>();
-  const happy = (t: WIT.Type): string | undefined => {
-    const all = (types: WIT.Type[]) => {
-      const values = types.map(happy);
-      return values.every((v) => v !== undefined) ? values as string[] : undefined;
-    };
-    if (t instanceof WIT.RecClass) {
-      return happy(t.get_type()!);
-    }
-    if (t instanceof WIT.ResultClass) {
-      const ok = payloadType(t._fields.ok);
-      const value = ok && happy(ok);
-      return !ok ? 'ok' : value && `ok(${value})`;
-    }
-    if (t instanceof WIT.TupleClass) {
-      const values = all(t._components);
-      return values && `(${values.join(', ')})`;
-    }
-    if (t instanceof WIT.RecordClass && !(t instanceof WIT.FlagsClass)) {
-      const fields = Object.entries(t._fields);
-      const values = all(fields.map(([_, ty]) => ty));
-      return values && `{${fields.map(([name], i) => `${name}: ${values[i]}`).join(', ')}}`;
-    }
-    const resource = t instanceof WIT.OwnedClass ? t.resource : t instanceof WIT.ResourceClass ? t : undefined;
-    if (!resource) {
-      return undefined;
-    }
-    const choices = context.choices(resource);
-    const mockable = context.canMock(resource);
-    if (choices.length === 0) {
-      return mockable ? '#mock' : undefined;
-    }
-    if (choices.length === 1 && !mockable) {
-      notes.set(resource, `the only instance of ${resource.witName}`);
-      return `#${choices[0].id}`;
-    }
-    if (mockable && level === 'eager') {
-      notes.set(resource, listInstances(resource, choices, false, 5));
-      return '#mock';
-    }
-    return undefined;
-  };
-  const value = level === 'none' ? undefined : happy(t);
-  return value === undefined ? undefined : { value, notes: [...notes.values()] };
-}
-
 // Where the run differs from the answers file, at `line`.
 export class Divergence extends Error {
   constructor(public readonly line: ScriptLine, what: string) {
@@ -407,6 +347,7 @@ export function scriptLines(log: CallLog, options: ScriptOptions): ScriptText[] 
   };
   const writeImport = (entry: ImportEntry) => {
     const { record } = entry;
+    // What the file said of an answer from it, e.g. its comments; who answered is in the log.
     const answer = options.answers?.get(record);
     if (entry.prompt) {
       lines.push({ text: `${record.label} = ${HOLE}  // expects ${entry.prompt.type.name}`, hole: true });
@@ -416,10 +357,11 @@ export function scriptLines(log: CallLog, options: ScriptOptions): ScriptText[] 
       if (value === undefined) {
         return;
       }
-      const head = !answer || answer.source === 'default' || answer.pinned ? record.label : record.callee;
-      const notes = !answer ? [entry.note]
-        : answer.source === 'default' ? ['default', answer.note, entry.note]
-          : [answer.comment, answer.pinned ? undefined : `was ${record.label}`, entry.note];
+      const by = entry.answered.by;
+      const unpinned = answer !== undefined && by?.source !== 'default' && !answer.pinned;
+      const head = unpinned ? record.callee : record.label;
+      const notes = by?.source === 'default' ? ['default', by.note, entry.note]
+        : [answer?.comment, unpinned ? `was ${record.label}` : undefined, entry.note];
       const comment = notes.filter(Boolean).join('; ');
       lines.push({ text: `${head} = ${value}${comment ? `  // ${comment}` : ''}` });
     } else if (entry.status !== 'pending' && !(entry.parent && isOwnCall(entry.parent, entry))) {

@@ -12,6 +12,30 @@ async function loadResource(page: Page, stub = '') {
   }
 }
 
+// Opens the console's settings.
+async function consoleSettings(page: Page) {
+  await page.getByRole('button', { name: 'Console settings' }).click();
+  const dialog = page.locator('console-panel wa-dialog.console-settings');
+  await expect(dialog).toHaveAttribute('open');
+  return dialog;
+}
+
+// Chooses how the console answers imports: 'none', 'careful' or 'eager', as the CLI's --defaults.
+async function setDefaults(page: Page, level: string) {
+  const dialog = await consoleSettings(page);
+  await dialog.locator(`wa-radio[value="${level}"]`).click();
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await expect(dialog).not.toHaveAttribute('open');
+}
+
+// Saves the console as an answers file, and returns its name and text.
+async function saveConsole(page: Page): Promise<[string, string]> {
+  const dialog = await consoleSettings(page);
+  const [download] = await Promise.all([page.waitForEvent('download'), dialog.getByRole('button', { name: 'Save logs' }).click()]);
+  const text = await (await download.createReadStream()).toArray().then((chunks) => Buffer.concat(chunks).toString('utf8'));
+  return [download.suggestedFilename(), text];
+}
+
 const s32 = (value: string) => async (prompt: ReturnType<typeof importPrompt>) => {
   await expect(prompt.locator('.sig-type').first()).toHaveText('s32');
   await prompt.locator('input').fill(value);
@@ -184,9 +208,8 @@ test('Save writes the console as an answers file the CLI replays', async ({ page
   }
   // The guest waits on the next import, which the file has as an answer still to give.
   await expect(importPrompt(page)).toBeVisible();
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Save' }).click()]);
-  expect(download.suggestedFilename()).toBe('resource.answers.txt');
-  const text = await (await download.createReadStream()).toArray().then((chunks) => Buffer.concat(chunks).toString('utf8'));
+  const [name, text] = await saveConsole(page);
+  expect(name).toBe('resource.answers.txt');
   expect(text.split('\n').slice(3)).toEqual([
     '> exports.test-imports()',
     '//! new imports/y(10) = #y-1',
@@ -198,4 +221,33 @@ test('Save writes the console as an answers file the CLI replays', async ({ page
     '',
   ]);
   expect(text).toMatch(/^\/\/! saved from component-ui's console; replay with: component-ui call resource\.wasm --answers resource\.answers\.txt$/m);
+  // Clear logs, in the settings too, empties the console.
+  const dialog = await consoleSettings(page);
+  await dialog.getByRole('button', { name: 'Clear logs' }).click();
+  await expect(page.locator('console-panel .console-empty')).toBeVisible();
+});
+
+test('defaults answer imports by the happy path, as the CLI does, and Save marks them', async ({ page }) => {
+  await loadResource(page);
+  await setDefaults(page, 'eager');
+  await call(funcCard(page, 'test-imports'));
+  // An s32 has no happy path, so it still asks.
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('10'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('20'));
+  // A y does: a new mock, though the host could return the #y-1 it was given, which Save notes.
+  const add = callEntry(page, 'exports.test-imports()').locator('.log-import', { hasText: 'imports/y.add(#y-1, 10)' });
+  await expect(add.locator('.log-import-output')).toHaveText('= #y-2');
+  await expect(add.locator('.log-default')).toHaveText('// default');
+  await expect(importPrompt(page)).toBeVisible();
+  const [, text] = await saveConsole(page);
+  expect(text).toContain('imports/y.add(#y-1, 10) = #mock-y-2  // default; instances of y: #y-1 (from new imports/y(10); moved into imports/y.add(#y-1, 10))\n');
+});
+
+test('careful defaults ask where there are instances to choose', async ({ page }) => {
+  await loadResource(page);
+  await setDefaults(page, 'careful');
+  await call(funcCard(page, 'test-imports'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('10'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('20'));
+  await answerImport(page, 'imports/y.add(#y-1, 10)', newMock);
 });

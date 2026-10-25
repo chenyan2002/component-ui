@@ -220,13 +220,13 @@ export class ImportDialogs implements MockFactory {
         draft,
         registry: this.registry,
         mock: this,
-        answer: (given = draft) => {
+        answer: (given = draft, by) => {
           const value = parseDraft(type, given, this.registry, this, 'host');
           if (value === INVALID) {
             return false;
           }
           // Before the host wrapper registers the mocks the value returns, so they can be told.
-          line.answered(false);
+          line.answered(false, by);
           if (isResult && value.tag === 'err') {
             reject(Object.assign(new Error(formatValue(this.registry, type, value)), { payload: value.val }));
           } else {
@@ -237,10 +237,10 @@ export class ImportDialogs implements MockFactory {
           return true;
         },
         random: () => randomize(type, draft, this.registry, this, 'host'),
-        trap: () => {
+        trap: (by) => {
           // jco treats a runtime error as a trap of the component instance.
           const err = new WebAssembly.RuntimeError(`Trapped at ${call.label}`);
-          line.answered(true);
+          line.answered(true, by);
           reject(err);
           line.error(err);
         },

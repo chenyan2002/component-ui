@@ -1,10 +1,38 @@
-import { html, LitElement, nothing, PropertyValues } from 'lit';
+import { html, LitElement, nothing, PropertyValues, TemplateResult } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 import { writeScript } from './answers';
+import { answerPrompt, defaultAnswer, DEFAULTS_LEVELS, DefaultsLevel } from './answering';
 import { CallLog, ImportEntry, isOwnCall, LogItem, StreamEntry } from './call-log';
 import { CallRecord } from './call-record';
 import { FormContext, renderField, typeName } from './form';
 import { ImportLog, ImportPrompt, LogEntry } from './log';
+
+// The choices of how imports are answered, as the CLI's `--defaults` levels.
+const LEVELS: Array<{ level: DefaultsLevel; label: string; description: TemplateResult }> = [
+  { level: 'none', label: 'Ask for every result', description: html`Every import that asks for its result shows a form for it.` },
+  {
+    level: 'careful', label: 'Fill in obvious results',
+    description: html`An import returning a <code>result</code> gets <code>ok</code>, and one returning a resource a new
+      mock where nothing else could be returned; the others ask.`,
+  },
+  {
+    level: 'eager', label: 'Fill in, preferring new mocks',
+    description: html`As above, and a new mock also where existing instances could be returned.`,
+  },
+];
+
+// Where the console's choice of how imports are answered is kept.
+const DEFAULTS_KEY = 'component-ui.defaults';
+
+function storedDefaults(): DefaultsLevel {
+  const level = localStorage.getItem(DEFAULTS_KEY) as DefaultsLevel | null;
+  return level && DEFAULTS_LEVELS.includes(level) ? level : 'none';
+}
+
+// Marks an import the happy path answered, which the console can't change.
+function renderDefault(entry: ImportEntry | undefined) {
+  return entry?.answered?.by?.source === 'default' ? html`<span class="log-default">// default</span>` : nothing;
+}
 
 // The guest's frames of a trap, innermost first.
 function renderFrames(frames: string[]) {
@@ -21,6 +49,10 @@ export class ConsolePanel extends LitElement {
   @property({ attribute: false }) accessor saveHeader: string[] | undefined = undefined;
   // The file name Save writes.
   @property() accessor saveName = 'answers.txt';
+  // How imports that ask are answered: by the user, or by the happy path where it has an answer,
+  // as the CLI's `--defaults` does past its answers file.
+  @state() accessor defaults: DefaultsLevel = storedDefaults();
+  @state() accessor settingsOpen = false;
   public readonly log = new CallLog((added) => {
     if (added) {
       this.follow = true;
@@ -68,9 +100,21 @@ export class ConsolePanel extends LitElement {
     return this.log.logAction(text);
   }
 
-  // Logs an import the guest called, under the pending call it happened in.
+  // Logs an import the guest called, under the pending call it happened in. One that asks gets
+  // the happy path's answer at the chosen level, if there is one, and asks the user otherwise.
   public logImport(record: CallRecord): ImportLog {
-    return this.log.logImport(record);
+    const line = this.log.logImport(record);
+    return {
+      ...line,
+      ask: (prompt) => {
+        line.ask(prompt);
+        const answer = this.defaults === 'none' ? undefined : defaultAnswer(prompt, this.defaults);
+        // Once the import has returned its promise, so the host wrapper registers the mocks it returns.
+        if (answer) {
+          queueMicrotask(() => answerPrompt(prompt, answer));
+        }
+      },
+    };
   }
 
   public print(stream: StreamEntry['stream'], text: string) {
@@ -78,6 +122,51 @@ export class ConsolePanel extends LitElement {
     const atEnd = !pre || pre.scrollHeight - pre.scrollTop - pre.clientHeight < 4;
     // Writes that join the last stream entry follow it if it was scrolled to its end.
     this.streamFollow ||= this.log.print(stream, text) ? atEnd : true;
+  }
+
+  private setDefaults(level: DefaultsLevel) {
+    this.defaults = level;
+    localStorage.setItem(DEFAULTS_KEY, level);
+  }
+
+  // How imports are answered, and saving or clearing the log; saving writes an answers file.
+  private renderSettings() {
+    return html`<wa-dialog
+      label="Console settings"
+      class="console-settings"
+      .open=${this.settingsOpen}
+      @wa-after-hide=${(e: Event) => {
+        if (e.target === e.currentTarget) {
+          this.settingsOpen = false;
+        }
+      }}
+    >
+      <wa-radio-group label="Answering imports" class="console-defaults" .value=${this.defaults}
+        @change=${(e: Event) => this.setDefaults((e.target as HTMLInputElement).value as DefaultsLevel)}>
+        ${LEVELS.map(({ level, label, description }) => html`<wa-radio value=${level}>
+          ${label}<div class="muted console-defaults-description">${description}</div>
+        </wa-radio>`)}
+      </wa-radio-group>
+      <p class="muted">
+        A default answer is final, as the guest goes on with it at once. It is marked <code>// default</code>,
+        and Save writes it, for the CLI to replay.
+      </p>
+      <div slot="footer" class="func-actions">
+        <wa-button appearance="plain" ?disabled=${this.log.entries.length === 0} @click=${() => {
+          this.clear();
+          this.settingsOpen = false;
+        }}>Clear logs</wa-button>
+        ${this.saveHeader === undefined ? nothing : html`<wa-button
+          title="Save the calls and the answers to imports as an answers file, which the CLI replays"
+          ?disabled=${this.log.entries.length === 0} @click=${() => {
+            this.save();
+            this.settingsOpen = false;
+          }}>
+          <wa-icon slot="start" name="file-arrow-down"></wa-icon>
+          Save logs
+        </wa-button>`}
+      </div>
+    </wa-dialog>`;
   }
 
   // Downloads the log as an answers file, which the CLI replays.
@@ -133,11 +222,13 @@ export class ConsolePanel extends LitElement {
     return html`
       <div class="panel-header">
         <span class="panel-title"><wa-icon name="terminal"></wa-icon> Console</span>
-        ${this.saveHeader === undefined ? nothing : html`<wa-button size="s" appearance="plain"
-          title="Save the calls and the answers to imports as a file the CLI replays"
-          ?disabled=${this.log.entries.length === 0} @click=${() => this.save()}>Save</wa-button>`}
-        <wa-button size="s" appearance="plain" @click=${() => this.clear()}>Clear</wa-button>
+        <span class="panel-actions">
+          <wa-button size="s" appearance="plain" title="Console settings" @click=${() => (this.settingsOpen = true)}>
+            <wa-icon name="gear" label="Console settings"></wa-icon>
+          </wa-button>
+        </span>
       </div>
+      ${this.renderSettings()}
       <div class="console" @scroll=${() => this.onScroll()}>
         <div class="console-log">
           ${this.log.entries.length === 0
@@ -156,8 +247,10 @@ export class ConsolePanel extends LitElement {
         <span class="log-prompt">↳</span>
         <code>${entry.record.label}</code>
         ${!entry.output ? nothing : html`<span class="log-import-output">= <code>${entry.output}</code></span>`}
+        ${renderDefault(entry)}
       </div>`}
       ${same ? nothing : renderFrames(entry.frames)}
+
       ${entry.note === undefined ? nothing : html`<div class="log-note">${entry.note}</div>`}
       ${entry.detail === undefined ? nothing : html`<div class="log-output"><pre>${entry.detail}</pre></div>`}
       ${entry.prompt ? this.renderPrompt(entry.prompt) : nothing}
@@ -223,7 +316,7 @@ export class ConsolePanel extends LitElement {
       ${!entry.output
         ? nothing
         : html`<div class="log-output">
-            <pre>${entry.output}</pre>
+            <pre>${entry.output}${renderDefault(entry.imports.find(isCall))}</pre>
             <wa-copy-button class="log-copy" .value=${entry.output}></wa-copy-button>
           </div>`}
       ${renderFrames(entry.frames)}

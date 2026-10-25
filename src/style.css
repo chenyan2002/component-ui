@@ -523,6 +523,27 @@ resource-table {
   font-size: var(--wa-font-size-xs);
   color: var(--wa-color-text-quiet);
 }
+/* The choices of how the console answers imports, with what each does. */
+.console-defaults-description {
+  font-size: var(--wa-font-size-s);
+}
+.console-defaults wa-radio {
+  margin-bottom: var(--wa-space-s);
+}
+/* An answer the happy path gave, at the end of its line. */
+.log-default {
+  margin-left: var(--wa-space-xs);
+  font-family: var(--wa-font-family-code);
+  font-size: var(--wa-font-size-xs);
+  color: var(--wa-color-text-quiet);
+  white-space: nowrap;
+}
+/* The controls of a panel, right of its title. */
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--wa-space-2xs);
+}
 /* The guest's frames of a trap, innermost first. */
 .log-frames {
   font-family: var(--wa-font-family-code);

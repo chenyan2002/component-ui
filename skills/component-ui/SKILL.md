@@ -153,8 +153,8 @@ under host resources, e.g. `fastly:compute/http-req/request@0.1.0.new()`.
 
 ## The answers file
 
-The user may give you one saved from component-ui's console in the browser (its **Save**
-button): it is the same format, so continue it with `--answers` as your own.
+The user may give you one saved from component-ui's console in the browser (**Save logs**, in its
+settings): it is the same format, so continue it with `--answers` as your own.
 
 - `> call` lines are the calls; the lines after one answer the imports it made, in order.
 - `import(args) = value` answers one call: `value` is WAVE of the type the import returns, or

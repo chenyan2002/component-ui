@@ -20,10 +20,17 @@ export interface ImportPrompt {
   registry: ResourceRegistry;
   mock: MockFactory;
   // Returns the value in `draft`, by default the prompt's own, unless it is invalid; whether it
-  // was valid. The errors are on the draft.
-  answer(draft?: Draft): boolean;
+  // was valid. The errors are on the draft. `by` says who answered, if not the user.
+  answer(draft?: Draft, by?: AnsweredBy): boolean;
   random(): void;
-  trap(): void;
+  trap(by?: AnsweredBy): void;
+}
+
+// Who answered an import other than the user, e.g. `default` for the happy path, or an answers
+// file's line, e.g. `run.txt:3`, and what more to say, e.g. which instances it passed over.
+export interface AnsweredBy {
+  source: string;
+  note?: string;
 }
 
 export interface ImportLog extends LogEntry {
@@ -34,5 +41,5 @@ export interface ImportLog extends LogEntry {
   // Something to know about the call, e.g. why the user's JavaScript wasn't called.
   note(text: string): void;
   // The prompt was answered, by trapping the guest or with a value, which is about to be returned.
-  answered(trapped: boolean): void;
+  answered(trapped: boolean, by?: AnsweredBy): void;
 }

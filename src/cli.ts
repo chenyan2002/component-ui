@@ -3,10 +3,12 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import * as WIT from './wit';
 import { CallRecord, qualified, qualifiedResource, unversioned } from './call-record';
-import { CallLine, DEFAULTS_LEVELS, DefaultsLevel, Divergence, parseAnswer, parseScript, Script, scriptLines, ScriptLine, writeScript } from './answers';
+import { CallLine, Divergence, parseAnswer, parseScript, Script, scriptLines, ScriptLine, writeScript } from './answers';
+import { Answer, DEFAULTS_LEVELS, DefaultsLevel } from './answering';
 import { answeredValue, CallEntry, CallLog, ImportEntry, isOwnCall, StreamEntry } from './call-log';
-import { Answer, Driver, DriverEvent, Stopped } from './driver';
+import { Driver, DriverEvent, Stopped } from './driver';
 import { JSPI_SUPPORTED, loadComponent } from './loader';
+import { AnsweredBy } from './log';
 import { mapHandles } from './wave';
 import { byImportName } from './host-resources';
 import { importTemplate } from './import-template';
@@ -158,13 +160,13 @@ function outputLines(entry: StreamEntry, indent: string): RunLine[] {
 }
 
 // How a call or an import ended: its result, e.g. `= 3`, or error and the guest's frames, marked
-// with where its answer came from, e.g. `(answers.txt:1)`; `shown` is its value as the answers
-// file writes it, e.g. with new mocks as `#mock-x-2`.
-function endingLines(entry: CallEntry | ImportEntry, answer: Answer | undefined, shown?: string): string[] {
+// with who answered it, e.g. `(answers.txt:1)`; `shown` is its value as the answers file writes
+// it, e.g. with new mocks as `#mock-x-2`.
+function endingLines(entry: CallEntry | ImportEntry, by: AnsweredBy | undefined, shown?: string): string[] {
   if (entry.status === 'pending') {
     return [];
   }
-  const marked = (line: string) => (answer ? `${line}  (${[answer.source, answer.note].filter(Boolean).join('; ')})` : line);
+  const marked = (line: string) => (by ? `${line}  (${[by.source, by.note].filter(Boolean).join('; ')})` : line);
   if (entry.status === 'ok') {
     return [marked(`= ${shown ?? (entry.output === '' ? '()' : entry.output)}`)];
   }
@@ -174,19 +176,20 @@ function endingLines(entry: CallEntry | ImportEntry, answer: Answer | undefined,
 }
 
 // An import, e.g. `↳ add(1, 2)` and `= 3  (answers.txt:1)`; still asking, `? u32`.
-function importLines(entry: ImportEntry, answer: Answer | undefined, indent: string): RunLine[] {
+function importLines(entry: ImportEntry, indent: string): RunLine[] {
+  const by = entry.answered?.by;
   const lines = [
     ...(entry.note ? [`~ ${entry.note}`] : []),
     ...(entry.prompt ? [`? ${entry.prompt.type.name}`] : []),
-    ...endingLines(entry, answer, answeredValue(entry)),
+    ...endingLines(entry, by, answeredValue(entry)),
     ...(entry.detail === undefined ? [] : entry.detail.split('\n').map((line) => `| ${line}`)),
   ];
-  return [{ text: `${indent}↳ ${entry.record.label}`, source: answer?.source }, ...lines.map((text) => ({ text: `${indent}  ${text}` }))];
+  return [{ text: `${indent}↳ ${entry.record.label}`, source: by?.source }, ...lines.map((text) => ({ text: `${indent}  ${text}` }))];
 }
 
 // The run as the console shows it, e.g. `› f(1)`, `  ↳ g(1)` for an import, then `  = 2`: each
 // import under the call that made it, with the output written meanwhile, in order.
-function runLines(log: CallLog, answers: Map<CallRecord, Answer>): RunLine[] {
+function runLines(log: CallLog): RunLine[] {
   const lines: RunLine[] = [];
   for (const entry of log.entries) {
     if (entry.kind === 'stream') {
@@ -194,7 +197,7 @@ function runLines(log: CallLog, answers: Map<CallRecord, Answer>): RunLine[] {
         lines.push(...outputLines(entry, ''));
       }
     } else if (entry.kind === 'import') {
-      lines.push(...importLines(entry, answers.get(entry.record), ''));
+      lines.push(...importLines(entry, ''));
     } else {
       lines.push({ text: `› ${entry.label}`, header: true });
       const output = log.entries.filter((e): e is StreamEntry => e.kind === 'stream' && e.call === entry);
@@ -209,11 +212,11 @@ function runLines(log: CallLog, answers: Map<CallRecord, Answer>): RunLine[] {
             lines.push({ text: `  ? ${child.prompt.type.name}` });
           }
         } else {
-          lines.push(...importLines(child, answers.get(child.record), '  '));
+          lines.push(...importLines(child, '  '));
         }
       }
-      const answer = own && answers.get(own.record);
-      lines.push(...endingLines(entry, answer, own && answeredValue(own)).map((text, i) => ({ text: `  ${text}`, source: i === 0 ? answer?.source : undefined })));
+      const by = own?.answered?.by;
+      lines.push(...endingLines(entry, by, own && answeredValue(own)).map((text, i) => ({ text: `  ${text}`, source: i === 0 ? by?.source : undefined })));
     }
   }
   return lines;
@@ -305,7 +308,7 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
     `//! imports implemented in JavaScript, whose calls aren't recorded: ${Object.keys(importCode).join(', ') || 'none'}`,
     '//! WASI comes from the shim and isn\'t recorded; a run may differ where the guest uses it, e.g. its clocks or random numbers',
   ];
-  // Where each import's answer came from, which the run shows and --save writes.
+  // What the file said of the answers from it, e.g. their comments, which --save writes again.
   const answers = new Map<CallRecord, Answer>();
   const driver = await Driver.start(nodePlatform, await readFile(file), (event) => {
     if (event.type === 'answer') {
@@ -367,7 +370,7 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
   }
   const scriptOptions = { header, answers, callLines, rest: calls.slice(ran) };
   const from = values.all ? undefined : values.from !== undefined ? fromSource(values.from, files) : script.lastUsed?.source;
-  printRun(runLines(driver.log, answers), print, from);
+  printRun(runLines(driver.log), print, from);
   if (skipped.size > 0) {
     print(`warning: your JavaScript of ${[...skipped].join(', ')} wasn't called where an argument was a mock; those calls asked for answers instead`);
   }

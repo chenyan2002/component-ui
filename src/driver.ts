@@ -4,13 +4,17 @@ import { CallRecord, callTypes, qualified, qualifiedResource } from './call-reco
 import { call, CallActivity, CallTarget, drop, ExportsContext } from './calls';
 import { ImportDialogs } from './dialog';
 import { draftErrors, Giver, INVALID, instanceChoices, parseDraft } from './draft';
+import type { Instance } from './resources';
 import { HostResources } from './host-resources';
 import { ImportLog, ImportPrompt, LogEntry } from './log';
 import { instantiate, LoadedComponent, loadComponent } from './loader';
 import { Platform } from './platform';
-import { clashingNames, describeInstance, Instance, resourcesOf, ResourceRegistry } from './resources';
+import { Answer, AnswerContext, answerPrompt, listInstances, promptContext, RESTART } from './answering';
+import { clashingNames, resourcesOf, ResourceRegistry } from './resources';
 import { wasmFrames } from './frames';
 import { canonicalWave, parseWave } from './wave';
+
+export type { Answer, AnswerContext };
 
 // Runs a component without the UI, for frontends like the CLI: calls written as the console shows
 // them, events for what happens, and answers to the imports that ask from an `AnswerSource`.
@@ -33,39 +37,6 @@ export type DriverEvent =
   | { type: 'note'; record: CallRecord; text: string }
   // An instance was registered, e.g. a mock an import returned.
   | { type: 'instance'; instance: Instance };
-
-// An answer to an import: a value in WAVE, or none to trap the guest, or a hole, to answer
-// later, which stops the run. `source` is where it came from, e.g. `answers.txt:3` or `default`,
-// and `note` says more, e.g. which instances the happy path passed over for a mock.
-export interface Answer {
-  source: string;
-  value?: string;
-  hole?: boolean;
-  note?: string;
-  // What the answers file wrote along with it: the comments before it and after it, and whether
-  // it gave the arguments.
-  comments?: string[];
-  comment?: string;
-  pinned?: boolean;
-}
-
-// What a divergence error asks the user to do.
-export const RESTART = 'The guest\'s calls changed here, e.g. after an earlier answer was edited: remove this line and the ones after it, and run again';
-
-// The instances of a resource, e.g. `instances of x: #x-1 (from new exports/x(5)), or #mock`, up to
-// `max` of them, each described as in the UI's instance picker.
-export function listInstances(resource: WIT.ResourceClass, instances: Instance[], mock: boolean, max = Infinity): string {
-  const listed = instances.slice(0, max).map(describeInstance);
-  const more = instances.length > max ? [`and ${instances.length - max} more`] : [];
-  return `instances of ${resource.witName}: ${[...listed, ...more].join(', ')}${mock ? ', or #mock' : ''}`;
-}
-
-// What an answer source can ask about the instances an answer could return.
-export interface AnswerContext {
-  // The instances the host could return, as the UI's instance picker offers them.
-  choices(resource: WIT.ResourceClass): Instance[];
-  canMock(resource: WIT.ResourceClass): boolean;
-}
 
 // Answers the imports that ask, in the order the guest calls them, with a value of the type
 // `func` returns. Returns undefined when it has no answer, and throws when it can't answer, e.g.
@@ -333,7 +304,7 @@ export class Driver {
         entry.ask(prompt);
         this.ask(record, prompt);
       },
-      answered: (trapped) => entry.answered(trapped),
+      answered: (trapped, by) => entry.answered(trapped, by),
     };
   }
 
@@ -372,10 +343,7 @@ export class Driver {
     const stop = (unanswered: boolean, reason: string) => this.stopped?.({ record, func: prompt.func, unanswered, reason });
     let answer: Answer | undefined;
     try {
-      answer = this.answers.answer(record, prompt.func, {
-        choices: (resource) => this.choices(resource, 'host'),
-        canMock: (resource) => this.canMock(resource),
-      });
+      answer = this.answers.answer(record, prompt.func, promptContext(prompt));
     } catch (err) {
       stop(false, errorText(err));
       return;
@@ -392,19 +360,9 @@ export class Driver {
     if (answer.value !== undefined && /#mock-/.test(answer.value)) {
       this.expected.set(record, { answer, type: prompt.type, func: prompt.func });
     }
-    if (answer.value === undefined) {
-      prompt.trap();
-      return;
-    }
-    let draft;
-    try {
-      draft = parseWave(prompt.type, answer.value);
-    } catch (err) {
-      stop(false, `${answer.source}: ${answer.value} is no ${prompt.type.name}: ${errorText(err)}`);
-      return;
-    }
-    if (!prompt.answer(draft)) {
-      stop(false, [`${answer.source}: invalid answer for ${record.label}: ${draftErrors(draft).join('; ')}`, ...this.instancesFor([prompt.type], 'host')].join('; '));
+    const failed = answerPrompt(prompt, answer);
+    if (failed) {
+      stop(false, [failed, ...this.instancesFor([prompt.type], 'host')].join('; '));
     }
   }
 }

@@ -15,6 +15,10 @@ writing any glue code.
 - **Mock imports interactively.** Any import that isn't WASI and that you haven't implemented
   asks for its return value in the console when the guest calls it, and the guest waits for
   your answer. This includes methods of imported/host resources, which can also be passed to exports as mock arguments.
+  The console can also answer them by the happy path, as the CLI's `--defaults` does, which its
+  settings choose: **Fill in obvious results** answers `ok`, and a new mock where nothing else
+  could be returned; **Fill in, preferring new mocks** also takes a new mock where existing
+  instances could be returned. Others still ask.
 - **Implement imports in JavaScript.** Click **Implement in JavaScript** on the **Imports** bar to write an ES
   module for an imported interface, then **Apply and restart**. Functions you leave out still get mocked interactively.
 - **Resource table.** Tracks each resource handle: who created it, whether it is live, moved
@@ -22,8 +26,9 @@ writing any glue code.
   dropped from the table.
 - **Traps show where they happened.** A call that traps lists the guest's stack in the console,
   with Rust and C++ function names demangled, e.g. `kv_store_component::…::Entry::dtor`.
-- **Save a session.** **Save** on the console writes the calls and the answers given to imports
-  as an answers file, which the [command line](#command-line) replays and continues.
+- **Save a session.** **Save logs**, in the console's settings, writes the calls and the answers
+  given to imports as an answers file, which the [command line](#command-line) replays and
+  continues.
 - **WASI in the browser.** WASI imports are provided by
   [`@bytecodealliance/preview2-shim`](https://www.npmjs.com/package/@bytecodealliance/preview2-shim),
   with stdout and stderr streamed to the console, an in-memory filesystem, and in-page sockets.
