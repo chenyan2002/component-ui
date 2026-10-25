@@ -43,6 +43,8 @@ const EXAMPLE_IMPORT_CODE: Record<string, string> = {
 interface Session {
   id: number;
   name: string;
+  // The component's file name, e.g. `resource.wasm`.
+  fileName: string;
   component: LoadedComponent;
   // JS source for each non-WASI import, keyed by package, as edited and as last applied.
   importCode: Record<string, string>;
@@ -374,7 +376,8 @@ export class ComponentApp extends LitElement {
       const templates = Object.fromEntries(component.customImports.map((pkg) => [pkg, importTemplate(ifaces.get(unversioned(pkg)) ?? [])]));
       const importCode = Object.fromEntries(component.customImports.map((pkg) => [pkg, EXAMPLE_IMPORT_CODE[pkg] ?? templates[pkg]]));
       const session: Session = {
-        id, name, component, importCode, appliedCode: {}, templates, exportsResources: usesResources(component.interfaces),
+        id, name, fileName: typeof file === 'string' ? file : file.name, component, importCode, appliedCode: {}, templates,
+        exportsResources: usesResources(component.interfaces),
         status: 'instantiating', generation: 0,
       };
       this.session = session;
@@ -394,6 +397,21 @@ export class ComponentApp extends LitElement {
     }
   }
 
+  // Starts the console's log of a new instance, which tells the answers' new mocks, and where
+  // instances came from, for Save.
+  private logInstance(panel: ConsolePanel, s: Session, registry: ResourceRegistry, code: Record<string, string>) {
+    panel.log.begin();
+    panel.log.ids = () => registry.ids();
+    registry.onInstance = (instance) => panel.log.instance(instance);
+    const implemented = Object.entries(code).filter(([pkg, text]) => text.trim() !== '' && text !== s.templates[pkg]).map(([pkg]) => pkg);
+    panel.saveName = `${s.fileName.replace(/\.wasm$/, '')}.answers.txt`;
+    panel.saveHeader = [
+      `//! saved from component-ui's console; replay with: component-ui call ${s.fileName} --answers ${panel.saveName}`,
+      `//! imports implemented in JavaScript, whose calls aren't recorded: ${implemented.join(', ') || 'none'}`,
+      '//! WASI comes from the shim and isn\'t recorded; a run may differ where the guest uses it, e.g. its clocks or random numbers',
+    ];
+  }
+
   // Starts a new instance of the component with `code` implementing its imports.
   private async instantiate(s: Session, code = s.importCode) {
     s.status = 'instantiating';
@@ -402,7 +420,15 @@ export class ComponentApp extends LitElement {
       // Each component instance has its own resource instances, including those its imports
       // hand out while it instantiates.
       const registry = new ResourceRegistry(clashingNames(s.component.imports, s.component.interfaces));
+      // The console's log tells the answers' new mocks, and where instances came from, for Save.
+      // It renders once the session does.
+      await this.updateComplete;
+      const panel = this.consolePanel;
+      if (panel) {
+        this.logInstance(panel, s, registry, code);
+      }
       const host = new HostResources(registry, s.component.imports);
+      host.log = (record) => this.consolePanel!.logImport(record);
       // Missing imports and mock resources ask in the console, and the guest waits for the answer.
       const dialogs = new ImportDialogs(registry, host, s.component.imports, (call) => this.consolePanel!.logImport(call));
       s.appliedCode = { ...code };

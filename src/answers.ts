@@ -1,7 +1,8 @@
 import * as WIT from './wit';
 import { CallRecord } from './call-record';
-import { Answer, AnswerContext, AnswerSource, DriverEvent, listInstances, RESTART } from './driver';
-import { canonicalWave } from './wave';
+import { Answer, AnswerContext, AnswerSource, listInstances, RESTART } from './driver';
+import { answeredValue, CallEntry, CallLog, ImportEntry, isOwnCall } from './call-log';
+import { canonicalWave, mapHandles } from './wave';
 
 // The answers file: the calls of a run, and the answers to the imports that ask, in the order
 // the guest calls them. `--save` writes it from a run, so that it reproduces the run:
@@ -11,6 +12,7 @@ import { canonicalWave } from './wave';
 //     > exports.test-imports()
 //     //! new imports/y(10) = #y-1
 //     imports/y.get-a(#borrow-y-1) = 10
+//     //! imports/y.set-a(#borrow-y-1, 20)
 //     imports/y.add(#y-1, 10) = #mock-y-2  // default; instances of y: #y-1 (from new imports/y(10))
 //     imports/y.get-a(#borrow-y-2) = ?  // expects s32
 //
@@ -25,7 +27,8 @@ import { canonicalWave } from './wave';
 //   the id `y-2`, which `--save` writes for every new mock, so that later uses of `#y-2` show
 //   where it came from. A run where the mock gets another id stops.
 // - Lines starting with `//!` are written by `--save` for the reader, and written anew each time:
-//   the header, and where instances that no answer returned came from. Other `//` comments, and
+//   the imports that didn't ask, e.g. `//! imports/y.set-a(#borrow-y-1, 20)`, the header, and where
+//   instances came from that no other line shows, e.g. WASI's. Other `//` comments, and
 //   those after a call or answer, are kept, including `--save`'s notes on the happy path's
 //   answers, e.g. `// default; instances of x: …`, until the user removes them.
 //
@@ -66,7 +69,7 @@ const HOLE = '?';
 // The parts of comments that `--save` writes anew each time: the call an unpinned answer
 // answered, the type a hole expects, and a call's result. Its notes on defaults, e.g.
 // `default; instances of x: …`, stay until the user removes them.
-const REWRITTEN = { answer: /^(was |expects )/, call: /^(= |! )/ };
+const REWRITTEN = { answer: /^(was |expects |your JavaScript )/, call: /^(= |! )/ };
 
 // The end of the string or char literal starting at `start`, just past its closing quote.
 function literalEnd(text: string, start: number): number {
@@ -259,8 +262,15 @@ export function happyValue(t: WIT.Type, context: AnswerContext, level: DefaultsL
   return value === undefined ? undefined : { value, notes: [...notes.values()] };
 }
 
+// Where the run differs from the answers file, at `line`.
+export class Divergence extends Error {
+  constructor(public readonly line: ScriptLine, what: string) {
+    super(`${line.source}: ${what}. ${RESTART}.`);
+  }
+}
+
 function divergence(line: ScriptLine, what: string): Error {
-  return new Error(`${line.source}: ${what}. ${RESTART}.`);
+  return new Divergence(line, what);
 }
 
 // Answers the imports from an answers file, checking each line against the run, and then from
@@ -333,158 +343,99 @@ export class Script implements AnswerSource {
   }
 }
 
-// Calls `fn` on each `#label` of the text outside string and char literals, replacing it.
-function mapHandles(text: string, fn: (label: string) => string): string {
-  let out = '';
-  for (let i = 0; i < text.length;) {
-    const c = text[i];
-    if (c === '"' || c === "'") {
-      const end = literalEnd(text, i);
-      out += text.slice(i, end);
-      i = end;
-    } else if (c === '#') {
-      const label = /^#([a-zA-Z0-9-]+)/.exec(text.slice(i));
-      out += label ? `#${fn(label[1])}` : c;
-      i += label ? label[0].length : 1;
-    } else {
-      out += c;
-      i++;
-    }
-  }
-  return out;
+// What an answers file says about a run, besides the log: where the answers came from, e.g. the
+// file's lines, with their comments, and the file's lines of the calls.
+export interface ScriptOptions {
+  header: string[];
+  // The answers of the imports, by call; without, e.g. in the UI, answers are the user's.
+  answers?: Map<CallRecord, Answer>;
+  // The file's lines of the calls, in the order they were made.
+  callLines?: Array<CallLine | undefined>;
+  // Calls not made, which follow the rest.
+  rest?: Array<{ text: string; line?: CallLine }>;
 }
 
-// A line `--save` writes, and for those that say where an instance came from, the instance's id,
-// to write only if a later line uses it.
-interface SavedLine {
+// A line of an answers file, and whether it is a hole, an answer still to give.
+export interface ScriptText {
   text: string;
-  origin?: string;
   hole?: boolean;
 }
 
-// An import answered in the run, until it returns.
-interface Answering {
-  index: number;
-  record: CallRecord;
-  answer: Answer;
-  // The instances there were when it was answered; others in its result are its new mocks.
-  before: Set<string>;
+// The ids of the instances new mocks of call arguments got, e.g. `#mock` or the UI's "New mock",
+// and which call they were for.
+function newMocks(log: CallLog): Map<string, CallEntry> {
+  const calls = log.entries.filter((e): e is CallEntry => e.kind === 'call');
+  const mocks = new Map<string, CallEntry>();
+  for (const { seq, instance } of log.instances) {
+    const call = calls.find((c) => c.seq > seq);
+    if (instance.origin === 'new mock' && call) {
+      mocks.set(instance.id, call);
+    }
+  }
+  return mocks;
 }
 
-// Writes the answers file of a run, as `--save` does: the calls, the answers each import got,
-// with new mocks as `#mock-x-2`, and where other instances came from.
-export class ScriptRecorder {
-  private readonly lines: SavedLine[] = [];
-  private readonly answering = new Map<CallRecord, Answering>();
-  private readonly shown = new Map<CallRecord, string>();
-  private call?: { index: number; text: string; line?: CallLine; record?: CallRecord };
-
-  constructor(private readonly header: string[], private readonly ids: () => Set<string>) {}
-
-  // A call the run makes, from the file's line if it has one.
-  public beginCall(text: string, line?: CallLine) {
-    this.lines.push(...(line?.comments ?? []).map((comment) => ({ text: comment })));
-    this.call = { index: this.lines.length, text, line };
-    this.lines.push({ text: `> ${text}` });
-  }
-
-  public event(event: DriverEvent) {
-    switch (event.type) {
-      case 'call':
-        if (event.record.kind !== 'import' && this.call && !this.call.record) {
-          this.call.record = event.record;
-        }
-        break;
-      case 'answer': {
-        this.lines.push(...(event.answer.comments ?? []).map((comment) => ({ text: comment })));
-        this.answering.set(event.record, { index: this.lines.length, record: event.record, answer: event.answer, before: this.ids() });
-        this.lines.push({ text: '' });
-        this.writeAnswer(event.record, undefined);
-        break;
+// The lines of an answers file that reproduces the run of a log: its calls; each import the guest
+// made, in order, as the answer it got, with new mocks as `#mock-x-2`, as a `?` if it still asks,
+// or as a `//!` line if it didn't ask; and where other instances came from, e.g. WASI's.
+export function scriptLines(log: CallLog, options: ScriptOptions): ScriptText[] {
+  const lines: ScriptText[] = options.header.map((text) => ({ text }));
+  // The current component instance's part of the log.
+  const entries = log.entries.filter((e) => e.seq >= log.since);
+  const imports = entries.flatMap((e): ImportEntry[] => (e.kind === 'call' ? e.imports : e.kind === 'import' ? [e] : []));
+  const calls = entries.filter((e): e is CallEntry => e.kind === 'call' && e.record !== undefined);
+  // The labels of the imports and calls, whose lines show the instances they made.
+  const made = new Set([...imports.map((i) => i.record.label), ...calls.map((c) => c.label), 'new mock']);
+  const mocks = newMocks(log);
+  const items: Array<{ seq: number; write: () => void }> = [
+    ...calls.map((call, n) => ({ seq: call.seq, write: () => writeCall(call, options.callLines?.[n]) })),
+    ...imports.map((entry) => ({ seq: entry.seq, write: () => writeImport(entry) })),
+    ...log.instances.filter(({ seq, instance }) => seq >= log.since && !made.has(instance.origin))
+      .map(({ seq, instance }) => ({ seq, write: () => lines.push({ text: `//! ${instance.origin} = #${instance.id}` }) })),
+  ];
+  const writeCall = (call: CallEntry, script?: CallLine) => {
+    lines.push(...(script?.comments ?? []).map((text) => ({ text })));
+    // A new mock passed to the call is written as such, e.g. `#mock-x-2`, or `#borrow-mock-x-2`.
+    const text = mapHandles(call.label, (label) => {
+      const borrowed = label.startsWith('borrow-');
+      const id = borrowed ? label.slice('borrow-'.length) : label;
+      return mocks.get(id) === call ? `${borrowed ? 'borrow-' : ''}mock-${id}` : label;
+    });
+    const result = call.status === 'pending' ? undefined : call.status === 'ok' ? `= ${call.output === '' ? '()' : call.output}` : `! ${call.output}`;
+    const comment = [script?.comment, result].filter(Boolean).join('; ');
+    lines.push({ text: `> ${text}${comment ? `  // ${comment}` : ''}` });
+  };
+  const writeImport = (entry: ImportEntry) => {
+    const { record } = entry;
+    const answer = options.answers?.get(record);
+    if (entry.prompt) {
+      lines.push({ text: `${record.label} = ${HOLE}  // expects ${entry.prompt.type.name}`, hole: true });
+    } else if (entry.answered) {
+      lines.push(...(answer?.comments ?? []).map((text) => ({ text })));
+      const value = entry.answered.trapped ? TRAP : answeredValue(entry) ?? answer?.value;
+      if (value === undefined) {
+        return;
       }
-      case 'result':
-      case 'error': {
-        const text = event.type === 'result' ? (event.text === '' ? '()' : event.text) : event.text;
-        if (this.answering.has(event.record)) {
-          this.writeAnswer(event.record, event.type === 'result' ? text : undefined);
-          this.answering.delete(event.record);
-        } else if (event.record === this.call?.record) {
-          const own = this.call.line?.comment;
-          const result = event.type === 'result' ? `= ${text}` : `! ${text}`;
-          this.lines[this.call.index] = { text: `> ${this.call.text}  // ${[own, result].filter(Boolean).join('; ')}` };
-        }
-        break;
-      }
-      case 'instance': {
-        const { instance } = event;
-        // Not the new mocks of answers, which show as `#mock-x-2`, nor what a call returns: those
-        // instances come from the call they were answered or returned by.
-        const answered = [...this.answering.values()].some(({ record }) => record.label === instance.origin);
-        if (answered || instance.origin === this.call?.record?.label) {
-          break;
-        }
-        this.lines.push({ text: `//! ${instance.origin} = #${instance.id}`, origin: instance.id });
-        break;
-      }
+      const head = !answer || answer.source === 'default' || answer.pinned ? record.label : record.callee;
+      const notes = !answer ? [entry.note]
+        : answer.source === 'default' ? ['default', answer.note, entry.note]
+          : [answer.comment, answer.pinned ? undefined : `was ${record.label}`, entry.note];
+      const comment = notes.filter(Boolean).join('; ');
+      lines.push({ text: `${head} = ${value}${comment ? `  // ${comment}` : ''}` });
+    } else if (entry.status !== 'pending' && !(entry.parent && isOwnCall(entry.parent, entry))) {
+      // An import that didn't ask, e.g. a constructor, or a function without a result.
+      const result = entry.status === 'error' ? `  ! ${entry.output}` : entry.output ? ` = ${entry.output}` : '';
+      lines.push({ text: `//! ${record.label}${result}` });
     }
+  };
+  items.sort((a, b) => a.seq - b.seq).forEach((item) => item.write());
+  for (const { text, line } of options.rest ?? []) {
+    lines.push(...(line?.comments ?? []).map((comment) => ({ text: comment })));
+    lines.push({ text: `> ${text}${line?.comment ? `  // ${line.comment}` : ''}` });
   }
-
-  // The value an import got, as `--save` writes it: its result, with its new mocks as `#mock-x-2`.
-  public valueOf(record: CallRecord): string | undefined {
-    return this.shown.get(record);
-  }
-
-  private writeAnswer(record: CallRecord, result: string | undefined) {
-    const { index, answer, before } = this.answering.get(record)!;
-    let value = answer.value === undefined ? TRAP : answer.value;
-    if (result !== undefined && answer.value !== undefined) {
-      value = mapHandles(result, (label) => (before.has(label) || label.startsWith('borrow-') ? label : `mock-${label}`));
-      this.shown.set(record, value);
-    }
-    const head = answer.source === 'default' || answer.pinned ? record.label : record.callee;
-    const notes = answer.source === 'default'
-      ? ['default', answer.note]
-      : [answer.comment, answer.pinned ? undefined : `was ${record.label}`];
-    const comment = notes.filter(Boolean).join('; ');
-    this.lines[index] = { text: `${head} = ${value}${comment ? `  // ${comment}` : ''}` };
-  }
-
-  // An import still to be answered, where the run stopped.
-  public hole(record: CallRecord, type: WIT.Type) {
-    this.lines.push({ text: `${record.label} = ${HOLE}  // expects ${type.name}`, hole: true });
-  }
-
-  // The line number of the hole in the file `text` writes, if there is one.
-  public holeLine(): number | undefined {
-    const index = this.kept().findIndex((line) => line.hole);
-    return index < 0 ? undefined : this.header.length + index + 1;
-  }
-
-
-  // Calls the run didn't get to.
-  public rest(calls: Array<{ text: string; line?: CallLine }>) {
-    for (const { text, line } of calls) {
-      this.lines.push(...(line?.comments ?? []).map((comment) => ({ text: comment })));
-      this.lines.push({ text: `> ${text}${line?.comment ? `  // ${line.comment}` : ''}` });
-    }
-  }
-
-  // The file: the header, and the lines, with where instances came from only if a later line
-  // uses them.
-  public text(): string {
-    return [...this.header, ...this.kept().map((line) => line.text)].map((line) => `${line}\n`).join('');
-  }
-
-  private kept(): SavedLine[] {
-    return this.lines.filter((line, i) => line.origin === undefined || this.lines.slice(i + 1).some((later) => usesId(later.text, line.origin!)));
-  }
+  return lines;
 }
 
-function usesId(text: string, id: string): boolean {
-  let used = false;
-  mapHandles(splitComment(text)[0], (label) => {
-    used ||= label === id || label === `borrow-${id}` || label === `mock-${id}`;
-    return label;
-  });
-  return used;
+export function writeScript(log: CallLog, options: ScriptOptions): string {
+  return scriptLines(log, options).map((line) => `${line.text}\n`).join('');
 }

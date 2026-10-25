@@ -1,50 +1,32 @@
 import { html, LitElement, nothing, PropertyValues } from 'lit';
-import { customElement, query, state } from 'lit/decorators.js';
+import { customElement, property, query, state } from 'lit/decorators.js';
+import { writeScript } from './answers';
+import { CallLog, ImportEntry, isOwnCall, LogItem, StreamEntry } from './call-log';
 import { CallRecord } from './call-record';
 import { FormContext, renderField, typeName } from './form';
 import { ImportLog, ImportPrompt, LogEntry } from './log';
 
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+// The guest's frames of a trap, innermost first.
+function renderFrames(frames: string[]) {
+  return frames.length === 0 ? nothing : html`<div class="log-frames">${frames.map((frame) => html`<div>at ${frame}</div>`)}</div>`;
 }
-
-// An import the guest called, under the call that made it, if any.
-interface ImportEntry {
-  kind: 'import';
-  call: string;
-  record: CallRecord;
-  status: 'pending' | 'ok' | 'error';
-  output?: string;
-  detail?: string;
-  prompt?: ImportPrompt;
-}
-
-// A call the UI made, or something else it did, e.g. loading a file, which has no record.
-interface CallEntry {
-  kind: 'call';
-  call: string;
-  record?: CallRecord;
-  time: string;
-  status: 'pending' | 'ok' | 'error';
-  output?: string;
-  elapsed?: number;
-  imports: ImportEntry[];
-}
-
-// Text the component wrote to stdout or stderr.
-interface StreamEntry {
-  kind: 'stream';
-  stream: 'stdout' | 'stderr';
-  text: string;
-}
-
-type Entry = CallEntry | StreamEntry | ImportEntry;
 
 @customElement('console-panel')
 export class ConsolePanel extends LitElement {
-  @state() accessor entries: Entry[] = [];
+  // Bumped on each change of the log, which the console renders.
+  @state() accessor version = 0;
   @query('.console') accessor list!: HTMLElement;
   @query('.console-log') accessor content!: HTMLElement;
+  // The header of the answers file Save writes, e.g. the component's name; none to offer no Save.
+  @property({ attribute: false }) accessor saveHeader: string[] | undefined = undefined;
+  // The file name Save writes.
+  @property() accessor saveName = 'answers.txt';
+  public readonly log = new CallLog((added) => {
+    if (added) {
+      this.follow = true;
+    }
+    this.version++;
+  });
   // Whether the console keeps its end in view as it grows: until the user scrolls up, and again
   // once they scroll back down or a new entry is added.
   private follow = true;
@@ -74,75 +56,39 @@ export class ConsolePanel extends LitElement {
   }
 
   public clear() {
-    this.entries = [];
+    this.log.clear();
   }
 
   public logCall(record: CallRecord): LogEntry {
-    return this.addCall(record.label, record);
+    return this.log.logCall(record);
   }
 
   // Logs something the UI did that isn't a call, e.g. failing to load a file.
   public logAction(text: string): LogEntry {
-    return this.addCall(text);
-  }
-
-  private addCall(call: string, record?: CallRecord): LogEntry {
-    const started = performance.now();
-    const entry: CallEntry = { kind: 'call', call, record, time: new Date().toLocaleTimeString(), status: 'pending', imports: [] };
-    this.follow = true;
-    this.entries = [...this.entries, entry];
-    const finish = (status: CallEntry['status'], output: string) => {
-      Object.assign(entry, { status, output, elapsed: Math.round(performance.now() - started) });
-      this.requestUpdate();
-    };
-    return {
-      result: (text) => finish('ok', text),
-      error: (err) => finish('error', errorText(err)),
-    };
+    return this.log.logAction(text);
   }
 
   // Logs an import the guest called, under the pending call it happened in.
   public logImport(record: CallRecord): ImportLog {
-    const entry: ImportEntry = { kind: 'import', call: record.label, record, status: 'pending' };
-    const parent = [...this.entries].reverse().find((e): e is CallEntry => e.kind === 'call' && e.status === 'pending');
-    this.follow = true;
-    if (parent) {
-      parent.imports.push(entry);
-      this.requestUpdate();
-    } else {
-      this.entries = [...this.entries, entry];
-    }
-    const finish = (status: ImportEntry['status'], output: string) => {
-      Object.assign(entry, { status, output, prompt: undefined });
-      this.requestUpdate();
-    };
-    return {
-      result: (text) => finish('ok', text),
-      error: (err) => finish('error', errorText(err)),
-      detail: (text) => {
-        Object.assign(entry, { status: 'ok', detail: text, prompt: undefined });
-        this.requestUpdate();
-      },
-      ask: (prompt) => {
-        entry.prompt = prompt;
-        this.requestUpdate();
-      },
-    };
+    return this.log.logImport(record);
   }
 
   public print(stream: StreamEntry['stream'], text: string) {
-    // Consecutive writes to the same stream share an entry.
-    const last = this.entries[this.entries.length - 1];
-    if (last?.kind === 'stream' && last.stream === stream) {
-      const pre = this.querySelector<HTMLElement>('.log-entry.stream:last-child pre');
-      this.streamFollow ||= !pre || pre.scrollHeight - pre.scrollTop - pre.clientHeight < 4;
-      last.text += text;
-      this.requestUpdate();
-    } else {
-      this.follow = true;
-      this.streamFollow = true;
-      this.entries = [...this.entries, { kind: 'stream', stream, text }];
-    }
+    const pre = this.querySelector<HTMLElement>('.log-entry.stream:last-child pre');
+    const atEnd = !pre || pre.scrollHeight - pre.scrollTop - pre.clientHeight < 4;
+    // Writes that join the last stream entry follow it if it was scrolled to its end.
+    this.streamFollow ||= this.log.print(stream, text) ? atEnd : true;
+  }
+
+  // Downloads the log as an answers file, which the CLI replays.
+  private save() {
+    const text = writeScript(this.log, { header: this.saveHeader ?? [] });
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = this.saveName;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   protected firstUpdated() {
@@ -187,13 +133,16 @@ export class ConsolePanel extends LitElement {
     return html`
       <div class="panel-header">
         <span class="panel-title"><wa-icon name="terminal"></wa-icon> Console</span>
+        ${this.saveHeader === undefined ? nothing : html`<wa-button size="s" appearance="plain"
+          title="Save the calls and the answers to imports as a file the CLI replays"
+          ?disabled=${this.log.entries.length === 0} @click=${() => this.save()}>Save</wa-button>`}
         <wa-button size="s" appearance="plain" @click=${() => this.clear()}>Clear</wa-button>
       </div>
       <div class="console" @scroll=${() => this.onScroll()}>
         <div class="console-log">
-          ${this.entries.length === 0
+          ${this.log.entries.length === 0
             ? html`<div class="console-empty">Call a function to see results here.</div>`
-            : this.entries.map((entry) => this.renderEntry(entry))}
+            : this.log.entries.map((entry) => this.renderEntry(entry))}
         </div>
       </div>
     `;
@@ -205,9 +154,11 @@ export class ConsolePanel extends LitElement {
     return html`<div class="log-import ${entry.status}">
       ${same ? nothing : html`<div class="log-call">
         <span class="log-prompt">↳</span>
-        <code>${entry.call}</code>
+        <code>${entry.record.label}</code>
         ${!entry.output ? nothing : html`<span class="log-import-output">= <code>${entry.output}</code></span>`}
       </div>`}
+      ${same ? nothing : renderFrames(entry.frames)}
+      ${entry.note === undefined ? nothing : html`<div class="log-note">${entry.note}</div>`}
       ${entry.detail === undefined ? nothing : html`<div class="log-output"><pre>${entry.detail}</pre></div>`}
       ${entry.prompt ? this.renderPrompt(entry.prompt) : nothing}
     </div>`;
@@ -244,7 +195,7 @@ export class ConsolePanel extends LitElement {
     this.requestUpdate();
   }
 
-  private renderEntry(entry: Entry) {
+  private renderEntry(entry: LogItem) {
     if (entry.kind === 'import') {
       return html`<div class="log-entry import">${this.renderImport(entry)}</div>`;
     }
@@ -257,13 +208,13 @@ export class ConsolePanel extends LitElement {
     const waiting = entry.imports.some((i) => i.prompt);
     // A call of the UI's to the host may reach an import: a mock's, which asks, or the host
     // effect of one. Only its prompt and detail show; the call itself is already shown.
-    const isCall = (i: ImportEntry) => entry.record?.kind === 'host' && i.call === entry.call;
+    const isCall = (i: ImportEntry) => isOwnCall(entry, i);
     const imports = entry.imports.filter((i) => !isCall(i) || i.prompt || i.detail !== undefined);
     const meta = waiting ? 'waiting for an import' : entry.elapsed === undefined ? entry.time : `${entry.time} · ${entry.elapsed} ms`;
     return html`<div class="log-entry ${entry.status}">
       <div class="log-call">
         <span class="log-prompt">›</span>
-        <code>${entry.call}</code>
+        <code>${entry.label}</code>
         <span class=${waiting ? 'log-meta waiting' : 'log-meta'}>${meta}</span>
       </div>
       ${imports.length > 0
@@ -275,6 +226,7 @@ export class ConsolePanel extends LitElement {
             <pre>${entry.output}</pre>
             <wa-copy-button class="log-copy" .value=${entry.output}></wa-copy-button>
           </div>`}
+      ${renderFrames(entry.frames)}
     </div>`;
   }
 }

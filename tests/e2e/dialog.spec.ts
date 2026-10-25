@@ -48,6 +48,8 @@ test('a missing host resource is mocked, and its calls ask for their results', a
 
   await expect(entry.locator('.log-import').first().locator('.log-call')).toHaveText(/new imports\/y\(10\)\s*=\s*#y-1/);
   await expect(entry.locator('.log-import', { hasText: 'imports/y.set-a(#borrow-y-1, 20)' }).locator('.log-import-output')).toHaveCount(0);
+  // The guest drops the mock it got from `add`, which the console shows where it happened.
+  await expect(entry.locator('.log-import .log-call code', { hasText: /^drop #y-2$/ })).toHaveCount(1);
   await expect(row(page, 'y-2').locator('.instance-type')).toHaveText('y · mock');
   await expect(page.locator('resource-table tr.resource-row wa-tag'))
     .toHaveText(['moved', 'dropped', 'moved', 'moved', 'dropped', 'dropped']);
@@ -168,4 +170,32 @@ test('mock host resources stand in for the arguments a host would create', async
   await expect(row(page, 'incoming-request-1').locator('.instance-type')).toHaveText('incoming-request · mock');
   await expect(row(page, 'response-outparam-2').locator('wa-tag')).toHaveText('moved');
   await expect(row(page, 'outgoing-response-7').locator('.instance-type')).toHaveText('outgoing-response');
+});
+
+test('Save writes the console as an answers file the CLI replays', async ({ page }) => {
+  await loadResource(page);
+  await call(funcCard(page, 'test-imports'));
+  for (const [label, answer] of [
+    ['imports/y.get-a(#borrow-y-1)', s32('10')],
+    ['imports/y.get-a(#borrow-y-1)', s32('20')],
+    ['imports/y.add(#y-1, 10)', newMock],
+  ] as const) {
+    await answerImport(page, label, answer);
+  }
+  // The guest waits on the next import, which the file has as an answer still to give.
+  await expect(importPrompt(page)).toBeVisible();
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Save' }).click()]);
+  expect(download.suggestedFilename()).toBe('resource.answers.txt');
+  const text = await (await download.createReadStream()).toArray().then((chunks) => Buffer.concat(chunks).toString('utf8'));
+  expect(text.split('\n').slice(3)).toEqual([
+    '> exports.test-imports()',
+    '//! new imports/y(10) = #y-1',
+    'imports/y.get-a(#borrow-y-1) = 10',
+    '//! imports/y.set-a(#borrow-y-1, 20)',
+    'imports/y.get-a(#borrow-y-1) = 20',
+    'imports/y.add(#y-1, 10) = #mock-y-2',
+    'imports/y.get-a(#borrow-y-2) = ?  // expects s32',
+    '',
+  ]);
+  expect(text).toMatch(/^\/\/! saved from component-ui's console; replay with: component-ui call resource\.wasm --answers resource\.answers\.txt$/m);
 });

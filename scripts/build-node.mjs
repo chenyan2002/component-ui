@@ -1,7 +1,7 @@
 // Bundles the core for Node: the CLI into dist-cli, and tests/node into tests/node/.build.
 // Run by `npm run build:cli` and `npm run test:node`; `node scripts/build-node.mjs [cli] [tests]`.
 import * as esbuild from 'esbuild';
-import { copyFile, mkdir } from 'node:fs/promises';
+import { chmod, copyFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -36,6 +36,8 @@ const targets = {
       outfile: resolve(outdir, 'component-ui.mjs'),
       banner: { js: '#!/usr/bin/env node' },
     });
+    // So that it runs as a command, e.g. through `npm link`.
+    await chmod(resolve(outdir, 'component-ui.mjs'), 0o755);
     await copyBindgen(outdir);
   },
   async tests() {

@@ -106,12 +106,13 @@ export function describeCall(
   }
 }
 
-// Describes the UI dropping `instance`, which runs the destructor of its guest or host.
-export function describeDrop(instance: Instance): CallRecord {
+// Describes the UI dropping `instance`, which runs the destructor of its guest or host; or with
+// `kind` `import`, the guest dropping its handle on a host instance.
+export function describeDrop(instance: Instance, kind?: CallSide): CallRecord {
   const self = `#${instance.id}`;
   return {
-    kind: instance.holders ? 'host' : 'export', callKind: 'drop', ...resourceFields(instance.resource), func: 'drop', self, args: [],
-    callee: 'drop', label: `drop ${self}`,
+    kind: kind ?? (instance.holders ? 'host' : 'export'), callKind: 'drop', ...resourceFields(instance.resource), func: 'drop', self,
+    args: [], callee: 'drop', label: `drop ${self}`,
   };
 }
 

@@ -1,13 +1,15 @@
 import * as WIT from './wit';
+import { CallLog } from './call-log';
 import { CallRecord, callTypes, qualified, qualifiedResource } from './call-record';
-import { call, CallActivity, CallTarget, ExportsContext } from './calls';
+import { call, CallActivity, CallTarget, drop, ExportsContext } from './calls';
 import { ImportDialogs } from './dialog';
 import { draftErrors, Giver, INVALID, instanceChoices, parseDraft } from './draft';
 import { HostResources } from './host-resources';
 import { ImportLog, ImportPrompt, LogEntry } from './log';
 import { instantiate, LoadedComponent, loadComponent } from './loader';
 import { Platform } from './platform';
-import { clashingNames, Instance, resourcesOf, ResourceRegistry } from './resources';
+import { clashingNames, describeInstance, Instance, resourcesOf, ResourceRegistry } from './resources';
+import { wasmFrames } from './frames';
 import { canonicalWave, parseWave } from './wave';
 
 // Runs a component without the UI, for frontends like the CLI: calls written as the console shows
@@ -17,8 +19,9 @@ import { canonicalWave, parseWave } from './wave';
 export type DriverEvent =
   | { type: 'call'; record: CallRecord }
   | { type: 'result'; record: CallRecord; text: string }
-  // `failed` unless the call returned the `err` of a `result`, e.g. when it trapped.
-  | { type: 'error'; record: CallRecord; text: string; failed: boolean }
+  // `failed` unless the call returned the `err` of a `result`, e.g. when it trapped; `frames` are
+  // the guest's of a trap, innermost first.
+  | { type: 'error'; record: CallRecord; text: string; failed: boolean; frames: string[] }
   // A result shown apart from the call, e.g. the HTTP response of a WASI HTTP handler.
   | { type: 'detail'; record: CallRecord; text: string }
   | { type: 'output'; stream: 'stdout' | 'stderr'; text: string }
@@ -26,6 +29,8 @@ export type DriverEvent =
   | { type: 'ask'; record: CallRecord; expects: string }
   // An import got an answer.
   | { type: 'answer'; record: CallRecord; answer: Answer }
+  // Something to know about an import call, e.g. why the user's JavaScript wasn't called.
+  | { type: 'note'; record: CallRecord; text: string }
   // An instance was registered, e.g. a mock an import returned.
   | { type: 'instance'; instance: Instance };
 
@@ -48,9 +53,9 @@ export interface Answer {
 export const RESTART = 'The guest\'s calls changed here, e.g. after an earlier answer was edited: remove this line and the ones after it, and run again';
 
 // The instances of a resource, e.g. `instances of x: #x-1 (from new exports/x(5)), or #mock`, up to
-// `max` of them.
+// `max` of them, each described as in the UI's instance picker.
 export function listInstances(resource: WIT.ResourceClass, instances: Instance[], mock: boolean, max = Infinity): string {
-  const listed = instances.slice(0, max).map((i) => `#${i.id} (from ${i.origin})`);
+  const listed = instances.slice(0, max).map(describeInstance);
   const more = instances.length > max ? [`and ${instances.length - max} more`] : [];
   return `instances of ${resource.witName}: ${[...listed, ...more].join(', ')}${mock ? ', or #mock' : ''}`;
 }
@@ -134,8 +139,12 @@ function callables(interfaces: WIT.InterfaceClass[]): Map<string, Callable> {
 export class Driver {
   public readonly component: LoadedComponent;
   public readonly registry: ResourceRegistry;
-  // Whether a call the UI made failed other than by returning an `err`, e.g. by trapping.
+  // The calls, the imports the guest made during them, and its output, in order.
+  public readonly log = new CallLog();
+  // Whether a call the UI made failed other than by returning an `err`, e.g. by trapping, and
+  // the last that did.
   public failed = false;
+  public lastFailure?: { record: CallRecord; text: string };
   private readonly callables: Map<string, Callable>;
   private ctx!: ExportsContext;
   private dialogs!: ImportDialogs;
@@ -148,7 +157,11 @@ export class Driver {
   private constructor(component: LoadedComponent, private readonly onEvent: (event: DriverEvent) => void, private readonly answers: AnswerSource) {
     this.component = component;
     this.registry = new ResourceRegistry(clashingNames(component.imports, component.interfaces));
-    this.registry.onInstance = (instance) => this.onEvent({ type: 'instance', instance });
+    this.registry.onInstance = (instance) => {
+      this.log.instance(instance);
+      this.onEvent({ type: 'instance', instance });
+    };
+    this.log.ids = () => this.registry.ids();
     this.callables = callables(component.interfaces);
   }
 
@@ -166,15 +179,26 @@ export class Driver {
   private async instantiate(platform: Platform, importCode: Record<string, string>) {
     const { component, registry } = this;
     const host = new HostResources(registry, component.imports);
+    host.log = (record) => this.logImport(record);
     this.dialogs = new ImportDialogs(registry, host, component.imports, (record) => this.logImport(record));
     const exports = await instantiate(platform, component.transpiled, importCode, {
-      stdout: (text) => this.onEvent({ type: 'output', stream: 'stdout', text }),
-      stderr: (text) => this.onEvent({ type: 'output', stream: 'stderr', text }),
+      stdout: (text) => {
+        this.log.print('stdout', text);
+        this.onEvent({ type: 'output', stream: 'stdout', text });
+      },
+      stderr: (text) => {
+        this.log.print('stderr', text);
+        this.onEvent({ type: 'output', stream: 'stderr', text });
+      },
     }, {
       complete: (pkg, mod, wasi) => this.dialogs.complete(pkg, mod, wasi),
       wrap: (pkg, mod) => host.wrap(pkg, mod),
     });
-    this.ctx = { exports, log: (record) => this.logCall(record), registry, host, activity: new CallActivity(), mocks: this.dialogs };
+    this.ctx = {
+      exports, log: (record) => this.logCall(record), registry, host, activity: new CallActivity(), mocks: this.dialogs,
+      // A trap's frames are in its event.
+      report: () => {},
+    };
   }
 
   // The instances that could be passed as a handle of the resource, by the UI to a call or by
@@ -190,6 +214,15 @@ export class Driver {
   // Runs a call written as the console shows it, e.g. `exports/x.get-a(#borrow-x-1)`. Returns
   // what stopped it, if an import's answer did; then the guest stays suspended in the call.
   public async run(text: string): Promise<Stopped | undefined> {
+    // Drops an instance, e.g. `drop #x-1`, as the UI's resource table does.
+    const dropped = /^drop #(\S+)$/.exec(text.trim());
+    if (dropped) {
+      if (!this.registry.instance(dropped[1])) {
+        throw new Error(`No instance #${dropped[1]}`);
+      }
+      drop(this.ctx, dropped[1]);
+      return undefined;
+    }
     const [callee, argText] = splitCall(text);
     const { target, key, func } = this.resolve(callee);
     const args = this.parseArgs(func, target.type === 'func' ? undefined : target.resource, argText);
@@ -254,30 +287,53 @@ export class Driver {
   }
 
   private logCall(record: CallRecord): LogEntry {
+    const entry = this.log.logCall(record);
     this.onEvent({ type: 'call', record });
+    return this.ending(record, entry);
+  }
+
+  private ending(record: CallRecord, entry: LogEntry): LogEntry {
     return {
-      result: (text) => this.onEvent({ type: 'result', record, text }),
+      result: (text) => {
+        entry.result(text);
+        this.onEvent({ type: 'result', record, text });
+      },
       // calls.ts formats the `err` a call returns, and passes other errors, e.g. traps, as they are.
       error: (err) => {
+        entry.error(err);
         const failed = typeof err !== 'string';
         if (failed && record.kind !== 'import') {
           this.failed = true;
+          this.lastFailure = { record, text: errorText(err) };
         }
-        this.onEvent({ type: 'error', record, text: errorText(err), failed });
+        this.onEvent({ type: 'error', record, text: errorText(err), failed, frames: wasmFrames(err) });
       },
     };
   }
 
   private logImport(record: CallRecord): ImportLog {
-    const log = this.logCall(record);
+    const entry = this.log.logImport(record);
+    this.onEvent({ type: 'call', record });
+    const log = this.ending(record, entry);
     return {
       ...log,
       result: (text) => {
         log.result(text);
         this.checkMocks(record, text);
       },
-      detail: (text) => this.onEvent({ type: 'detail', record, text }),
-      ask: (prompt) => this.ask(record, prompt),
+      detail: (text) => {
+        entry.detail(text);
+        this.onEvent({ type: 'detail', record, text });
+      },
+      note: (text) => {
+        entry.note(text);
+        this.onEvent({ type: 'note', record, text });
+      },
+      ask: (prompt) => {
+        entry.ask(prompt);
+        this.ask(record, prompt);
+      },
+      answered: (trapped) => entry.answered(trapped),
     };
   }
 

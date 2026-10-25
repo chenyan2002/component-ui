@@ -31,7 +31,12 @@ test('inspect shows the exports, the imports that ask, and the types', () => {
   assert.match(out, /^ {2}docs:adder\/add@0\.1\.0\.add\(a: u32, b: u32\) -> u32$/m);
   assert.match(out, /^ {2}op = enum \{ add \}$/m);
   // A method takes its instance first.
-  assert.match(cli('inspect', RESOURCE).out, /^ {2}exports\/x\.get-a\(self: borrow<x>\) -> s32$/m);
+  const resource = cli('inspect', RESOURCE).out;
+  assert.match(resource, /^ {2}exports\/x\.get-a\(self: borrow<x>\) -> s32$/m);
+  // Imports that don't ask are listed apart, and so are the host resources the exports use.
+  assert.match(resource, /^Imports answered on their own, .*:\n {2}new imports\/y\(a: s32\)\n {2}imports\/y\.set-a\(self: borrow<y>, a: s32\)$/m);
+  assert.match(resource, /^Types: none$/m);
+  assert.match(cli('inspect', 'public/kv-store.wasm').out, /^Host resources the exports use, .*:\n {2}fastly:compute\/async-io\/pollable@0\.1\.0\.is-ready\(self: borrow<pollable>\) -> bool$/m);
 });
 
 test('a run stops at an import without an answer, and says what it expects', () => {
@@ -76,6 +81,39 @@ test('an answer that no import asked for means the guest\'s calls changed', () =
   const { code, out } = cli('call', CALC, EVAL, '--answer', 'docs:adder/add@0.1.0.add = 3', '--answer', 'docs:adder/add@0.1.0.add = 4');
   assert.equal(code, 1);
   assert.match(out, /stopped: --answer 2: no import asked for this answer\. The guest's calls changed here/);
+});
+
+test('template prints a module to implement an import with, for --imports', () => {
+  const { code, out } = cli('template', RESOURCE, 'imports');
+  assert.equal(code, 0);
+  assert.match(out, /^export class Y \{$/m);
+  assert.match(out, /^ {2}\/\/ get-a: func\(\) -> s32\n {2}getA\(\) \{$/m);
+  const missing = cli('template', RESOURCE, 'nope');
+  assert.equal(missing.code, 1);
+  assert.match(missing.err, /Give a package to implement: imports/);
+});
+
+test('JavaScript that an argument\'s mock keeps from being called says so', () => {
+  // The service the guest passes is a mock, which the JavaScript can't have made.
+  const jwt = file('jwt.js', 'export function getSignedAuthHeader(service, mode) { return "Bearer js"; }');
+  const answers = file('kv.txt', [
+    '> fastly:compute/http-req/request@0.1.0.new()',
+    'fastly:compute/http-req/request@0.1.0.new() = ok(#mock-request-1)',
+    '> fastly:compute/async-io/pollable@0.1.0.new-ready()',
+    'fastly:compute/async-io/pollable@0.1.0.new-ready() = #mock-pollable-2',
+    '> fastly:compute/http-incoming@0.1.0.handle(#request-1, #pollable-2)',
+    'fastly:private/privileged-kv-store-service.get() = ok(#mock-service-3)',
+    'fastly:compute/compute-runtime@0.1.0.get-region() = "us-east"',
+    'fastly:private/namespaces/service.open-backend(#borrow-service-3, "kiad700.storage-gateway.service.secretcdn.net") = ok(#mock-backend-4)',
+    'fastly:compute/backend/backend@0.1.0.get-name(#borrow-backend-4) = "kiad700.storage-gateway.service.secretcdn.net"',
+    '',
+  ].join('\n'));
+  const { code, out } = cli('call', 'public/kv-store.wasm', '--answers', answers, '--imports', `fastly:private/service-jwt=${jwt}`);
+  assert.equal(code, 2, out);
+  assert.match(out, /↳ fastly:private\/service-jwt\.get-signed-auth-header\(#borrow-service-3, read\)\n {4}~ your JavaScript get-signed-auth-header wasn't called, as an argument is a mock/);
+  assert.match(out, /warning: your JavaScript of fastly:private\/service-jwt\.get-signed-auth-header wasn't called where an argument was a mock/);
+  // The stop says where the instances the call takes came from.
+  assert.match(out, /^ {2}the call takes #service-3 \(from fastly:private\/privileged-kv-store-service\.get\(\); held by guest\)$/m);
 });
 
 test('imports can be implemented in JavaScript', () => {
@@ -146,9 +184,14 @@ test('--save writes a file that reproduces the run, with a ? where it stopped', 
   assert.equal(last.code, 0, last.out);
   const text = readFileSync(saved, 'utf8');
   // New mocks say the ids they get, and the happy path notes the instances it passed over.
-  assert.match(text, /^imports\/y\.add\(#y-1, 10\) = #mock-y-2  \/\/ default; instances of y: #y-1 \(from new imports\/y\(10\)\)$/m);
+  assert.match(text, /^imports\/y\.add\(#y-1, 10\) = #mock-y-2  \/\/ default; instances of y: #y-1 \(from new imports\/y\(10\); moved into imports\/y\.add\(#y-1, 10\)\)$/m);
   assert.match(text, /^imports\/y\.get-a\(#borrow-y-2\) = 30$/m);
   assert.match(text, /^> exports\.test-imports\(\)  \/\/ = ok$/m);
+  // Imports that didn't ask show too, e.g. the set-a that makes the next get-a's answer differ.
+  assert.match(text, /^imports\/y\.get-a\(#borrow-y-1\) = 10\n\/\/! imports\/y\.set-a\(#borrow-y-1, 20\)\nimports\/y\.get-a\(#borrow-y-1\) = 20$/m);
+  assert.match(text, /^\/\/! new imports\/y\(2\) = #y-4$/m);
+  // The guest's drops of host instances show too, though they call no import.
+  assert.match(text, /^imports\/y\.get-a\(#borrow-y-2\) = 30\n\/\/! drop #y-2$/m);
   // The file reproduces the run, and saves as it is.
   assert.equal(cli('call', RESOURCE, '--answers', saved, '--save', saved).code, 0);
   assert.equal(readFileSync(saved, 'utf8'), text);
@@ -157,11 +200,14 @@ test('--save writes a file that reproduces the run, with a ? where it stopped', 
   const mock = cli('call', RESOURCE, '--answers', edited);
   assert.equal(mock.code, 1);
   assert.match(mock.out, /edited\.txt:\d+: the guest got #y-2, not #y-9, as the new mocks got other ids\. The guest's calls changed here/);
-  // So does an answer the guest's checks fail on: the call traps, and its other answers are left.
+  // An answer the guest's checks fail on traps it, before it uses the answers after it: the run
+  // says so, with the guest's frames, rather than blame the answers left.
   const trap = cli('call', RESOURCE, '--answers', file('trap.txt', text.replace('#borrow-y-1) = 20', '#borrow-y-1) = 21')));
-  assert.equal(trap.code, 1, trap.out);
-  assert.match(trap.out, /! wasm trap/);
-  assert.match(trap.out, /trap\.txt:9: no import asked for this answer before the next call/);
+  assert.equal(trap.code, 3, trap.out);
+  assert.match(trap.out, /\[stderr\] Assertion failed: imports_method_y_get_a\(borrowed_y\) == 20/);
+  assert.match(trap.out, /! wasm trap: wasm `unreachable` instruction executed\n {4}at exports_test_imports\n/);
+  assert.match(trap.out, /stopped: exports\.test-imports\(\) failed, with wasm trap: .* before using the answers from .*trap\.txt:\d+ on\. Fix the answer that made it fail/);
+  assert.equal(trap.err, '');
   // A call that traps where the file ends exits with 3.
   const end = cli('call', RESOURCE, 'exports.test-imports()', '--answer', 'imports/y.get-a(#borrow-y-1) = !trap');
   assert.equal(end.code, 3, end.out);
@@ -175,7 +221,7 @@ test('--defaults careful stops where there are instances to choose, and none at 
   const answers = file('careful.txt', '> exports.test-imports()\nimports/y.get-a(#borrow-y-1) = 10\nimports/y.get-a(#borrow-y-1) = 20\n');
   const careful = cli('call', RESOURCE, '--answers', answers, '--defaults', 'careful');
   assert.equal(careful.code, 2);
-  assert.match(careful.out, /stopped: No answer for imports\/y\.add\(#y-1, 10\)\n {2}expects y\n {2}instances of y: #y-1 \(from new imports\/y\(10\)\), or #mock/);
+  assert.match(careful.out, /stopped: No answer for imports\/y\.add\(#y-1, 10\)\n {2}expects y\n {2}the call takes #y-1 \(from new imports\/y\(10\); moved into imports\/y\.add\(#y-1, 10\)\)\n {2}instances of y: #y-1 \(from new imports\/y\(10\); moved into imports\/y\.add\(#y-1, 10\)\), or #mock/);
   // Answers must give their arguments.
   const unpinned = cli('call', RESOURCE, '--answers', file('unpinned.txt', '> exports.test-imports()\nimports/y.get-a = 10\n'), '--defaults', 'careful');
   assert.equal(unpinned.code, 1);
@@ -185,6 +231,19 @@ test('--defaults careful stops where there are instances to choose, and none at 
   const host = cli('call', 'public/kv-store.wasm', 'fastly:compute/http-req/request@0.1.0.new()', '--defaults', 'none');
   assert.equal(host.code, 2);
   assert.match(host.out, /stopped: No answer for fastly:compute\/http-req\/request@0\.1\.0\.new\(\)/);
+});
+
+test('calls can drop instances, and pass new mocks, which the file writes as #mock-<id>', () => {
+  const dropped = join(dir, 'dropped.txt');
+  const drop = cli('call', RESOURCE, 'new exports/x(5)', 'drop #x-1', '--save', dropped);
+  assert.equal(drop.code, 0, drop.out);
+  assert.match(readFileSync(dropped, 'utf8'), /^> drop #x-1  \/\/ = dropped$/m);
+  assert.equal(cli('call', RESOURCE, '--answers', dropped).code, 0);
+  assert.match(cli('call', RESOURCE, 'drop #x-9').err, /No instance #x-9/);
+  const mocks = join(dir, 'mocks.txt');
+  assert.equal(cli('call', 'public/kv-store.wasm', 'fastly:compute/http-incoming@0.1.0.handle(#mock, #mock)', '--save', mocks).code, 2);
+  assert.match(readFileSync(mocks, 'utf8'), /^> fastly:compute\/http-incoming@0\.1\.0\.handle\(#mock-request-1, #mock-pollable-2\)$/m);
+  assert.equal(cli('call', 'public/kv-store.wasm', '--answers', mocks).code, 2);
 });
 
 test('instances an answer or an argument could use are listed', () => {

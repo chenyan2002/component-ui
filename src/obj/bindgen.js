@@ -6062,6 +6062,8 @@ let postReturn0;
 let postReturn0Async;
 let postReturn1;
 let postReturn1Async;
+let postReturn2;
+let postReturn2Async;
 let exports1GenerateAst;
 
 function generateAst(arg0) {
@@ -6198,6 +6200,124 @@ function generateAst(arg0) {
           throw new ComponentError(retCopy.val);
         }
         return retCopy.val;
+        
+        
+      } catch (err) {
+        if (!task.isResolvedState()) {
+          task.setErrored(err);
+          task.reject(err);
+        }
+        if (!task.isExited()) { task.exit({ skipExclusiveLockCheck: true }); }
+        throw err;
+      }
+    },
+  });
+  
+}
+let exports1Demangle;
+
+function demangle(arg0) {
+  
+  const hostProvided = false;
+  getOrCreateAsyncState(0).throwIfTrapped();
+  
+  const [task, _wasm_call_currentTaskID] = createNewCurrentTask({
+    componentIdx: 0,
+    isAsync: false,
+    isManualAsync: false,
+    preserveFutureResult: false,
+    entryFnName: 'exports1Demangle',
+    getCallbackFn: () => null,
+    callbackFnName: null,
+    errHandling: 'none',
+    callingWasmExport: true,
+  });
+  task.setCalleeIsAsync(false);
+  task.setFuncTypeIsAsync(false);
+  task.setReturnResultTypeIdx(22);
+  
+  const started = task.enterSync();
+  CURRENT_TASK_MAY_BLOCK.value = task.mayBlock() ? 1 : 0;
+  
+  if (0!== null) {
+    task.setReturnMemoryIdx(0);
+    task.setReturnMemory((() => memory0)());
+  }
+  
+  
+  return _withGlobalCurrentTaskMeta({
+    taskID: task.id(),
+    componentIdx: task.componentIdx(),
+    fn: () => {
+      try {
+        
+        
+        var encodeRes = _utf8AllocateAndEncode(arg0, realloc0, memory0);
+        var ptr0= encodeRes.ptr;
+        var len0 = encodeRes.len;
+        
+        _debugLog('[iface="demangle", function="demangle"][Instruction::CallWasm] enter', {
+          funcName: 'demangle',
+          paramCount: 2,
+          async: false,
+          postReturn: true,
+        });
+        
+        let ret;
+        
+        try {
+          ret =  _withGlobalCurrentTaskMeta({
+            taskID: task.id(),
+            componentIdx: task.componentIdx(),
+            fn: () => exports1Demangle(ptr0, len0),
+          });
+        } catch (err) {
+          
+          _debugLog('[Instruction::CallWasm] error during sync call', {
+            taskID: task.id(),
+            err,
+          });
+          getOrCreateAsyncState(0).markTrapped(err);
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+          
+        }
+        task.endFirstSlice();
+        
+        let variant2;
+        switch (dataView(memory0).getUint8(((ret >>> 0)) + 0, true)) {
+          case 0: {
+            variant2 = undefined;
+            break;
+          }
+          case 1: {
+            var ptr1 = dataView(memory0).getUint32(((ret >>> 0)) + 4, true) >>> 0;
+            var len1 = dataView(memory0).getUint32(((ret >>> 0)) + 8, true);
+            var result1 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr1, len1));
+            variant2 = result1;
+            break;
+          }
+          default: {
+            throw new TypeError('invalid variant discriminant for option');
+          }
+        }
+        _debugLog('[iface="demangle", function="demangle"][Instruction::Return]', {
+          funcName: 'demangle',
+          paramCount: 1,
+          async: false,
+          postReturn: true
+        });
+        task.resolve([variant2]);
+        const retCopy = variant2;
+        
+        let cstate = getOrCreateAsyncState(0);
+        cstate.mayLeave = false;
+        postReturn1(ret);
+        cstate.mayLeave = true;
+        task.exit();
+        return retCopy;
         
         
       } catch (err) {
@@ -6890,7 +7010,7 @@ function parse(arg0, arg1) {
   });
   task.setCalleeIsAsync(false);
   task.setFuncTypeIsAsync(false);
-  task.setReturnResultTypeIdx(26);
+  task.setReturnResultTypeIdx(28);
   
   const started = task.enterSync();
   CURRENT_TASK_MAY_BLOCK.value = task.mayBlock() ? 1 : 0;
@@ -7488,7 +7608,7 @@ function parse(arg0, arg1) {
         
         let cstate = getOrCreateAsyncState(0);
         cstate.mayLeave = false;
-        postReturn1(ret);
+        postReturn2(ret);
         cstate.mayLeave = true;
         task.exit();
         
@@ -8943,15 +9063,24 @@ const $init = (() => {
       postReturn0Async = exports1['cabi_post_generate-ast'];
     }
     
-    postReturn1 = exports1['cabi_post_local:bindgen/wave#parse'];
+    postReturn1 = exports1.cabi_post_demangle;
     
     try {
-      postReturn1Async = WebAssembly.promising(exports1['cabi_post_local:bindgen/wave#parse']);
+      postReturn1Async = WebAssembly.promising(exports1.cabi_post_demangle);
     } catch(err) {
-      postReturn1Async = exports1['cabi_post_local:bindgen/wave#parse'];
+      postReturn1Async = exports1.cabi_post_demangle;
+    }
+    
+    postReturn2 = exports1['cabi_post_local:bindgen/wave#parse'];
+    
+    try {
+      postReturn2Async = WebAssembly.promising(exports1['cabi_post_local:bindgen/wave#parse']);
+    } catch(err) {
+      postReturn2Async = exports1['cabi_post_local:bindgen/wave#parse'];
     }
     
     exports1GenerateAst = exports1['generate-ast'];
+    exports1Demangle = exports1.demangle;
     waveFormat = exports1['local:bindgen/wave#format'];
     waveParse = exports1['local:bindgen/wave#parse'];
   })();
@@ -8996,7 +9125,7 @@ const wave = {
   
 };
 
-export { wave, generateAst, wave as 'local:bindgen/wave',  }
+export { wave, demangle, generateAst, wave as 'local:bindgen/wave',  }
 export const _util = {
   
 }

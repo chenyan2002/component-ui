@@ -130,7 +130,8 @@ kebab case (`src/codegen/util.rs`, `wit_func_name`), which loses information:
 
 ## component-ui's answers files
 
-component-ui's CLI writes a run as an answers file (see the [README](../README.md#command-line)):
+component-ui's CLI writes a run as an answers file (see the [README](../README.md#command-line)),
+and so does the UI's console, with **Save**:
 `> call` lines for the export calls, and after each, the answers its imports got, in order,
 `import(args) = value`. That is close to proxy-component's trace: a call line for `ExportArgs`,
 an answer line for an `ImportArgs` and its `ImportRet`. The differences:

@@ -70,4 +70,7 @@ interface wave {
 world bindgen {
   export generate-ast: func(component: list<u8>) -> result<string, string>;
   export wave;
+  // The source-level name of a compiled function's symbol, e.g. `core::fmt::write` for Rust's
+  // `_ZN4core3fmt5write17h…E`, or `foo::bar(int)` for C++'s `_ZN3foo3barEi`; none for another.
+  export demangle: func(symbol: string) -> option<string>;
 }

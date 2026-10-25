@@ -265,6 +265,10 @@ test.describe('variants', () => {
     await call(card);
     await expectCall(page, 'test:variants/test.variant-enums(false, ok, a)', 'error', /^wasm trap/);
     await expect(streamEntries(page, 'stderr').last()).toContainText('Assertion failed');
+    // The guest's frames, without those of its runtime, e.g. `abort`.
+    const frames = callEntry(page, 'test:variants/test.variant-enums(false, ok, a)').locator('.log-frames');
+    await expect(frames).toContainText('at exports_test_variants_test_variant_enums');
+    await expect(frames).not.toContainText('abort');
 
     await call(funcCard(page, 'invert-bool'));
     await expectCall(page, 'test:variants/test.invert-bool(false)', 'error', /cannot enter component instance/);

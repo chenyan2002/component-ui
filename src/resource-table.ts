@@ -4,18 +4,14 @@ import { classMap } from 'lit/directives/class-map.js';
 import { repeat } from 'lit/directives/repeat.js';
 import { drop, ExportsContext, watchContext } from './calls';
 import { MOCK } from './dialog';
-import { callable, Instance, InstanceState, Slot } from './resources';
+import { callable, holdersText, Instance, InstanceState, Slot } from './resources';
 
 const STATE_VARIANTS: Record<InstanceState, string> = { live: 'success', moved: 'warning', dropped: 'neutral' };
 
 // Who holds a live host-implemented instance, e.g. `held by guest ×2`.
-function renderHolders({ holders, state }: Instance) {
-  if (!holders || state !== 'live') {
-    return nothing;
-  }
-  const guest = holders.guest > 1 ? `guest ×${holders.guest}` : holders.guest === 1 ? 'guest' : undefined;
-  const names = [holders.ui ? 'you' : undefined, guest].filter((name) => name !== undefined);
-  return html`<div class="instance-holders">held by ${names.join(', ')}</div>`;
+function renderHolders(instance: Instance) {
+  const holders = holdersText(instance);
+  return holders === undefined ? nothing : html`<div class="instance-holders">${holders}</div>`;
 }
 
 function renderHistory(instance: Instance) {

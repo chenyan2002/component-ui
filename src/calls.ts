@@ -16,6 +16,8 @@ export interface ExportsContext {
   activity: CallActivity;
   // Mock instances of host resources, whose methods ask in the console.
   mocks: MockFactory;
+  // Reports an error a call failed with, e.g. a trap's stack; the browser's console by default.
+  report?: (err: unknown) => void;
 }
 
 // Counts calls that haven't returned. While one waits, e.g. on an import prompt, the component
@@ -167,7 +169,7 @@ async function run(ctx: ExportsContext, target: CallTarget, name: string, func: 
   } catch (err) {
     registry.settle(fate);
     entry.error(errorText(ctx, func, err));
-    console.error(err);
+    (ctx.report ?? console.error)(err);
     return;
   }
   // Settle moved arguments first: returned resources may reuse their handle indices.

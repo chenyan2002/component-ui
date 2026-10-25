@@ -31,4 +31,8 @@ export interface ImportLog extends LogEntry {
   ask(prompt: ImportPrompt): void;
   // A result shown below the call rather than after it, e.g. an HTTP response.
   detail(text: string): void;
+  // Something to know about the call, e.g. why the user's JavaScript wasn't called.
+  note(text: string): void;
+  // The prompt was answered, by trapping the guest or with a value, which is about to be returned.
+  answered(trapped: boolean): void;
 }

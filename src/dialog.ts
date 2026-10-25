@@ -40,6 +40,8 @@ export class ImportDialogs implements MockFactory {
   private readonly mockClasses = new Map<WIT.ResourceClass, Function>();
   // Subclasses of the host's classes, for mock instances of resources the host implements.
   private readonly mockSubclasses = new Map<WIT.ResourceClass, Function>();
+  // The functions that ask for their results, which stand in for those the user didn't write.
+  private readonly prompts = new WeakSet<Function>();
 
   constructor(
     private readonly registry: ResourceRegistry,
@@ -65,14 +67,14 @@ export class ImportDialogs implements MockFactory {
     for (const [key, { iface, func }] of funcs) {
       const callee: Callee = { callKind: 'func', iface: iface._name };
       completed[key] = typeof mod[key] === 'function'
-        ? this.routing(`${name}#${func._witName}`, func, key, mod[key], () => callee)
+        ? this.routing(`${name}#${func._witName}`, func, key, mod[key], () => callee, wasi)
         : this.prompting(func, key, () => callee);
     }
     const resources = new Map(ifaces.flatMap((iface) => iface.get_resources()).map((r) => [r._name, r] as const).reverse());
     for (const resource of resources.values()) {
       const cls = mod[resource._name];
       if (typeof cls === 'function') {
-        completed[resource._name] = this.routeStatics(name, resource, wasi ? cls : this.fill(resource, cls));
+        completed[resource._name] = this.routeStatics(name, resource, wasi ? cls : this.fill(resource, cls), wasi);
       } else if (!wasi) {
         completed[resource._name] = this.mockClass(resource);
       }
@@ -114,27 +116,30 @@ export class ImportDialogs implements MockFactory {
     return cls;
   }
 
-  // Asks instead of calling `fn`, jco's `key`, when one of the arguments is a mock.
-  // `name` is the function's `iface#wit-name`, which may have a host effect to show.
-  private routing(name: string, func: WIT.FuncClass, key: string, fn: Function, callee: (self: unknown) => Callee): Function {
+  // Asks instead of calling `fn`, jco's `key`, when one of the arguments is a mock, which the
+  // host's code doesn't know. `name` is the function's `iface#wit-name`, which may have a host
+  // effect to show. The call notes when `fn` is the user's JavaScript rather than WASI's.
+  private routing(name: string, func: WIT.FuncClass, key: string, fn: Function, callee: (self: unknown) => Callee, wasi: boolean): Function {
     if (!involvesResources(func)) {
       return fn;
     }
     const dialogs = this;
     const effect = HOST_EFFECTS[name];
+    const note = wasi ? undefined : `your JavaScript ${func.displayName(key)} wasn't called, as an argument is a mock`;
     return function (this: unknown, ...args: any[]) {
       if (!argHandles(func, args).some(([_, obj]) => MOCK in obj)) {
         return fn.apply(this, args);
       }
-      return dialogs.ask(func, dialogs.describe(callee(this), func, key, args), effect && (() => effect(args)));
+      return dialogs.ask(func, dialogs.describe(callee(this), func, key, args), effect && (() => effect(args)), note);
     };
   }
 
-  // Routes the static functions of a host class, e.g. `ResponseOutparam.set(mock, …)`.
-  private routeStatics(name: string, resource: WIT.ResourceClass, cls: Function): Function {
+  // Routes the static functions of a host class, e.g. `ResponseOutparam.set(mock, …)`; not those
+  // `fill` added, which ask anyway.
+  private routeStatics(name: string, resource: WIT.ResourceClass, cls: Function, wasi: boolean): Function {
     const statics = new Map(resource.get_static_funcs()
-      .filter(([key, func]) => func.callKind === 'static' && typeof (cls as any)[key] === 'function')
-      .map(([key, func]) => [key, this.routing(`${name}#${func._witName}`, func, key, (cls as any)[key].bind(cls), () => ({ callKind: 'static', resource }))]));
+      .filter(([key, func]) => func.callKind === 'static' && typeof (cls as any)[key] === 'function' && !this.prompts.has((cls as any)[key]))
+      .map(([key, func]) => [key, this.routing(`${name}#${func._witName}`, func, key, (cls as any)[key].bind(cls), () => ({ callKind: 'static', resource }), wasi)]));
     return statics.size === 0 ? cls : new Proxy(cls, {
       get: (target, key, receiver) => (typeof key === 'string' && statics.get(key)) || Reflect.get(target, key, receiver),
     });
@@ -182,15 +187,20 @@ export class ImportDialogs implements MockFactory {
   // A function, jco's `key`, that asks for its result; `callee` gets the instance it is called on.
   private prompting(func: WIT.FuncClass, key: string, callee: (self: unknown) => Callee): Function {
     const dialogs = this;
-    return function (this: unknown, ...args: any[]) {
+    const prompt = function (this: unknown, ...args: any[]) {
       return dialogs.ask(func, dialogs.describe(callee(this), func, key, args));
     };
+    this.prompts.add(prompt);
+    return prompt;
   }
 
   // Asks for the return value of an import call; one without a return value returns right away,
   // showing what the host would do with it if there is an `effect` to show.
-  private ask(func: WIT.FuncClass, call: CallRecord, effect?: () => Promise<string>): any {
+  private ask(func: WIT.FuncClass, call: CallRecord, effect?: () => Promise<string>, note?: string): any {
     const line = this.log(call);
+    if (note) {
+      line.note(note);
+    }
     const [type] = func._ret;
     if (!type) {
       if (effect) {
@@ -215,6 +225,8 @@ export class ImportDialogs implements MockFactory {
           if (value === INVALID) {
             return false;
           }
+          // Before the host wrapper registers the mocks the value returns, so they can be told.
+          line.answered(false);
           if (isResult && value.tag === 'err') {
             reject(Object.assign(new Error(formatValue(this.registry, type, value)), { payload: value.val }));
           } else {
@@ -228,6 +240,7 @@ export class ImportDialogs implements MockFactory {
         trap: () => {
           // jco treats a runtime error as a trap of the component instance.
           const err = new WebAssembly.RuntimeError(`Trapped at ${call.label}`);
+          line.answered(true);
           reject(err);
           line.error(err);
         },

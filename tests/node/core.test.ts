@@ -40,6 +40,8 @@ async function start(file: string, answer: (call: CallRecord, prompt: ImportProm
       result: (text) => lines.push(`${call.label} -> ${text}`),
       error: (err) => lines.push(`${call.label} !! ${err}`),
       detail: (text) => lines.push(`${call.label} => ${text}`),
+      note: (text) => lines.push(`${call.label} ~ ${text}`),
+      answered: () => {},
       ask: (prompt) => answer(call, prompt),
     };
   };

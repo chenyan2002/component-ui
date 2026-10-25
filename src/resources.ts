@@ -126,11 +126,14 @@ export class ResourceRegistry extends EventTarget {
   }
 
   // The guest gave up a handle on a host object, by dropping it or moving it into an import.
-  public release(obj: object, state: 'moved' | 'dropped', fate: string) {
+  // Returns the instance, if the guest held it and gave it up; not when the UI drops it.
+  public release(obj: object, state: 'moved' | 'dropped', fate: string): Instance | undefined {
     const instance = this.byObj.get(obj);
     if (instance?.holders && obj !== this.dropping) {
       this.hold(instance, instance.holders.guest - 1, instance.holders.ui, [state, fate]);
+      return instance;
     }
+    return undefined;
   }
 
   private create(
@@ -182,6 +185,11 @@ export class ResourceRegistry extends EventTarget {
 
   public idOf(obj: unknown): string | undefined {
     return this.instanceOf(obj)?.id;
+  }
+
+  // The ids of all the instances there have been.
+  public ids(): Set<string> {
+    return new Set([...this.slots.values()].flatMap((slot) => [slot.current, ...slot.earlier]).map((instance) => instance.id));
   }
 
   public instance(id: string): Instance | undefined {
@@ -312,6 +320,24 @@ export class ResourceRegistry extends EventTarget {
   private changed() {
     this.dispatchEvent(new Event('change'));
   }
+}
+
+// Who holds a live host-implemented instance, e.g. `held by you, guest ×2`; undefined for other
+// instances, whose holders aren't observed.
+export function holdersText({ holders, state }: Instance): string | undefined {
+  if (!holders || state !== 'live') {
+    return undefined;
+  }
+  const guest = holders.guest > 1 ? `guest ×${holders.guest}` : holders.guest === 1 ? 'guest' : undefined;
+  const names = [holders.ui ? 'you' : undefined, guest].filter((name) => name !== undefined);
+  return `held by ${names.join(', ')}`;
+}
+
+// An instance with where it came from, where it went if it moved or was dropped, and who holds
+// it, e.g. `#y-1 (from new imports/y(10); moved into imports/y.add(#y-1, 10))`.
+export function describeInstance(instance: Instance): string {
+  const parts = [`from ${instance.origin}`, instance.fate, holdersText(instance)].filter((part) => part !== undefined);
+  return `#${instance.id} (${parts.join('; ')})`;
 }
 
 // Whether a value of the type can contain resource handles.

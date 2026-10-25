@@ -523,6 +523,19 @@ resource-table {
   font-size: var(--wa-font-size-xs);
   color: var(--wa-color-text-quiet);
 }
+/* The guest's frames of a trap, innermost first. */
+.log-frames {
+  font-family: var(--wa-font-family-code);
+  font-size: var(--wa-font-size-xs);
+  color: var(--wa-color-text-quiet);
+  overflow-wrap: anywhere;
+}
+/* Something to know about an import call, e.g. why the user's JavaScript wasn't called. */
+.log-note {
+  font-family: var(--wa-font-family-body);
+  font-size: var(--wa-font-size-xs);
+  color: var(--wa-color-warning-on-quiet);
+}
 /* Imports the guest called during a call, and the form asking for a missing one's result. */
 .log-imports {
   display: flex;

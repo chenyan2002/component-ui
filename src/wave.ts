@@ -397,10 +397,12 @@ class ToDraft extends WIT.Visitor<number, Draft> {
   // it does is for the caller to check (see src/driver.ts).
   private handle(i: number, resource: WIT.ResourceClass, borrowed = false): Draft {
     const label = this.node(i, 'handle');
-    if (label === MOCK_LABEL || (label.startsWith(`${MOCK_LABEL}-`) && !isIdOf(label, resource) && isIdOf(label.slice(MOCK_LABEL.length + 1), resource))) {
+    const prefix = borrowed ? 'borrow-' : '';
+    // A new mock, also borrowed, e.g. `#borrow-mock-x-2`, as answers files write mocks passed to calls.
+    const mock = borrowed && label.startsWith(prefix) && !isIdOf(label.slice(prefix.length), resource) ? label.slice(prefix.length) : label;
+    if (mock === MOCK_LABEL || (mock.startsWith(`${MOCK_LABEL}-`) && !isIdOf(mock, resource) && isIdOf(mock.slice(MOCK_LABEL.length + 1), resource))) {
       return this.text(NEW_MOCK);
     }
-    const prefix = borrowed ? 'borrow-' : '';
     const id = label.startsWith(prefix) ? label.slice(prefix.length) : '';
     if (!isIdOf(id, resource)) {
       throw new Error(`Expected a handle like #${prefix}${resource.witName}-1, got #${label}`);
@@ -490,4 +492,25 @@ export function canonicalWave(t: WIT.Type, text: string): string {
 export function parseWave(t: WIT.Type, text: string): Draft {
   const nodes = wave.parse(typeNodesOf(t), expandBytes(text));
   return t.accept(new ToDraft(nodes), nodes.length - 1);
+}
+
+// Calls `fn` on each `#label` of the text outside string and char literals, replacing it.
+export function mapHandles(text: string, fn: (label: string) => string): string {
+  let out = '';
+  for (let i = 0; i < text.length;) {
+    const c = text[i];
+    if (c === '"' || c === "'") {
+      const end = literalEnd(text, i);
+      out += text.slice(i, end);
+      i = end;
+    } else if (c === '#') {
+      const label = /^#([a-zA-Z0-9-]+)/.exec(text.slice(i));
+      out += label ? `#${fn(label[1])}` : c;
+      i += label ? label[0].length : 1;
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
 }

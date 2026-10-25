@@ -1,5 +1,6 @@
 import * as WIT from './wit';
-import { Callee, describeCall, unversioned } from './call-record';
+import { CallRecord, Callee, describeCall, describeDrop, unversioned } from './call-record';
+import { ImportLog } from './log';
 import { dispose, Instance, involvesResources, ownedHandles, ResourceRegistry, returnedType, thrownType } from './resources';
 
 // Hooks are installed on a host object once; they report to the component instance that
@@ -53,6 +54,9 @@ export class HostResources {
   private readonly classes = new Map<WIT.ResourceClass, Function>();
   // Set while the UI calls the host directly, which isn't the guest using its imports.
   private direct = 0;
+  // Logs what the guest does with host instances that no import call shows: dropping its
+  // handles on them, which the component model does without calling an import.
+  public log?: (record: CallRecord) => ImportLog;
 
   constructor(private readonly registry: ResourceRegistry, interfaces: WIT.InterfaceClass[]) {
     // jco may key imports without their version.
@@ -159,7 +163,11 @@ export class HostResources {
     }
     const destructor = obj[dispose];
     define(obj, dispose, function (this: any) {
-      observers.get(obj)?.registry.release(obj, 'dropped', 'dropped by the guest');
+      const host = observers.get(obj);
+      const dropped = host?.registry.release(obj, 'dropped', 'dropped by the guest');
+      if (host && dropped) {
+        host.log?.(describeDrop(dropped, 'import')).result('');
+      }
       return typeof destructor === 'function' ? destructor.call(this) : undefined;
     });
     for (const [name, func] of instance.resource.get_method_funcs()) {
