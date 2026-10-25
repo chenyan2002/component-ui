@@ -26,3 +26,9 @@ heck = "0.5.0"
 wit-bindgen = "0.63.0"
 wit-component = "0.262.0"
 wit-parser = { version = "0.262.0", default-features = false }
+# proxy-component's fork, which adds resource handles, so both tools read and write the same
+# WAVE. Without the default `wit` feature, which would pull in an older wit-parser.
+# Demangles the guest's function names in the stacks of traps: Rust's, and C++'s.
+rustc-demangle = "0.1.24"
+cpp_demangle = "0.5.1"
+wasm-wave = { git = "https://github.com/chenyan2002/wasm-tools.git", rev = "efecaa186fc3c3abe637bcad6234403b28d09322", default-features = false }

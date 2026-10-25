@@ -1,10 +1,11 @@
 import * as WIT from './wit';
-import { ImportLog } from './console';
+import { CallRecord, Callee, describeCall, unversioned } from './call-record';
+import { ImportLog } from './log';
 import { initDraft, INVALID, MockFactory, parseDraft, randomize } from './draft';
-import { byImportName, HostResources, ownFunc, qualified, qualifiedResource, unversioned } from './host-resources';
+import { byImportName, HostResources, ownFunc } from './host-resources';
 import { stubMissingImports } from './loader';
 import { argHandles, dispose, involvesResources, ResourceRegistry, thrownType } from './resources';
-import { formatArgs, formatHandle, formatValue } from './wave';
+import { formatHandle, formatValue } from './wave';
 import { sentResponse } from './wasi-http';
 
 // Marks mock instances, which have no host implementation behind them.
@@ -39,12 +40,14 @@ export class ImportDialogs implements MockFactory {
   private readonly mockClasses = new Map<WIT.ResourceClass, Function>();
   // Subclasses of the host's classes, for mock instances of resources the host implements.
   private readonly mockSubclasses = new Map<WIT.ResourceClass, Function>();
+  // The functions that ask for their results, which stand in for those the user didn't write.
+  private readonly prompts = new WeakSet<Function>();
 
   constructor(
     private readonly registry: ResourceRegistry,
     private readonly host: HostResources,
     interfaces: WIT.InterfaceClass[],
-    private readonly log: (call: string) => ImportLog,
+    private readonly log: (call: CallRecord) => ImportLog,
   ) {
     this.interfaces = byImportName(interfaces);
   }
@@ -62,16 +65,16 @@ export class ImportDialogs implements MockFactory {
     // jco gives all versions of an interface one import object; the first one's types stand for all.
     const funcs = new Map(ifaces.flatMap((iface) => Object.entries(iface._fields).map(([key, func]) => [key, { iface, func }] as const)).reverse());
     for (const [key, { iface, func }] of funcs) {
-      const label = (_self: unknown, args: any[]) => `${qualified(iface._name, func.displayName(key))}(${this.format(func, args)})`;
+      const callee: Callee = { callKind: 'func', iface: iface._name };
       completed[key] = typeof mod[key] === 'function'
-        ? this.routing(`${name}#${func._witName}`, func, mod[key], label)
-        : this.prompting(func, label);
+        ? this.routing(`${name}#${func._witName}`, func, key, mod[key], () => callee, wasi)
+        : this.prompting(func, key, () => callee);
     }
     const resources = new Map(ifaces.flatMap((iface) => iface.get_resources()).map((r) => [r._name, r] as const).reverse());
     for (const resource of resources.values()) {
       const cls = mod[resource._name];
       if (typeof cls === 'function') {
-        completed[resource._name] = this.routeStatics(name, resource, wasi ? cls : this.fill(resource, cls));
+        completed[resource._name] = this.routeStatics(name, resource, wasi ? cls : this.fill(resource, cls), wasi);
       } else if (!wasi) {
         completed[resource._name] = this.mockClass(resource);
       }
@@ -106,42 +109,40 @@ export class ImportDialogs implements MockFactory {
       // Dropping a mock frees nothing; the host's destructor would expect its own state.
       define(cls.prototype, dispose, () => {});
       for (const [key, func] of resource.get_method_funcs()) {
-        define(cls.prototype, key, this.prompting(func, (self, args) => this.methodLabel(resource, key, func, self, args)));
+        define(cls.prototype, key, this.prompting(func, key, (self) => ({ callKind: 'method', resource, self })));
       }
       this.mockSubclasses.set(resource, cls);
     }
     return cls;
   }
 
-  // Asks instead of calling `fn` when one of the arguments is a mock.
-  // `name` is the function's `iface#wit-name`, which may have a host effect to show.
-  private routing(name: string, func: WIT.FuncClass, fn: Function, label: (self: unknown, args: any[]) => string): Function {
+  // Asks instead of calling `fn`, jco's `key`, when one of the arguments is a mock, which the
+  // host's code doesn't know. `name` is the function's `iface#wit-name`, which may have a host
+  // effect to show. The call notes when `fn` is the user's JavaScript rather than WASI's.
+  private routing(name: string, func: WIT.FuncClass, key: string, fn: Function, callee: (self: unknown) => Callee, wasi: boolean): Function {
     if (!involvesResources(func)) {
       return fn;
     }
     const dialogs = this;
     const effect = HOST_EFFECTS[name];
+    const note = wasi ? undefined : `your JavaScript ${func.displayName(key)} wasn't called, as an argument is a mock`;
     return function (this: unknown, ...args: any[]) {
       if (!argHandles(func, args).some(([_, obj]) => MOCK in obj)) {
         return fn.apply(this, args);
       }
-      return dialogs.ask(func, label(this, args), effect && (() => effect(args)));
+      return dialogs.ask(func, dialogs.describe(callee(this), func, key, args), effect && (() => effect(args)), note);
     };
   }
 
-  // Routes the static functions of a host class, e.g. `ResponseOutparam.set(mock, …)`.
-  private routeStatics(name: string, resource: WIT.ResourceClass, cls: Function): Function {
+  // Routes the static functions of a host class, e.g. `ResponseOutparam.set(mock, …)`; not those
+  // `fill` added, which ask anyway.
+  private routeStatics(name: string, resource: WIT.ResourceClass, cls: Function, wasi: boolean): Function {
     const statics = new Map(resource.get_static_funcs()
-      .filter(([key, func]) => func.callKind === 'static' && typeof (cls as any)[key] === 'function')
-      .map(([key, func]) => [key, this.routing(`${name}#${func._witName}`, func, (cls as any)[key].bind(cls), (_self, args) =>
-        `${qualifiedResource(resource)}.${func.displayName(key)}(${this.format(func, args)})`)]));
+      .filter(([key, func]) => func.callKind === 'static' && typeof (cls as any)[key] === 'function' && !this.prompts.has((cls as any)[key]))
+      .map(([key, func]) => [key, this.routing(`${name}#${func._witName}`, func, key, (cls as any)[key].bind(cls), () => ({ callKind: 'static', resource }), wasi)]));
     return statics.size === 0 ? cls : new Proxy(cls, {
       get: (target, key, receiver) => (typeof key === 'string' && statics.get(key)) || Reflect.get(target, key, receiver),
     });
-  }
-
-  private methodLabel(resource: WIT.ResourceClass, key: string, func: WIT.FuncClass, self: unknown, args: any[]): string {
-    return `${formatHandle(this.registry, self, resource, true)}.${func.displayName(key)}(${this.format(func, args)})`;
   }
 
   private mockClass(resource: WIT.ResourceClass): Function {
@@ -152,7 +153,7 @@ export class ImportDialogs implements MockFactory {
         constructor(...args: any[]) {
           super();
           const ctor = ownFunc(resource._fields, 'constructor');
-          dialogs.constructed(this, resource, `new ${qualifiedResource(resource)}(${dialogs.format(ctor, args)})`);
+          dialogs.constructed(this, resource, dialogs.describe({ callKind: 'constructor', resource }, ctor, 'constructor', args));
         }
       };
       define(cls, 'name', resource._name);
@@ -165,12 +166,12 @@ export class ImportDialogs implements MockFactory {
   private fill(resource: WIT.ResourceClass, cls: Function): Function {
     for (const [key, func] of resource.get_method_funcs()) {
       if (typeof cls.prototype[key] !== 'function') {
-        define(cls.prototype, key, this.prompting(func, (self, args) => this.methodLabel(resource, key, func, self, args)));
+        define(cls.prototype, key, this.prompting(func, key, (self) => ({ callKind: 'method', resource, self })));
       }
     }
     for (const [key, func] of resource.get_static_funcs()) {
       if (func.callKind === 'static' && typeof (cls as any)[key] !== 'function') {
-        define(cls, key, this.prompting(func, (_self, args) => `${qualifiedResource(resource)}.${func.displayName(key)}(${this.format(func, args)})`));
+        define(cls, key, this.prompting(func, key, () => ({ callKind: 'static', resource })));
       }
     }
     return cls;
@@ -178,22 +179,28 @@ export class ImportDialogs implements MockFactory {
 
   // Logs the guest constructing a mock, which needs no answer. The host wrapper registers the
   // instance once the constructor returns, so its id is known a microtask later.
-  private constructed(obj: object, resource: WIT.ResourceClass, call: string) {
+  private constructed(obj: object, resource: WIT.ResourceClass, call: CallRecord) {
     const line = this.log(call);
     queueMicrotask(() => line.result(formatHandle(this.registry, obj, resource)));
   }
 
-  private prompting(func: WIT.FuncClass, label: (self: unknown, args: any[]) => string): Function {
+  // A function, jco's `key`, that asks for its result; `callee` gets the instance it is called on.
+  private prompting(func: WIT.FuncClass, key: string, callee: (self: unknown) => Callee): Function {
     const dialogs = this;
-    return function (this: unknown, ...args: any[]) {
-      return dialogs.ask(func, label(this, args));
+    const prompt = function (this: unknown, ...args: any[]) {
+      return dialogs.ask(func, dialogs.describe(callee(this), func, key, args));
     };
+    this.prompts.add(prompt);
+    return prompt;
   }
 
   // Asks for the return value of an import call; one without a return value returns right away,
   // showing what the host would do with it if there is an `effect` to show.
-  private ask(func: WIT.FuncClass, call: string, effect?: () => Promise<string>): any {
+  private ask(func: WIT.FuncClass, call: CallRecord, effect?: () => Promise<string>, note?: string): any {
     const line = this.log(call);
+    if (note) {
+      line.note(note);
+    }
     const [type] = func._ret;
     if (!type) {
       if (effect) {
@@ -208,15 +215,18 @@ export class ImportDialogs implements MockFactory {
     return new Promise((resolve, reject) => {
       const draft = initDraft(type);
       line.ask({
+        func,
         type,
         draft,
         registry: this.registry,
         mock: this,
-        answer: () => {
-          const value = parseDraft(type, draft, this.registry, this, 'host');
+        answer: (given = draft, by) => {
+          const value = parseDraft(type, given, this.registry, this, 'host');
           if (value === INVALID) {
-            return;
+            return false;
           }
+          // Before the host wrapper registers the mocks the value returns, so they can be told.
+          line.answered(false, by);
           if (isResult && value.tag === 'err') {
             reject(Object.assign(new Error(formatValue(this.registry, type, value)), { payload: value.val }));
           } else {
@@ -224,11 +234,13 @@ export class ImportDialogs implements MockFactory {
           }
           // After the host wrapper registers returned resources, so they show by id.
           queueMicrotask(() => line.result(formatValue(this.registry, type, value)));
+          return true;
         },
         random: () => randomize(type, draft, this.registry, this, 'host'),
-        trap: () => {
+        trap: (by) => {
           // jco treats a runtime error as a trap of the component instance.
-          const err = new WebAssembly.RuntimeError(`Trapped at ${call}`);
+          const err = new WebAssembly.RuntimeError(`Trapped at ${call.label}`);
+          line.answered(true, by);
           reject(err);
           line.error(err);
         },
@@ -236,7 +248,7 @@ export class ImportDialogs implements MockFactory {
     });
   }
 
-  private format(func: WIT.FuncClass | undefined, args: any[]): string {
-    return formatArgs(this.registry, func, args);
+  private describe(callee: Callee, func: WIT.FuncClass | undefined, key: string, args: any[]): CallRecord {
+    return describeCall(this.registry, 'import', callee, func, key, args);
   }
 }

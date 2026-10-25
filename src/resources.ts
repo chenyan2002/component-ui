@@ -84,6 +84,8 @@ export function clashingNames(imports: WIT.InterfaceClass[], exports: WIT.Interf
 export class ResourceRegistry extends EventTarget {
   // Called for each new host-implemented instance, to observe what the guest does with it.
   public onHostInstance?: (instance: Instance) => void;
+  // Called for each new instance, guest- or host-implemented.
+  public onInstance?: (instance: Instance) => void;
 
   // `clashing` names resources both sides implement, from `clashingNames`.
   constructor(private readonly clashing: ReadonlySet<string> = new Set()) {
@@ -124,11 +126,14 @@ export class ResourceRegistry extends EventTarget {
   }
 
   // The guest gave up a handle on a host object, by dropping it or moving it into an import.
-  public release(obj: object, state: 'moved' | 'dropped', fate: string) {
+  // Returns the instance, if the guest held it and gave it up; not when the UI drops it.
+  public release(obj: object, state: 'moved' | 'dropped', fate: string): Instance | undefined {
     const instance = this.byObj.get(obj);
     if (instance?.holders && obj !== this.dropping) {
       this.hold(instance, instance.holders.guest - 1, instance.holders.ui, [state, fate]);
+      return instance;
     }
+    return undefined;
   }
 
   private create(
@@ -153,6 +158,7 @@ export class ResourceRegistry extends EventTarget {
     if (holders) {
       this.onHostInstance?.(instance);
     }
+    this.onInstance?.(instance);
     this.changed();
     return instance;
   }
@@ -179,6 +185,15 @@ export class ResourceRegistry extends EventTarget {
 
   public idOf(obj: unknown): string | undefined {
     return this.instanceOf(obj)?.id;
+  }
+
+  // The ids of all the instances there have been.
+  public ids(): Set<string> {
+    return new Set([...this.slots.values()].flatMap((slot) => [slot.current, ...slot.earlier]).map((instance) => instance.id));
+  }
+
+  public instance(id: string): Instance | undefined {
+    return this.byId.get(id);
   }
 
   // Table rows by handle index; instances without one come last, in creation order.
@@ -307,6 +322,24 @@ export class ResourceRegistry extends EventTarget {
   }
 }
 
+// Who holds a live host-implemented instance, e.g. `held by you, guest ×2`; undefined for other
+// instances, whose holders aren't observed.
+export function holdersText({ holders, state }: Instance): string | undefined {
+  if (!holders || state !== 'live') {
+    return undefined;
+  }
+  const guest = holders.guest > 1 ? `guest ×${holders.guest}` : holders.guest === 1 ? 'guest' : undefined;
+  const names = [holders.ui ? 'you' : undefined, guest].filter((name) => name !== undefined);
+  return `held by ${names.join(', ')}`;
+}
+
+// An instance with where it came from, where it went if it moved or was dropped, and who holds
+// it, e.g. `#y-1 (from new imports/y(10); moved into imports/y.add(#y-1, 10))`.
+export function describeInstance(instance: Instance): string {
+  const parts = [`from ${instance.origin}`, instance.fate, holdersText(instance)].filter((part) => part !== undefined);
+  return `#${instance.id} (${parts.join('; ')})`;
+}
+
 // Whether a value of the type can contain resource handles.
 class HasResource extends WIT.Visitor<Set<WIT.RecClass>, boolean> {
   public visitType<T>(_t: WIT.Type<T>, _seen: Set<WIT.RecClass>): boolean {
@@ -340,6 +373,44 @@ class HasResource extends WIT.Visitor<Set<WIT.RecClass>, boolean> {
 }
 
 const hasResource = new HasResource();
+
+// The resources whose handles a value of the type can contain, e.g. `x` for `option<borrow<x>>`.
+class ResourcesOf extends WIT.Visitor<Set<WIT.Type>, WIT.ResourceClass[]> {
+  public visitType<T>(_t: WIT.Type<T>, _seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return [];
+  }
+  public visitResource(t: WIT.ResourceClass, _seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return [t];
+  }
+  public visitOpt(_t: WIT.OptClass, ty: WIT.Type, seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return ty.accept(this, seen);
+  }
+  public visitVec(_t: WIT.VecClass, ty: WIT.Type, seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return ty.accept(this, seen);
+  }
+  public visitRecord(_t: WIT.RecordClass, fields: Record<string, WIT.Type>, seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return Object.values(fields).flatMap((ty) => ty.accept(this, seen));
+  }
+  public visitTuple(_t: WIT.TupleClass, components: WIT.Type[], seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return components.flatMap((ty) => ty.accept(this, seen));
+  }
+  public visitVariant(_t: WIT.VariantClass, fields: Record<string, WIT.Type>, seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    return Object.values(fields).flatMap((ty) => ty.accept(this, seen));
+  }
+  public visitRec(t: WIT.RecClass, ty: WIT.Type, seen: Set<WIT.Type>): WIT.ResourceClass[] {
+    if (seen.has(t)) {
+      return [];
+    }
+    seen.add(t);
+    return ty.accept(this, seen);
+  }
+}
+
+export function resourcesOf(types: WIT.Type[]): WIT.ResourceClass[] {
+  const visitor = new ResourcesOf();
+  const seen = new Set<WIT.Type>();
+  return [...new Set(types.flatMap((ty) => ty.accept(visitor, seen)))];
+}
 
 // Whether calling the function can pass resource handles either way.
 export function involvesResources(func: WIT.FuncClass): boolean {

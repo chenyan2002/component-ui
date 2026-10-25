@@ -150,7 +150,7 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   await arg(getMethod, 1).locator('input').fill('10');
   await call(getMethod);
   // A `u64` is a `bigint`, shown as a number.
-  await expectCall(page, '#borrowed-request-1.get-method(10)', 'ok', 'ok("POST")');
+  await expectCall(page, 'fastly:compute/http-req/request@0.1.0.get-method(#borrow-request-1, 10)', 'ok', 'ok("POST")');
 
   // The guest accepts them; imports the stubs leave out ask for their results.
   const handle = funcCard(page, 'handle');
@@ -265,6 +265,10 @@ test.describe('variants', () => {
     await call(card);
     await expectCall(page, 'test:variants/test.variant-enums(false, ok, a)', 'error', /^wasm trap/);
     await expect(streamEntries(page, 'stderr').last()).toContainText('Assertion failed');
+    // The guest's frames, without those of its runtime, e.g. `abort`.
+    const frames = callEntry(page, 'test:variants/test.variant-enums(false, ok, a)').locator('.log-frames');
+    await expect(frames).toContainText('at exports_test_variants_test_variant_enums');
+    await expect(frames).not.toContainText('abort');
 
     await call(funcCard(page, 'invert-bool'));
     await expectCall(page, 'test:variants/test.invert-bool(false)', 'error', /cannot enter component instance/);

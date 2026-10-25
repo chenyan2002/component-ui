@@ -288,6 +288,9 @@ function parseInteger(bits: number, signed: boolean, text: string): number | big
   return toInteger(bits, signed, BigInt(trimmed));
 }
 
+// Floats that are no numbers, as WAVE writes them.
+const SPECIAL_FLOATS = new Map([['nan', NaN], ['inf', Infinity], ['-inf', -Infinity]]);
+
 // Converts a draft into the JS value jco expects. Invalid drafts get an `error`
 // and yield INVALID; every field is visited so all errors show at once.
 class Parse extends IDL.Visitor<Draft, any> {
@@ -326,6 +329,10 @@ class Parse extends IDL.Visitor<Draft, any> {
   public visitFixedFloat(_t: IDL.FixedFloatClass, d: Draft): any {
     return this.leaf(d, () => {
       const text = (d as TextDraft).text.trim();
+      const special = SPECIAL_FLOATS.get(text);
+      if (special !== undefined) {
+        return special;
+      }
       const value = Number(text);
       if (text === '' || Number.isNaN(value)) {
         throw new Error(`Expected a number, got "${text}"`);
@@ -420,6 +427,26 @@ class Parse extends IDL.Visitor<Draft, any> {
 // Parses a single value, recording errors on the draft. Returns INVALID on failure.
 export function parseDraft(t: IDL.Type, d: Draft, registry: ResourceRegistry, mock?: MockFactory, giver: Giver = 'ui'): any {
   return t.accept(new Parse(registry, mock, giver), d);
+}
+
+// The errors `parseDraft` left on a draft and the drafts it contains.
+export function draftErrors(d: Draft | undefined): string[] {
+  if (!d) {
+    return [];
+  }
+  const own = d.error ? [d.error] : [];
+  switch (d.kind) {
+    case 'opt':
+      return own.concat(d.some ? draftErrors(d.inner) : []);
+    case 'list':
+      return own.concat(d.items.flatMap(draftErrors));
+    case 'fields':
+      return own.concat(d.fields.flatMap(draftErrors));
+    case 'case':
+      return own.concat(draftErrors(d.payload));
+    default:
+      return own;
+  }
 }
 
 // Parses all arguments, or returns undefined if any of them is invalid.

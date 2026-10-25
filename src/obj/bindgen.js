@@ -143,10 +143,67 @@ if (insecureSeed=== undefined) {
 let dv = new DataView(new ArrayBuffer());
 const dataView = mem => dv.buffer === mem.buffer ? dv : dv = new DataView(mem.buffer);
 
+function toInt64(val) {
+  const converted = BigInt(val)
+  
+  return BigInt.asIntN(64, converted);
+}
+
+
 function toUint64(val) {
   const converted = BigInt(val)
   
   return BigInt.asUintN(64, converted);
+}
+
+
+function toInt16(val) {
+  
+  val >>>= 0;
+  val %= 2 ** 16;
+  if (val >= 2 ** 15) {
+    val -= 2 ** 16;
+  }
+  return val;
+}
+
+
+function toInt32(val) {
+  
+  return val >> 0;
+}
+
+
+function toInt8(val) {
+  
+  val >>>= 0;
+  val %= 2 ** 8;
+  if (val >= 2 ** 7) {
+    val -= 2 ** 8;
+  }
+  return val;
+}
+
+
+function toUint16(val) {
+  
+  val >>>= 0;
+  val %= 2 ** 16;
+  return val;
+}
+
+
+function toUint32(val) {
+  
+  return val >>> 0;
+}
+
+
+function toUint8(val) {
+  
+  val >>>= 0;
+  val %= 2 ** 8;
+  return val;
 }
 
 
@@ -253,6 +310,18 @@ function _utf8AllocateAndEncode(s, realloc, memory) {
   }
   const res = { ptr, len, codepoints };
   return res;
+}
+
+
+function validateGuestChar(i) {
+  if ((i > 0x10ffff) || (i >= 0xd800 && i <= 0xdfff)) { throw new TypeError(`not a valid char`); }
+  return String.fromCodePoint(i);
+}
+
+
+function validateHostChar(s) {
+  if (typeof s !== 'string') { throw new TypeError(`must be a string`); }
+  return s.codePointAt(0);
 }
 
 const T_FLAG = 1 << 30;
@@ -4084,10 +4153,30 @@ function _guardTrap(componentIdx, fn, convertsRangeErrors = false) {
   };
 }
 
-const base64Compile = str => WebAssembly.compile(Uint8Array.from(atob(str), b => b.charCodeAt(0)));
+const base64Compile = str => WebAssembly.compile(
+typeof Buffer !== 'undefined'
+? Buffer.from(str, 'base64')
+: Uint8Array.from(atob(str), b => b.charCodeAt(0))
+);
 
 
-const fetchCompile = url => fetch(url).then(WebAssembly.compileStreaming);
+function clampGuest(i, min, max) {
+  if (i < min || i > max) {
+    throw new TypeError(`must be between ${min} and ${max}`);
+  }
+  return i;
+}
+
+
+const isNode = typeof process !== 'undefined' && process.versions && process.versions.node;
+let _fs;
+async function fetchCompile (url) {
+  if (isNode) {
+    _fs = _fs || await import('node:fs/promises');
+    return WebAssembly.compile(await _fs.readFile(url));
+  }
+  return fetch(url).then(WebAssembly.compileStreaming);
+}
 
 const symbolCabiDispose = Symbol.for('cabiDispose');
 
@@ -4112,6 +4201,10 @@ function getErrorPayload(e) {
   if (e && hasOwnProperty.call(e, 'payload')) return e.payload;
   if (e instanceof Error) throw e;
   return e;
+}
+
+function throwInvalidBool() {
+  throw new TypeError('invalid variant discriminant for bool');
 }
 
 const instantiateCore = WebAssembly.instantiate;
@@ -5967,6 +6060,10 @@ _trampoline21.fnName = 'wasi:cli/terminal-stderr@0.2.9#getTerminalStderr';
 let exports2;
 let postReturn0;
 let postReturn0Async;
+let postReturn1;
+let postReturn1Async;
+let postReturn2;
+let postReturn2Async;
 let exports1GenerateAst;
 
 function generateAst(arg0) {
@@ -6094,6 +6191,1424 @@ function generateAst(arg0) {
         let cstate = getOrCreateAsyncState(0);
         cstate.mayLeave = false;
         postReturn0(ret);
+        cstate.mayLeave = true;
+        task.exit();
+        
+        
+        
+        if (typeof retCopy === 'object' && retCopy.tag === 'err') {
+          throw new ComponentError(retCopy.val);
+        }
+        return retCopy.val;
+        
+        
+      } catch (err) {
+        if (!task.isResolvedState()) {
+          task.setErrored(err);
+          task.reject(err);
+        }
+        if (!task.isExited()) { task.exit({ skipExclusiveLockCheck: true }); }
+        throw err;
+      }
+    },
+  });
+  
+}
+let exports1Demangle;
+
+function demangle(arg0) {
+  
+  const hostProvided = false;
+  getOrCreateAsyncState(0).throwIfTrapped();
+  
+  const [task, _wasm_call_currentTaskID] = createNewCurrentTask({
+    componentIdx: 0,
+    isAsync: false,
+    isManualAsync: false,
+    preserveFutureResult: false,
+    entryFnName: 'exports1Demangle',
+    getCallbackFn: () => null,
+    callbackFnName: null,
+    errHandling: 'none',
+    callingWasmExport: true,
+  });
+  task.setCalleeIsAsync(false);
+  task.setFuncTypeIsAsync(false);
+  task.setReturnResultTypeIdx(22);
+  
+  const started = task.enterSync();
+  CURRENT_TASK_MAY_BLOCK.value = task.mayBlock() ? 1 : 0;
+  
+  if (0!== null) {
+    task.setReturnMemoryIdx(0);
+    task.setReturnMemory((() => memory0)());
+  }
+  
+  
+  return _withGlobalCurrentTaskMeta({
+    taskID: task.id(),
+    componentIdx: task.componentIdx(),
+    fn: () => {
+      try {
+        
+        
+        var encodeRes = _utf8AllocateAndEncode(arg0, realloc0, memory0);
+        var ptr0= encodeRes.ptr;
+        var len0 = encodeRes.len;
+        
+        _debugLog('[iface="demangle", function="demangle"][Instruction::CallWasm] enter', {
+          funcName: 'demangle',
+          paramCount: 2,
+          async: false,
+          postReturn: true,
+        });
+        
+        let ret;
+        
+        try {
+          ret =  _withGlobalCurrentTaskMeta({
+            taskID: task.id(),
+            componentIdx: task.componentIdx(),
+            fn: () => exports1Demangle(ptr0, len0),
+          });
+        } catch (err) {
+          
+          _debugLog('[Instruction::CallWasm] error during sync call', {
+            taskID: task.id(),
+            err,
+          });
+          getOrCreateAsyncState(0).markTrapped(err);
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+          
+        }
+        task.endFirstSlice();
+        
+        let variant2;
+        switch (dataView(memory0).getUint8(((ret >>> 0)) + 0, true)) {
+          case 0: {
+            variant2 = undefined;
+            break;
+          }
+          case 1: {
+            var ptr1 = dataView(memory0).getUint32(((ret >>> 0)) + 4, true) >>> 0;
+            var len1 = dataView(memory0).getUint32(((ret >>> 0)) + 8, true);
+            var result1 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr1, len1));
+            variant2 = result1;
+            break;
+          }
+          default: {
+            throw new TypeError('invalid variant discriminant for option');
+          }
+        }
+        _debugLog('[iface="demangle", function="demangle"][Instruction::Return]', {
+          funcName: 'demangle',
+          paramCount: 1,
+          async: false,
+          postReturn: true
+        });
+        task.resolve([variant2]);
+        const retCopy = variant2;
+        
+        let cstate = getOrCreateAsyncState(0);
+        cstate.mayLeave = false;
+        postReturn1(ret);
+        cstate.mayLeave = true;
+        task.exit();
+        return retCopy;
+        
+        
+      } catch (err) {
+        if (!task.isResolvedState()) {
+          task.setErrored(err);
+          task.reject(err);
+        }
+        if (!task.isExited()) { task.exit({ skipExclusiveLockCheck: true }); }
+        throw err;
+      }
+    },
+  });
+  
+}
+let waveFormat;
+
+function format(arg0, arg1) {
+  
+  const hostProvided = false;
+  getOrCreateAsyncState(0).throwIfTrapped();
+  
+  const [task, _wasm_call_currentTaskID] = createNewCurrentTask({
+    componentIdx: 0,
+    isAsync: false,
+    isManualAsync: false,
+    preserveFutureResult: false,
+    entryFnName: 'waveFormat',
+    getCallbackFn: () => null,
+    callbackFnName: null,
+    errHandling: 'throw-result-err',
+    callingWasmExport: true,
+  });
+  task.setCalleeIsAsync(false);
+  task.setFuncTypeIsAsync(false);
+  task.setReturnResultTypeIdx(20);
+  
+  const started = task.enterSync();
+  CURRENT_TASK_MAY_BLOCK.value = task.mayBlock() ? 1 : 0;
+  
+  if (0!== null) {
+    task.setReturnMemoryIdx(0);
+    task.setReturnMemory((() => memory0)());
+  }
+  
+  
+  return _withGlobalCurrentTaskMeta({
+    taskID: task.id(),
+    componentIdx: task.componentIdx(),
+    fn: () => {
+      try {
+        
+        var vec16 = arg0;
+        var len16 = vec16.length;
+        var result16 = realloc0(0, 0, 4, len16 * 20);
+        if (result16 < 0 || len16 < 0 || len16 > 13421772 || result16 > memory0.buffer.byteLength || len16 > Math.floor((memory0.buffer.byteLength - result16) / 20)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+        for (let i = 0; i < vec16.length; i++) {
+          const e = vec16[i];
+          const base = result16 + i * 20;var variant15 = e;
+          switch (variant15.tag) {
+            case 'bool': {
+              dataView(memory0).setInt8((base) + 0, 0, true);
+              break;
+            }
+            case 's8': {
+              dataView(memory0).setInt8((base) + 0, 1, true);
+              break;
+            }
+            case 's16': {
+              dataView(memory0).setInt8((base) + 0, 2, true);
+              break;
+            }
+            case 's32': {
+              dataView(memory0).setInt8((base) + 0, 3, true);
+              break;
+            }
+            case 's64': {
+              dataView(memory0).setInt8((base) + 0, 4, true);
+              break;
+            }
+            case 'u8': {
+              dataView(memory0).setInt8((base) + 0, 5, true);
+              break;
+            }
+            case 'u16': {
+              dataView(memory0).setInt8((base) + 0, 6, true);
+              break;
+            }
+            case 'u32': {
+              dataView(memory0).setInt8((base) + 0, 7, true);
+              break;
+            }
+            case 'u64': {
+              dataView(memory0).setInt8((base) + 0, 8, true);
+              break;
+            }
+            case 'f32': {
+              dataView(memory0).setInt8((base) + 0, 9, true);
+              break;
+            }
+            case 'f64': {
+              dataView(memory0).setInt8((base) + 0, 10, true);
+              break;
+            }
+            case 'char': {
+              dataView(memory0).setInt8((base) + 0, 11, true);
+              break;
+            }
+            case 'string': {
+              dataView(memory0).setInt8((base) + 0, 12, true);
+              break;
+            }
+            case 'list': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 13, true);
+              dataView(memory0).setInt32((base) + 4, toUint32(e), true);
+              break;
+            }
+            case 'record': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 14, true);
+              var vec2 = e;
+              var len2 = vec2.length;
+              var result2 = realloc0(0, 0, 4, len2 * 12);
+              if (result2 < 0 || len2 < 0 || len2 > 22369621 || result2 > memory0.buffer.byteLength || len2 > Math.floor((memory0.buffer.byteLength - result2) / 12)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+              for (let i = 0; i < vec2.length; i++) {
+                const e = vec2[i];
+                const base = result2 + i * 12;var [tuple0_0, tuple0_1] = e;
+                
+                var encodeRes = _utf8AllocateAndEncode(tuple0_0, realloc0, memory0);
+                var ptr1= encodeRes.ptr;
+                var len1 = encodeRes.len;
+                
+                dataView(memory0).setUint32((base) + 4, len1, true);
+                dataView(memory0).setUint32((base) + 0, ptr1, true);
+                dataView(memory0).setInt32((base) + 8, toUint32(tuple0_1), true);
+              }
+              dataView(memory0).setUint32((base) + 8, len2, true);
+              dataView(memory0).setUint32((base) + 4, result2, true);
+              break;
+            }
+            case 'tuple': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 15, true);
+              var val3 = e;
+              var len3 = val3.length;
+              var ptr3 = realloc0(0, 0, 4, len3 * 4);
+              
+              let valData3;
+              const valLenBytes3 = len3 * 4;
+              if (Array.isArray(val3)) {
+                // Regular array likely containing numbers, write values to memory
+                let offset = 0;
+                const dv3 = new DataView(memory0.buffer);
+                for (const v of val3) {
+                  _requireValidNumericPrimitive.bind(null, 'u32')(v);
+                  dv3.setUint32(ptr3+ offset, v, true);
+                  offset += 4;
+                }
+              } else {
+                // TypedArray / ArrayBuffer-like, direct copy
+                valData3 = new Uint8Array(val3.buffer || val3, val3.byteOffset, valLenBytes3);
+                const out3 = new Uint8Array(memory0.buffer, ptr3, valLenBytes3);
+                out3.set(valData3);
+              }
+              
+              dataView(memory0).setUint32((base) + 8, len3, true);
+              dataView(memory0).setUint32((base) + 4, ptr3, true);
+              break;
+            }
+            case 'variant': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 16, true);
+              var vec7 = e;
+              var len7 = vec7.length;
+              var result7 = realloc0(0, 0, 4, len7 * 16);
+              if (result7 < 0 || len7 < 0 || len7 > 16777215 || result7 > memory0.buffer.byteLength || len7 > Math.floor((memory0.buffer.byteLength - result7) / 16)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+              for (let i = 0; i < vec7.length; i++) {
+                const e = vec7[i];
+                const base = result7 + i * 16;var [tuple4_0, tuple4_1] = e;
+                
+                var encodeRes = _utf8AllocateAndEncode(tuple4_0, realloc0, memory0);
+                var ptr5= encodeRes.ptr;
+                var len5 = encodeRes.len;
+                
+                dataView(memory0).setUint32((base) + 4, len5, true);
+                dataView(memory0).setUint32((base) + 0, ptr5, true);
+                var variant6 = tuple4_1;
+                if (variant6 === null || variant6=== undefined) {
+                  dataView(memory0).setInt8((base) + 8, 0, true);
+                } else {
+                  const e = variant6;
+                  dataView(memory0).setInt8((base) + 8, 1, true);
+                  dataView(memory0).setInt32((base) + 12, toUint32(e), true);
+                }
+              }
+              dataView(memory0).setUint32((base) + 8, len7, true);
+              dataView(memory0).setUint32((base) + 4, result7, true);
+              break;
+            }
+            case 'enum': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 17, true);
+              var vec9 = e;
+              var len9 = vec9.length;
+              var result9 = realloc0(0, 0, 4, len9 * 8);
+              if (result9 < 0 || len9 < 0 || len9 > 33554431 || result9 > memory0.buffer.byteLength || len9 > Math.floor((memory0.buffer.byteLength - result9) / 8)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+              for (let i = 0; i < vec9.length; i++) {
+                const e = vec9[i];
+                const base = result9 + i * 8;
+                var encodeRes = _utf8AllocateAndEncode(e, realloc0, memory0);
+                var ptr8= encodeRes.ptr;
+                var len8 = encodeRes.len;
+                
+                dataView(memory0).setUint32((base) + 4, len8, true);
+                dataView(memory0).setUint32((base) + 0, ptr8, true);
+              }
+              dataView(memory0).setUint32((base) + 8, len9, true);
+              dataView(memory0).setUint32((base) + 4, result9, true);
+              break;
+            }
+            case 'option': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 18, true);
+              dataView(memory0).setInt32((base) + 4, toUint32(e), true);
+              break;
+            }
+            case 'result': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 19, true);
+              var [tuple10_0, tuple10_1] = e;
+              var variant11 = tuple10_0;
+              if (variant11 === null || variant11=== undefined) {
+                dataView(memory0).setInt8((base) + 4, 0, true);
+              } else {
+                const e = variant11;
+                dataView(memory0).setInt8((base) + 4, 1, true);
+                dataView(memory0).setInt32((base) + 8, toUint32(e), true);
+              }
+              var variant12 = tuple10_1;
+              if (variant12 === null || variant12=== undefined) {
+                dataView(memory0).setInt8((base) + 12, 0, true);
+              } else {
+                const e = variant12;
+                dataView(memory0).setInt8((base) + 12, 1, true);
+                dataView(memory0).setInt32((base) + 16, toUint32(e), true);
+              }
+              break;
+            }
+            case 'flags': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 20, true);
+              var vec14 = e;
+              var len14 = vec14.length;
+              var result14 = realloc0(0, 0, 4, len14 * 8);
+              if (result14 < 0 || len14 < 0 || len14 > 33554431 || result14 > memory0.buffer.byteLength || len14 > Math.floor((memory0.buffer.byteLength - result14) / 8)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+              for (let i = 0; i < vec14.length; i++) {
+                const e = vec14[i];
+                const base = result14 + i * 8;
+                var encodeRes = _utf8AllocateAndEncode(e, realloc0, memory0);
+                var ptr13= encodeRes.ptr;
+                var len13 = encodeRes.len;
+                
+                dataView(memory0).setUint32((base) + 4, len13, true);
+                dataView(memory0).setUint32((base) + 0, ptr13, true);
+              }
+              dataView(memory0).setUint32((base) + 8, len14, true);
+              dataView(memory0).setUint32((base) + 4, result14, true);
+              break;
+            }
+            case 'handle': {
+              dataView(memory0).setInt8((base) + 0, 21, true);
+              break;
+            }
+            default: {
+              throw new TypeError(`invalid variant tag value \`${JSON.stringify(variant15.tag)}\` (received \`${variant15}\`) specified for \`TypeNode\``);
+            }
+          }
+        }
+        var vec33 = arg1;
+        var len33 = vec33.length;
+        var result33 = realloc0(0, 0, 8, len33 * 24);
+        if (result33 < 0 || len33 < 0 || len33 > 11184810 || result33 > memory0.buffer.byteLength || len33 > Math.floor((memory0.buffer.byteLength - result33) / 24)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+        for (let i = 0; i < vec33.length; i++) {
+          const e = vec33[i];
+          const base = result33 + i * 24;var variant32 = e;
+          switch (variant32.tag) {
+            case 'bool': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 0, true);
+              dataView(memory0).setInt8((base) + 8, e ? 1 : 0, true);
+              break;
+            }
+            case 's8': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 1, true);
+              dataView(memory0).setInt8((base) + 8, toInt8(e), true);
+              break;
+            }
+            case 's16': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 2, true);
+              dataView(memory0).setInt16((base) + 8, toInt16(e), true);
+              break;
+            }
+            case 's32': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 3, true);
+              dataView(memory0).setInt32((base) + 8, toInt32(e), true);
+              break;
+            }
+            case 's64': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 4, true);
+              dataView(memory0).setBigInt64((base) + 8, toInt64(e), true);
+              break;
+            }
+            case 'u8': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 5, true);
+              dataView(memory0).setInt8((base) + 8, toUint8(e), true);
+              break;
+            }
+            case 'u16': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 6, true);
+              dataView(memory0).setInt16((base) + 8, toUint16(e), true);
+              break;
+            }
+            case 'u32': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 7, true);
+              dataView(memory0).setInt32((base) + 8, toUint32(e), true);
+              break;
+            }
+            case 'u64': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 8, true);
+              dataView(memory0).setBigInt64((base) + 8, toUint64(e), true);
+              break;
+            }
+            case 'f32': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 9, true);
+              dataView(memory0).setFloat32((base) + 8, +e, true);
+              break;
+            }
+            case 'f64': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 10, true);
+              dataView(memory0).setFloat64((base) + 8, +e, true);
+              break;
+            }
+            case 'char': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 11, true);
+              dataView(memory0).setInt32((base) + 8, validateHostChar(e), true);
+              break;
+            }
+            case 'string': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 12, true);
+              
+              var encodeRes = _utf8AllocateAndEncode(e, realloc0, memory0);
+              var ptr17= encodeRes.ptr;
+              var len17 = encodeRes.len;
+              
+              dataView(memory0).setUint32((base) + 12, len17, true);
+              dataView(memory0).setUint32((base) + 8, ptr17, true);
+              break;
+            }
+            case 'list': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 13, true);
+              var val18 = e;
+              var len18 = val18.length;
+              var ptr18 = realloc0(0, 0, 4, len18 * 4);
+              
+              let valData18;
+              const valLenBytes18 = len18 * 4;
+              if (Array.isArray(val18)) {
+                // Regular array likely containing numbers, write values to memory
+                let offset = 0;
+                const dv18 = new DataView(memory0.buffer);
+                for (const v of val18) {
+                  _requireValidNumericPrimitive.bind(null, 'u32')(v);
+                  dv18.setUint32(ptr18+ offset, v, true);
+                  offset += 4;
+                }
+              } else {
+                // TypedArray / ArrayBuffer-like, direct copy
+                valData18 = new Uint8Array(val18.buffer || val18, val18.byteOffset, valLenBytes18);
+                const out18 = new Uint8Array(memory0.buffer, ptr18, valLenBytes18);
+                out18.set(valData18);
+              }
+              
+              dataView(memory0).setUint32((base) + 12, len18, true);
+              dataView(memory0).setUint32((base) + 8, ptr18, true);
+              break;
+            }
+            case 'record': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 14, true);
+              var val19 = e;
+              var len19 = val19.length;
+              var ptr19 = realloc0(0, 0, 4, len19 * 4);
+              
+              let valData19;
+              const valLenBytes19 = len19 * 4;
+              if (Array.isArray(val19)) {
+                // Regular array likely containing numbers, write values to memory
+                let offset = 0;
+                const dv19 = new DataView(memory0.buffer);
+                for (const v of val19) {
+                  _requireValidNumericPrimitive.bind(null, 'u32')(v);
+                  dv19.setUint32(ptr19+ offset, v, true);
+                  offset += 4;
+                }
+              } else {
+                // TypedArray / ArrayBuffer-like, direct copy
+                valData19 = new Uint8Array(val19.buffer || val19, val19.byteOffset, valLenBytes19);
+                const out19 = new Uint8Array(memory0.buffer, ptr19, valLenBytes19);
+                out19.set(valData19);
+              }
+              
+              dataView(memory0).setUint32((base) + 12, len19, true);
+              dataView(memory0).setUint32((base) + 8, ptr19, true);
+              break;
+            }
+            case 'tuple': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 15, true);
+              var val20 = e;
+              var len20 = val20.length;
+              var ptr20 = realloc0(0, 0, 4, len20 * 4);
+              
+              let valData20;
+              const valLenBytes20 = len20 * 4;
+              if (Array.isArray(val20)) {
+                // Regular array likely containing numbers, write values to memory
+                let offset = 0;
+                const dv20 = new DataView(memory0.buffer);
+                for (const v of val20) {
+                  _requireValidNumericPrimitive.bind(null, 'u32')(v);
+                  dv20.setUint32(ptr20+ offset, v, true);
+                  offset += 4;
+                }
+              } else {
+                // TypedArray / ArrayBuffer-like, direct copy
+                valData20 = new Uint8Array(val20.buffer || val20, val20.byteOffset, valLenBytes20);
+                const out20 = new Uint8Array(memory0.buffer, ptr20, valLenBytes20);
+                out20.set(valData20);
+              }
+              
+              dataView(memory0).setUint32((base) + 12, len20, true);
+              dataView(memory0).setUint32((base) + 8, ptr20, true);
+              break;
+            }
+            case 'variant': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 16, true);
+              var [tuple21_0, tuple21_1] = e;
+              
+              var encodeRes = _utf8AllocateAndEncode(tuple21_0, realloc0, memory0);
+              var ptr22= encodeRes.ptr;
+              var len22 = encodeRes.len;
+              
+              dataView(memory0).setUint32((base) + 12, len22, true);
+              dataView(memory0).setUint32((base) + 8, ptr22, true);
+              var variant23 = tuple21_1;
+              if (variant23 === null || variant23=== undefined) {
+                dataView(memory0).setInt8((base) + 16, 0, true);
+              } else {
+                const e = variant23;
+                dataView(memory0).setInt8((base) + 16, 1, true);
+                dataView(memory0).setInt32((base) + 20, toUint32(e), true);
+              }
+              break;
+            }
+            case 'enum': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 17, true);
+              
+              var encodeRes = _utf8AllocateAndEncode(e, realloc0, memory0);
+              var ptr24= encodeRes.ptr;
+              var len24 = encodeRes.len;
+              
+              dataView(memory0).setUint32((base) + 12, len24, true);
+              dataView(memory0).setUint32((base) + 8, ptr24, true);
+              break;
+            }
+            case 'option': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 18, true);
+              var variant25 = e;
+              if (variant25 === null || variant25=== undefined) {
+                dataView(memory0).setInt8((base) + 8, 0, true);
+              } else {
+                const e = variant25;
+                dataView(memory0).setInt8((base) + 8, 1, true);
+                dataView(memory0).setInt32((base) + 12, toUint32(e), true);
+              }
+              break;
+            }
+            case 'result': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 19, true);
+              var variant28 = e;
+              switch (variant28.tag) {
+                case 'ok': {
+                  const e = variant28.val;
+                  dataView(memory0).setInt8((base) + 8, 0, true);
+                  var variant26 = e;
+                  if (variant26 === null || variant26=== undefined) {
+                    dataView(memory0).setInt8((base) + 12, 0, true);
+                  } else {
+                    const e = variant26;
+                    dataView(memory0).setInt8((base) + 12, 1, true);
+                    dataView(memory0).setInt32((base) + 16, toUint32(e), true);
+                  }
+                  
+                  break;
+                }
+                case 'err': {
+                  const e = variant28.val;
+                  dataView(memory0).setInt8((base) + 8, 1, true);
+                  var variant27 = e;
+                  if (variant27 === null || variant27=== undefined) {
+                    dataView(memory0).setInt8((base) + 12, 0, true);
+                  } else {
+                    const e = variant27;
+                    dataView(memory0).setInt8((base) + 12, 1, true);
+                    dataView(memory0).setInt32((base) + 16, toUint32(e), true);
+                  }
+                  
+                  break;
+                }
+                default: {
+                  _debugLog("ERROR: invalid value (expected result as object with 'tag' member)", { value: variant28, valueType: typeof variant28});
+                  throw new TypeError('invalid variant specified for result');
+                }
+              }
+              break;
+            }
+            case 'flags': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 20, true);
+              var vec30 = e;
+              var len30 = vec30.length;
+              var result30 = realloc0(0, 0, 4, len30 * 8);
+              if (result30 < 0 || len30 < 0 || len30 > 33554431 || result30 > memory0.buffer.byteLength || len30 > Math.floor((memory0.buffer.byteLength - result30) / 8)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+              for (let i = 0; i < vec30.length; i++) {
+                const e = vec30[i];
+                const base = result30 + i * 8;
+                var encodeRes = _utf8AllocateAndEncode(e, realloc0, memory0);
+                var ptr29= encodeRes.ptr;
+                var len29 = encodeRes.len;
+                
+                dataView(memory0).setUint32((base) + 4, len29, true);
+                dataView(memory0).setUint32((base) + 0, ptr29, true);
+              }
+              dataView(memory0).setUint32((base) + 12, len30, true);
+              dataView(memory0).setUint32((base) + 8, result30, true);
+              break;
+            }
+            case 'handle': {
+              const e = variant32.val;
+              dataView(memory0).setInt8((base) + 0, 21, true);
+              
+              var encodeRes = _utf8AllocateAndEncode(e, realloc0, memory0);
+              var ptr31= encodeRes.ptr;
+              var len31 = encodeRes.len;
+              
+              dataView(memory0).setUint32((base) + 12, len31, true);
+              dataView(memory0).setUint32((base) + 8, ptr31, true);
+              break;
+            }
+            default: {
+              throw new TypeError(`invalid variant tag value \`${JSON.stringify(variant32.tag)}\` (received \`${variant32}\`) specified for \`ValueNode\``);
+            }
+          }
+        }
+        _debugLog('[iface="local:bindgen/wave", function="format"][Instruction::CallWasm] enter', {
+          funcName: 'format',
+          paramCount: 4,
+          async: false,
+          postReturn: true,
+        });
+        
+        let ret;
+        
+        try {
+          ret =  _withGlobalCurrentTaskMeta({
+            taskID: task.id(),
+            componentIdx: task.componentIdx(),
+            fn: () => waveFormat(result16, len16, result33, len33),
+          });
+        } catch (err) {
+          
+          _debugLog('[Instruction::CallWasm] error during sync call', {
+            taskID: task.id(),
+            err,
+          });
+          getOrCreateAsyncState(0).markTrapped(err);
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+          
+        }
+        task.endFirstSlice();
+        
+        let variant36;
+        switch (dataView(memory0).getUint8(((ret >>> 0)) + 0, true)) {
+          case 0: {
+            var ptr34 = dataView(memory0).getUint32(((ret >>> 0)) + 4, true) >>> 0;
+            var len34 = dataView(memory0).getUint32(((ret >>> 0)) + 8, true);
+            var result34 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr34, len34));
+            variant36= {
+              tag: 'ok',
+              val: result34
+            };
+            break;
+          }
+          case 1: {
+            var ptr35 = dataView(memory0).getUint32(((ret >>> 0)) + 4, true) >>> 0;
+            var len35 = dataView(memory0).getUint32(((ret >>> 0)) + 8, true);
+            var result35 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr35, len35));
+            variant36= {
+              tag: 'err',
+              val: result35
+            };
+            break;
+          }
+          default: {
+            throw new TypeError('invalid variant discriminant for expected');
+          }
+        }
+        _debugLog('[iface="local:bindgen/wave", function="format"][Instruction::Return]', {
+          funcName: 'format',
+          paramCount: 1,
+          async: false,
+          postReturn: true
+        });
+        const retCopy = variant36;
+        task.resolve([retCopy.val]);
+        
+        let cstate = getOrCreateAsyncState(0);
+        cstate.mayLeave = false;
+        postReturn0(ret);
+        cstate.mayLeave = true;
+        task.exit();
+        
+        
+        
+        if (typeof retCopy === 'object' && retCopy.tag === 'err') {
+          throw new ComponentError(retCopy.val);
+        }
+        return retCopy.val;
+        
+        
+      } catch (err) {
+        if (!task.isResolvedState()) {
+          task.setErrored(err);
+          task.reject(err);
+        }
+        if (!task.isExited()) { task.exit({ skipExclusiveLockCheck: true }); }
+        throw err;
+      }
+    },
+  });
+  
+}
+let waveParse;
+
+function parse(arg0, arg1) {
+  
+  const hostProvided = false;
+  getOrCreateAsyncState(0).throwIfTrapped();
+  
+  const [task, _wasm_call_currentTaskID] = createNewCurrentTask({
+    componentIdx: 0,
+    isAsync: false,
+    isManualAsync: false,
+    preserveFutureResult: false,
+    entryFnName: 'waveParse',
+    getCallbackFn: () => null,
+    callbackFnName: null,
+    errHandling: 'throw-result-err',
+    callingWasmExport: true,
+  });
+  task.setCalleeIsAsync(false);
+  task.setFuncTypeIsAsync(false);
+  task.setReturnResultTypeIdx(28);
+  
+  const started = task.enterSync();
+  CURRENT_TASK_MAY_BLOCK.value = task.mayBlock() ? 1 : 0;
+  
+  if (0!== null) {
+    task.setReturnMemoryIdx(0);
+    task.setReturnMemory((() => memory0)());
+  }
+  
+  
+  return _withGlobalCurrentTaskMeta({
+    taskID: task.id(),
+    componentIdx: task.componentIdx(),
+    fn: () => {
+      try {
+        
+        var vec16 = arg0;
+        var len16 = vec16.length;
+        var result16 = realloc0(0, 0, 4, len16 * 20);
+        if (result16 < 0 || len16 < 0 || len16 > 13421772 || result16 > memory0.buffer.byteLength || len16 > Math.floor((memory0.buffer.byteLength - result16) / 20)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+        for (let i = 0; i < vec16.length; i++) {
+          const e = vec16[i];
+          const base = result16 + i * 20;var variant15 = e;
+          switch (variant15.tag) {
+            case 'bool': {
+              dataView(memory0).setInt8((base) + 0, 0, true);
+              break;
+            }
+            case 's8': {
+              dataView(memory0).setInt8((base) + 0, 1, true);
+              break;
+            }
+            case 's16': {
+              dataView(memory0).setInt8((base) + 0, 2, true);
+              break;
+            }
+            case 's32': {
+              dataView(memory0).setInt8((base) + 0, 3, true);
+              break;
+            }
+            case 's64': {
+              dataView(memory0).setInt8((base) + 0, 4, true);
+              break;
+            }
+            case 'u8': {
+              dataView(memory0).setInt8((base) + 0, 5, true);
+              break;
+            }
+            case 'u16': {
+              dataView(memory0).setInt8((base) + 0, 6, true);
+              break;
+            }
+            case 'u32': {
+              dataView(memory0).setInt8((base) + 0, 7, true);
+              break;
+            }
+            case 'u64': {
+              dataView(memory0).setInt8((base) + 0, 8, true);
+              break;
+            }
+            case 'f32': {
+              dataView(memory0).setInt8((base) + 0, 9, true);
+              break;
+            }
+            case 'f64': {
+              dataView(memory0).setInt8((base) + 0, 10, true);
+              break;
+            }
+            case 'char': {
+              dataView(memory0).setInt8((base) + 0, 11, true);
+              break;
+            }
+            case 'string': {
+              dataView(memory0).setInt8((base) + 0, 12, true);
+              break;
+            }
+            case 'list': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 13, true);
+              dataView(memory0).setInt32((base) + 4, toUint32(e), true);
+              break;
+            }
+            case 'record': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 14, true);
+              var vec2 = e;
+              var len2 = vec2.length;
+              var result2 = realloc0(0, 0, 4, len2 * 12);
+              if (result2 < 0 || len2 < 0 || len2 > 22369621 || result2 > memory0.buffer.byteLength || len2 > Math.floor((memory0.buffer.byteLength - result2) / 12)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+              for (let i = 0; i < vec2.length; i++) {
+                const e = vec2[i];
+                const base = result2 + i * 12;var [tuple0_0, tuple0_1] = e;
+                
+                var encodeRes = _utf8AllocateAndEncode(tuple0_0, realloc0, memory0);
+                var ptr1= encodeRes.ptr;
+                var len1 = encodeRes.len;
+                
+                dataView(memory0).setUint32((base) + 4, len1, true);
+                dataView(memory0).setUint32((base) + 0, ptr1, true);
+                dataView(memory0).setInt32((base) + 8, toUint32(tuple0_1), true);
+              }
+              dataView(memory0).setUint32((base) + 8, len2, true);
+              dataView(memory0).setUint32((base) + 4, result2, true);
+              break;
+            }
+            case 'tuple': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 15, true);
+              var val3 = e;
+              var len3 = val3.length;
+              var ptr3 = realloc0(0, 0, 4, len3 * 4);
+              
+              let valData3;
+              const valLenBytes3 = len3 * 4;
+              if (Array.isArray(val3)) {
+                // Regular array likely containing numbers, write values to memory
+                let offset = 0;
+                const dv3 = new DataView(memory0.buffer);
+                for (const v of val3) {
+                  _requireValidNumericPrimitive.bind(null, 'u32')(v);
+                  dv3.setUint32(ptr3+ offset, v, true);
+                  offset += 4;
+                }
+              } else {
+                // TypedArray / ArrayBuffer-like, direct copy
+                valData3 = new Uint8Array(val3.buffer || val3, val3.byteOffset, valLenBytes3);
+                const out3 = new Uint8Array(memory0.buffer, ptr3, valLenBytes3);
+                out3.set(valData3);
+              }
+              
+              dataView(memory0).setUint32((base) + 8, len3, true);
+              dataView(memory0).setUint32((base) + 4, ptr3, true);
+              break;
+            }
+            case 'variant': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 16, true);
+              var vec7 = e;
+              var len7 = vec7.length;
+              var result7 = realloc0(0, 0, 4, len7 * 16);
+              if (result7 < 0 || len7 < 0 || len7 > 16777215 || result7 > memory0.buffer.byteLength || len7 > Math.floor((memory0.buffer.byteLength - result7) / 16)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+              for (let i = 0; i < vec7.length; i++) {
+                const e = vec7[i];
+                const base = result7 + i * 16;var [tuple4_0, tuple4_1] = e;
+                
+                var encodeRes = _utf8AllocateAndEncode(tuple4_0, realloc0, memory0);
+                var ptr5= encodeRes.ptr;
+                var len5 = encodeRes.len;
+                
+                dataView(memory0).setUint32((base) + 4, len5, true);
+                dataView(memory0).setUint32((base) + 0, ptr5, true);
+                var variant6 = tuple4_1;
+                if (variant6 === null || variant6=== undefined) {
+                  dataView(memory0).setInt8((base) + 8, 0, true);
+                } else {
+                  const e = variant6;
+                  dataView(memory0).setInt8((base) + 8, 1, true);
+                  dataView(memory0).setInt32((base) + 12, toUint32(e), true);
+                }
+              }
+              dataView(memory0).setUint32((base) + 8, len7, true);
+              dataView(memory0).setUint32((base) + 4, result7, true);
+              break;
+            }
+            case 'enum': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 17, true);
+              var vec9 = e;
+              var len9 = vec9.length;
+              var result9 = realloc0(0, 0, 4, len9 * 8);
+              if (result9 < 0 || len9 < 0 || len9 > 33554431 || result9 > memory0.buffer.byteLength || len9 > Math.floor((memory0.buffer.byteLength - result9) / 8)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+              for (let i = 0; i < vec9.length; i++) {
+                const e = vec9[i];
+                const base = result9 + i * 8;
+                var encodeRes = _utf8AllocateAndEncode(e, realloc0, memory0);
+                var ptr8= encodeRes.ptr;
+                var len8 = encodeRes.len;
+                
+                dataView(memory0).setUint32((base) + 4, len8, true);
+                dataView(memory0).setUint32((base) + 0, ptr8, true);
+              }
+              dataView(memory0).setUint32((base) + 8, len9, true);
+              dataView(memory0).setUint32((base) + 4, result9, true);
+              break;
+            }
+            case 'option': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 18, true);
+              dataView(memory0).setInt32((base) + 4, toUint32(e), true);
+              break;
+            }
+            case 'result': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 19, true);
+              var [tuple10_0, tuple10_1] = e;
+              var variant11 = tuple10_0;
+              if (variant11 === null || variant11=== undefined) {
+                dataView(memory0).setInt8((base) + 4, 0, true);
+              } else {
+                const e = variant11;
+                dataView(memory0).setInt8((base) + 4, 1, true);
+                dataView(memory0).setInt32((base) + 8, toUint32(e), true);
+              }
+              var variant12 = tuple10_1;
+              if (variant12 === null || variant12=== undefined) {
+                dataView(memory0).setInt8((base) + 12, 0, true);
+              } else {
+                const e = variant12;
+                dataView(memory0).setInt8((base) + 12, 1, true);
+                dataView(memory0).setInt32((base) + 16, toUint32(e), true);
+              }
+              break;
+            }
+            case 'flags': {
+              const e = variant15.val;
+              dataView(memory0).setInt8((base) + 0, 20, true);
+              var vec14 = e;
+              var len14 = vec14.length;
+              var result14 = realloc0(0, 0, 4, len14 * 8);
+              if (result14 < 0 || len14 < 0 || len14 > 33554431 || result14 > memory0.buffer.byteLength || len14 > Math.floor((memory0.buffer.byteLength - result14) / 8)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+              for (let i = 0; i < vec14.length; i++) {
+                const e = vec14[i];
+                const base = result14 + i * 8;
+                var encodeRes = _utf8AllocateAndEncode(e, realloc0, memory0);
+                var ptr13= encodeRes.ptr;
+                var len13 = encodeRes.len;
+                
+                dataView(memory0).setUint32((base) + 4, len13, true);
+                dataView(memory0).setUint32((base) + 0, ptr13, true);
+              }
+              dataView(memory0).setUint32((base) + 8, len14, true);
+              dataView(memory0).setUint32((base) + 4, result14, true);
+              break;
+            }
+            case 'handle': {
+              dataView(memory0).setInt8((base) + 0, 21, true);
+              break;
+            }
+            default: {
+              throw new TypeError(`invalid variant tag value \`${JSON.stringify(variant15.tag)}\` (received \`${variant15}\`) specified for \`TypeNode\``);
+            }
+          }
+        }
+        
+        var encodeRes = _utf8AllocateAndEncode(arg1, realloc0, memory0);
+        var ptr17= encodeRes.ptr;
+        var len17 = encodeRes.len;
+        
+        _debugLog('[iface="local:bindgen/wave", function="parse"][Instruction::CallWasm] enter', {
+          funcName: 'parse',
+          paramCount: 4,
+          async: false,
+          postReturn: true,
+        });
+        
+        let ret;
+        
+        try {
+          ret =  _withGlobalCurrentTaskMeta({
+            taskID: task.id(),
+            componentIdx: task.componentIdx(),
+            fn: () => waveParse(result16, len16, ptr17, len17),
+          });
+        } catch (err) {
+          
+          _debugLog('[Instruction::CallWasm] error during sync call', {
+            taskID: task.id(),
+            err,
+          });
+          getOrCreateAsyncState(0).markTrapped(err);
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+          
+        }
+        task.endFirstSlice();
+        
+        let variant36;
+        switch (dataView(memory0).getUint8(((ret >>> 0)) + 0, true)) {
+          case 0: {
+            var len34 = dataView(memory0).getUint32(((ret >>> 0)) + 8, true);
+            var base34 = dataView(memory0).getUint32(((ret >>> 0)) + 4, true) >>> 0;
+            if (base34 < 0 || len34 < 0 || len34 > 11184810 || base34 > memory0.buffer.byteLength || len34 > Math.floor((memory0.buffer.byteLength - base34) / 24)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+            if (base34 % 8 !== 0) throw new TypeError(`list pointer [${base34}] is not aligned to 8`);
+            var result34 = [];
+            for (let i = 0; i < len34; i++) {
+              const base = base34 + i * 24;
+              let variant33;
+              switch (dataView(memory0).getUint8((base) + 0, true)) {
+                case 0: {
+                  var bool18 = dataView(memory0).getUint8((base) + 8, true);
+                  variant33= {
+                    tag: 'bool',
+                    val: bool18 == 0 ? false : (bool18 == 1 ? true : throwInvalidBool())
+                  };
+                  break;
+                }
+                case 1: {
+                  variant33= {
+                    tag: 's8',
+                    val: clampGuest(dataView(memory0).getInt8((base) + 8, true), -128, 127)
+                  };
+                  break;
+                }
+                case 2: {
+                  variant33= {
+                    tag: 's16',
+                    val: clampGuest(dataView(memory0).getInt16((base) + 8, true), -32768, 32767)
+                  };
+                  break;
+                }
+                case 3: {
+                  variant33= {
+                    tag: 's32',
+                    val: dataView(memory0).getInt32((base) + 8, true)
+                  };
+                  break;
+                }
+                case 4: {
+                  variant33= {
+                    tag: 's64',
+                    val: dataView(memory0).getBigInt64((base) + 8, true)
+                  };
+                  break;
+                }
+                case 5: {
+                  variant33= {
+                    tag: 'u8',
+                    val: clampGuest(dataView(memory0).getUint8((base) + 8, true), 0, 255)
+                  };
+                  break;
+                }
+                case 6: {
+                  variant33= {
+                    tag: 'u16',
+                    val: clampGuest(dataView(memory0).getUint16((base) + 8, true), 0, 65535)
+                  };
+                  break;
+                }
+                case 7: {
+                  variant33= {
+                    tag: 'u32',
+                    val: dataView(memory0).getInt32((base) + 8, true) >>> 0
+                  };
+                  break;
+                }
+                case 8: {
+                  variant33= {
+                    tag: 'u64',
+                    val: BigInt.asUintN(64, BigInt(dataView(memory0).getBigInt64((base) + 8, true)))
+                  };
+                  break;
+                }
+                case 9: {
+                  variant33= {
+                    tag: 'f32',
+                    val: dataView(memory0).getFloat32((base) + 8, true)
+                  };
+                  break;
+                }
+                case 10: {
+                  variant33= {
+                    tag: 'f64',
+                    val: dataView(memory0).getFloat64((base) + 8, true)
+                  };
+                  break;
+                }
+                case 11: {
+                  variant33= {
+                    tag: 'char',
+                    val: validateGuestChar(dataView(memory0).getInt32((base) + 8, true))
+                  };
+                  break;
+                }
+                case 12: {
+                  var ptr19 = dataView(memory0).getUint32((base) + 8, true) >>> 0;
+                  var len19 = dataView(memory0).getUint32((base) + 12, true);
+                  var result19 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr19, len19));
+                  variant33= {
+                    tag: 'string',
+                    val: result19
+                  };
+                  break;
+                }
+                case 13: {
+                  var ptr20 = dataView(memory0).getUint32((base) + 8, true) >>> 0;
+                  var len20 = dataView(memory0).getUint32((base) + 12, true);
+                  if (ptr20 < 0 || len20 < 0 || len20 > 67108863 || ptr20 > memory0.buffer.byteLength || len20 > Math.floor((memory0.buffer.byteLength - ptr20) / 4)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+                  if (ptr20 % 4 !== 0) throw new TypeError(`list pointer [${ptr20}] is not aligned to 4`);
+                  var result20 = new Uint32Array(memory0.buffer.slice(ptr20, ptr20 + len20 * 4));
+                  variant33= {
+                    tag: 'list',
+                    val: result20
+                  };
+                  break;
+                }
+                case 14: {
+                  var ptr21 = dataView(memory0).getUint32((base) + 8, true) >>> 0;
+                  var len21 = dataView(memory0).getUint32((base) + 12, true);
+                  if (ptr21 < 0 || len21 < 0 || len21 > 67108863 || ptr21 > memory0.buffer.byteLength || len21 > Math.floor((memory0.buffer.byteLength - ptr21) / 4)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+                  if (ptr21 % 4 !== 0) throw new TypeError(`list pointer [${ptr21}] is not aligned to 4`);
+                  var result21 = new Uint32Array(memory0.buffer.slice(ptr21, ptr21 + len21 * 4));
+                  variant33= {
+                    tag: 'record',
+                    val: result21
+                  };
+                  break;
+                }
+                case 15: {
+                  var ptr22 = dataView(memory0).getUint32((base) + 8, true) >>> 0;
+                  var len22 = dataView(memory0).getUint32((base) + 12, true);
+                  if (ptr22 < 0 || len22 < 0 || len22 > 67108863 || ptr22 > memory0.buffer.byteLength || len22 > Math.floor((memory0.buffer.byteLength - ptr22) / 4)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+                  if (ptr22 % 4 !== 0) throw new TypeError(`list pointer [${ptr22}] is not aligned to 4`);
+                  var result22 = new Uint32Array(memory0.buffer.slice(ptr22, ptr22 + len22 * 4));
+                  variant33= {
+                    tag: 'tuple',
+                    val: result22
+                  };
+                  break;
+                }
+                case 16: {
+                  var ptr23 = dataView(memory0).getUint32((base) + 8, true) >>> 0;
+                  var len23 = dataView(memory0).getUint32((base) + 12, true);
+                  var result23 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr23, len23));
+                  let variant24;
+                  switch (dataView(memory0).getUint8((base) + 16, true)) {
+                    case 0: {
+                      variant24 = undefined;
+                      break;
+                    }
+                    case 1: {
+                      variant24 = dataView(memory0).getInt32((base) + 20, true) >>> 0;
+                      break;
+                    }
+                    default: {
+                      throw new TypeError('invalid variant discriminant for option');
+                    }
+                  }
+                  variant33= {
+                    tag: 'variant',
+                    val: [result23, variant24]
+                  };
+                  break;
+                }
+                case 17: {
+                  var ptr25 = dataView(memory0).getUint32((base) + 8, true) >>> 0;
+                  var len25 = dataView(memory0).getUint32((base) + 12, true);
+                  var result25 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr25, len25));
+                  variant33= {
+                    tag: 'enum',
+                    val: result25
+                  };
+                  break;
+                }
+                case 18: {
+                  let variant26;
+                  switch (dataView(memory0).getUint8((base) + 8, true)) {
+                    case 0: {
+                      variant26 = undefined;
+                      break;
+                    }
+                    case 1: {
+                      variant26 = dataView(memory0).getInt32((base) + 12, true) >>> 0;
+                      break;
+                    }
+                    default: {
+                      throw new TypeError('invalid variant discriminant for option');
+                    }
+                  }
+                  variant33= {
+                    tag: 'option',
+                    val: variant26
+                  };
+                  break;
+                }
+                case 19: {
+                  let variant29;
+                  switch (dataView(memory0).getUint8((base) + 8, true)) {
+                    case 0: {
+                      let variant27;
+                      switch (dataView(memory0).getUint8((base) + 12, true)) {
+                        case 0: {
+                          variant27 = undefined;
+                          break;
+                        }
+                        case 1: {
+                          variant27 = dataView(memory0).getInt32((base) + 16, true) >>> 0;
+                          break;
+                        }
+                        default: {
+                          throw new TypeError('invalid variant discriminant for option');
+                        }
+                      }
+                      variant29= {
+                        tag: 'ok',
+                        val: variant27
+                      };
+                      break;
+                    }
+                    case 1: {
+                      let variant28;
+                      switch (dataView(memory0).getUint8((base) + 12, true)) {
+                        case 0: {
+                          variant28 = undefined;
+                          break;
+                        }
+                        case 1: {
+                          variant28 = dataView(memory0).getInt32((base) + 16, true) >>> 0;
+                          break;
+                        }
+                        default: {
+                          throw new TypeError('invalid variant discriminant for option');
+                        }
+                      }
+                      variant29= {
+                        tag: 'err',
+                        val: variant28
+                      };
+                      break;
+                    }
+                    default: {
+                      throw new TypeError('invalid variant discriminant for expected');
+                    }
+                  }
+                  variant33= {
+                    tag: 'result',
+                    val: variant29
+                  };
+                  break;
+                }
+                case 20: {
+                  var len31 = dataView(memory0).getUint32((base) + 12, true);
+                  var base31 = dataView(memory0).getUint32((base) + 8, true) >>> 0;
+                  if (base31 < 0 || len31 < 0 || len31 > 33554431 || base31 > memory0.buffer.byteLength || len31 > Math.floor((memory0.buffer.byteLength - base31) / 8)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
+                  if (base31 % 4 !== 0) throw new TypeError(`list pointer [${base31}] is not aligned to 4`);
+                  var result31 = [];
+                  for (let i = 0; i < len31; i++) {
+                    const base = base31 + i * 8;
+                    var ptr30 = dataView(memory0).getUint32((base) + 0, true) >>> 0;
+                    var len30 = dataView(memory0).getUint32((base) + 4, true);
+                    var result30 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr30, len30));
+                    result31.push(result30);
+                  }
+                  variant33= {
+                    tag: 'flags',
+                    val: result31
+                  };
+                  break;
+                }
+                case 21: {
+                  var ptr32 = dataView(memory0).getUint32((base) + 8, true) >>> 0;
+                  var len32 = dataView(memory0).getUint32((base) + 12, true);
+                  var result32 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr32, len32));
+                  variant33= {
+                    tag: 'handle',
+                    val: result32
+                  };
+                  break;
+                }
+                default: {
+                  throw new TypeError('invalid variant discriminant for ValueNode');
+                }
+              }
+              result34.push(variant33);
+            }
+            variant36= {
+              tag: 'ok',
+              val: result34
+            };
+            break;
+          }
+          case 1: {
+            var ptr35 = dataView(memory0).getUint32(((ret >>> 0)) + 4, true) >>> 0;
+            var len35 = dataView(memory0).getUint32(((ret >>> 0)) + 8, true);
+            var result35 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr35, len35));
+            variant36= {
+              tag: 'err',
+              val: result35
+            };
+            break;
+          }
+          default: {
+            throw new TypeError('invalid variant discriminant for expected');
+          }
+        }
+        _debugLog('[iface="local:bindgen/wave", function="parse"][Instruction::Return]', {
+          funcName: 'parse',
+          paramCount: 1,
+          async: false,
+          postReturn: true
+        });
+        const retCopy = variant36;
+        task.resolve([retCopy.val]);
+        
+        let cstate = getOrCreateAsyncState(0);
+        cstate.mayLeave = false;
+        postReturn2(ret);
         cstate.mayLeave = true;
         task.exit();
         
@@ -7548,7 +9063,26 @@ const $init = (() => {
       postReturn0Async = exports1['cabi_post_generate-ast'];
     }
     
+    postReturn1 = exports1.cabi_post_demangle;
+    
+    try {
+      postReturn1Async = WebAssembly.promising(exports1.cabi_post_demangle);
+    } catch(err) {
+      postReturn1Async = exports1.cabi_post_demangle;
+    }
+    
+    postReturn2 = exports1['cabi_post_local:bindgen/wave#parse'];
+    
+    try {
+      postReturn2Async = WebAssembly.promising(exports1['cabi_post_local:bindgen/wave#parse']);
+    } catch(err) {
+      postReturn2Async = exports1['cabi_post_local:bindgen/wave#parse'];
+    }
+    
     exports1GenerateAst = exports1['generate-ast'];
+    exports1Demangle = exports1.demangle;
+    waveFormat = exports1['local:bindgen/wave#format'];
+    waveParse = exports1['local:bindgen/wave#parse'];
   })();
   let promise, resolve, reject;
   function normalizeInstantiationError(e) {
@@ -7585,8 +9119,13 @@ const $init = (() => {
 })();
 
 await $init;
+const wave = {
+  format: format,
+  parse: parse,
+  
+};
 
-export { generateAst,  }
+export { wave, demangle, generateAst, wave as 'local:bindgen/wave',  }
 export const _util = {
   
 }

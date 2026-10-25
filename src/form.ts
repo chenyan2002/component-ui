@@ -8,7 +8,7 @@ import {
   BoolDraft, ByteEncoding, BytesDraft, CaseDraft, Draft, FieldsDraft, Giver, ListDraft, MAX_LIST_LENGTH, MockFactory, NEW_MOCK, OptDraft, TextDraft,
   bytesOf, instanceChoices, parseDraft, removeItem, resizeList, selectCase, selectedInstance, setEncoding, setSome, setTextItems,
 } from './draft';
-import { ResourceRegistry } from './resources';
+import { describeInstance, ResourceRegistry } from './resources';
 
 type Rendered = TemplateResult | typeof nothing;
 
@@ -179,7 +179,7 @@ class Render extends IDL.Visitor<RenderData, Rendered> {
       }}
     >
       ${mock ? html`<wa-option value=${NEW_MOCK}>${mockLabel}</wa-option>` : nothing}
-      ${instances.map((i, n) => html`<wa-option value=${i.id}>${labels[n]}</wa-option>`)}
+      ${instances.map((i, n) => html`<wa-option value=${i.id} title=${describeInstance(i)}>${labels[n]}</wa-option>`)}
     </wa-select>`;
   }
   // Checked for `some(T)`. A short value goes right of the checkbox; others go below it.

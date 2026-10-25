@@ -1,5 +1,76 @@
 package local:bindgen;
 
+// Reads and writes WAVE, the WebAssembly Value Encoding, with resource handles written as
+// `#label`. Types and values are lists of nodes, as WIT types can't be recursive: a node refers to
+// the nodes it contains by index, and the last node is the type or value itself.
+interface wave {
+  variant type-node {
+    %bool,
+    %s8,
+    %s16,
+    %s32,
+    %s64,
+    %u8,
+    %u16,
+    %u32,
+    %u64,
+    %f32,
+    %f64,
+    %char,
+    %string,
+    %list(u32),
+    // Field names and types, in order.
+    %record(list<tuple<string, u32>>),
+    %tuple(list<u32>),
+    // Case names and payload types.
+    %variant(list<tuple<string, option<u32>>>),
+    %enum(list<string>),
+    %option(u32),
+    // The `ok` and `err` payload types.
+    %result(tuple<option<u32>, option<u32>>),
+    %flags(list<string>),
+    handle,
+  }
+
+  variant value-node {
+    %bool(bool),
+    %s8(s8),
+    %s16(s16),
+    %s32(s32),
+    %s64(s64),
+    %u8(u8),
+    %u16(u16),
+    %u32(u32),
+    %u64(u64),
+    %f32(f32),
+    %f64(f64),
+    %char(char),
+    %string(string),
+    %list(list<u32>),
+    // Field values, in the order of the type's fields.
+    %record(list<u32>),
+    %tuple(list<u32>),
+    // The case name and its payload.
+    %variant(tuple<string, option<u32>>),
+    %enum(string),
+    %option(option<u32>),
+    %result(result<option<u32>, option<u32>>),
+    // The names of the flags that are set.
+    %flags(list<string>),
+    // The label of a handle, e.g. `x-1` for `#x-1`.
+    handle(string),
+  }
+
+  // Writes a value of the type.
+  format: func(ty: list<type-node>, value: list<value-node>) -> result<string, string>;
+  // Reads a value of the type.
+  parse: func(ty: list<type-node>, text: string) -> result<list<value-node>, string>;
+}
+
 world bindgen {
   export generate-ast: func(component: list<u8>) -> result<string, string>;
+  export wave;
+  // The source-level name of a compiled function's symbol, e.g. `core::fmt::write` for Rust's
+  // `_ZN4core3fmt5write17h…E`, or `foo::bar(int)` for C++'s `_ZN3foo3barEi`; none for another.
+  export demangle: func(symbol: string) -> option<string>;
 }

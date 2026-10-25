@@ -1,7 +1,7 @@
 import { html, nothing } from 'lit';
 import * as WIT from './wit';
 import { CallTarget, ExportsContext } from './calls';
-import { qualifiedResource } from './host-resources';
+import { qualifiedResource } from './call-record';
 import './func-card';
 
 // Whether a function shows for the search, given its name and those of the sections it is in.

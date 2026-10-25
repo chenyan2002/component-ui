@@ -12,6 +12,30 @@ async function loadResource(page: Page, stub = '') {
   }
 }
 
+// Opens the console's settings.
+async function consoleSettings(page: Page) {
+  await page.getByRole('button', { name: 'Console settings' }).click();
+  const dialog = page.locator('console-panel wa-dialog.console-settings');
+  await expect(dialog).toHaveAttribute('open');
+  return dialog;
+}
+
+// Chooses how the console answers imports: 'none', 'careful' or 'eager', as the CLI's --defaults.
+async function setDefaults(page: Page, level: string) {
+  const dialog = await consoleSettings(page);
+  await dialog.locator(`wa-radio[value="${level}"]`).click();
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await expect(dialog).not.toHaveAttribute('open');
+}
+
+// Saves the console as an answers file, and returns its name and text.
+async function saveConsole(page: Page): Promise<[string, string]> {
+  const dialog = await consoleSettings(page);
+  const [download] = await Promise.all([page.waitForEvent('download'), dialog.getByRole('button', { name: 'Save logs' }).click()]);
+  const text = await (await download.createReadStream()).toArray().then((chunks) => Buffer.concat(chunks).toString('utf8'));
+  return [download.suggestedFilename(), text];
+}
+
 const s32 = (value: string) => async (prompt: ReturnType<typeof importPrompt>) => {
   await expect(prompt.locator('.sig-type').first()).toHaveText('s32');
   await prompt.locator('input').fill(value);
@@ -30,24 +54,26 @@ test('a missing host resource is mocked, and its calls ask for their results', a
   await expect(funcCard(page, 'consume').locator('wa-button', { hasText: 'Call' })).toHaveAttribute('disabled');
 
   // Constructors return a new mock and void methods return right away, without asking.
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('10'));
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('20'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('10'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('20'));
   await answerImport(page, 'imports/y.add(#y-1, 10)', newMock);
-  await answerImport(page, '#borrowed-y-2.get-a()', s32('30'));
-  await answerImport(page, '#borrowed-y-3.get-a()', s32('1'));
-  await answerImport(page, '#borrowed-y-4.get-a()', s32('2'));
-  await answerImport(page, '#borrowed-y-3.get-a()', s32('10'));
-  await answerImport(page, '#borrowed-y-4.get-a()', s32('20'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-2)', s32('30'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-3)', s32('1'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-4)', s32('2'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-3)', s32('10'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-4)', s32('20'));
   await answerImport(page, 'imports/y.add(#y-3, 20)', newMock);
   await answerImport(page, 'imports/y.add(#y-4, 30)', newMock);
-  await answerImport(page, '#borrowed-y-5.get-a()', s32('30'));
-  await answerImport(page, '#borrowed-y-6.get-a()', s32('50'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-5)', s32('30'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-6)', s32('50'));
   // The guest checks the values it reads back.
   await expectCall(page, 'exports.test-imports()', 'ok', 'ok');
   await expect(funcCard(page, 'consume').locator('wa-button', { hasText: 'Call' })).not.toHaveAttribute('disabled');
 
   await expect(entry.locator('.log-import').first().locator('.log-call')).toHaveText(/new imports\/y\(10\)\s*=\s*#y-1/);
-  await expect(entry.locator('.log-import', { hasText: '#borrowed-y-1.set-a(20)' }).locator('.log-import-output')).toHaveCount(0);
+  await expect(entry.locator('.log-import', { hasText: 'imports/y.set-a(#borrow-y-1, 20)' }).locator('.log-import-output')).toHaveCount(0);
+  // The guest drops the mock it got from `add`, which the console shows where it happened.
+  await expect(entry.locator('.log-import .log-call code', { hasText: /^drop #y-2$/ })).toHaveCount(1);
   await expect(row(page, 'y-2').locator('.instance-type')).toHaveText('y · mock');
   await expect(page.locator('resource-table tr.resource-row wa-tag'))
     .toHaveText(['moved', 'dropped', 'moved', 'moved', 'dropped', 'dropped']);
@@ -60,20 +86,20 @@ test('an import returns instances the host owns, not those the guest holds', asy
     await expect(choices(picker(prompt))).toHaveText(offered);
     await choose(picker(prompt), { label: pick });
   };
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('10'));
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('20'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('10'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('20'));
   // The guest moved y-1 into the call, so the host can hand it back.
   await answerImport(page, 'imports/y.add(#y-1, 10)', returns(['New mock y', '#y-1'], '#y-1'));
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('30'));
-  await answerImport(page, '#borrowed-y-2.get-a()', s32('1'));
-  await answerImport(page, '#borrowed-y-3.get-a()', s32('2'));
-  await answerImport(page, '#borrowed-y-2.get-a()', s32('10'));
-  await answerImport(page, '#borrowed-y-3.get-a()', s32('20'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('30'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-2)', s32('1'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-3)', s32('2'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-2)', s32('10'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-3)', s32('20'));
   // The guest still holds y-3, and dropped y-1.
   await answerImport(page, 'imports/y.add(#y-2, 20)', returns(['New mock y', '#y-2'], 'New mock y'));
   await answerImport(page, 'imports/y.add(#y-3, 30)', returns(['New mock y', '#y-2', '#y-3'], 'New mock y'));
-  await answerImport(page, '#borrowed-y-4.get-a()', s32('30'));
-  await answerImport(page, '#borrowed-y-5.get-a()', s32('50'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-4)', s32('30'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-5)', s32('50'));
   await expectCall(page, 'exports.test-imports()', 'ok', 'ok');
   await expect(page.locator('resource-table tr.resource-row wa-tag'))
     .toHaveText(['dropped', 'moved', 'moved', 'dropped', 'dropped']);
@@ -88,19 +114,19 @@ test('a partial stub only asks for what it leaves out', async ({ page }) => {
     '}',
   ].join('\n'));
   await call(funcCard(page, 'test-imports'));
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('10'));
-  await answerImport(page, '#borrowed-y-1.get-a()', s32('20'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('10'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('20'));
   // `Y.add` is implemented, so it doesn't ask; its result is a real `Y`.
-  await answerImport(page, '#borrowed-y-2.get-a()', s32('30'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-2)', s32('30'));
   await expect(row(page, 'y-2').locator('.instance-type')).toHaveText('y');
 });
 
 test('Trap fails the import, and with it the call', async ({ page }) => {
   await loadResource(page);
   await call(funcCard(page, 'test-imports'));
-  await answerImport(page, '#borrowed-y-1.get-a()', undefined, 'Trap');
-  await expectCall(page, 'exports.test-imports()', 'error', /Trapped at #borrowed-y-1\.get-a\(\)/);
-  await expect(callEntry(page, 'exports.test-imports()').locator('.log-import.error')).toContainText('#borrowed-y-1.get-a()');
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', undefined, 'Trap');
+  await expectCall(page, 'exports.test-imports()', 'error', /Trapped at imports\/y\.get-a\(#borrow-y-1\)/);
+  await expect(callEntry(page, 'exports.test-imports()').locator('.log-import.error')).toContainText('imports/y.get-a(#borrow-y-1)');
   await expect(importPrompt(page)).toHaveCount(0);
   // Like a trap in the guest, it leaves the instance unusable.
   await call(funcCard(page, 'test-imports'));
@@ -121,11 +147,11 @@ test('mock host resources stand in for the arguments a host would create', async
     await choose(picker(prompt), 'ok');
     await choose(picker(prompt, 1), { label: `New mock ${resource}` });
   };
-  await answerImport(page, '#borrowed-incoming-request-1.headers()', async (prompt) => {
+  await answerImport(page, 'wasi:http/types/incoming-request@0.2.3.headers(#borrow-incoming-request-1)', async (prompt) => {
     await expect(chosen(picker(prompt))).toHaveText('New mock fields');
   });
   // Items are added and removed one by one. A `list<u8>` is typed as text, sent as UTF-8, or as hex.
-  await answerImport(page, '#borrowed-fields-3.entries()', async (prompt) => {
+  await answerImport(page, 'wasi:http/types/fields@0.2.3.entries(#borrow-fields-3)', async (prompt) => {
     const add = prompt.locator('wa-button', { hasText: 'Add item' });
     await add.click();
     await add.click();
@@ -147,16 +173,16 @@ test('mock host resources stand in for the arguments a host would create', async
     await expect(chosen(picker(prompt))).toHaveText('hex');
     await bytes.fill('0x68,0x69');
   });
-  await expect(page.locator('.log-import').filter({ hasText: 'entries()' }).locator('.log-import-output code')).toHaveText('[("x-id", [104, 105])]');
-  await answerImport(page, '#borrowed-incoming-request-1.method()', (prompt) => choose(picker(prompt), 'get'));
-  await answerImport(page, '#borrowed-incoming-request-1.scheme()');
-  await answerImport(page, '#borrowed-incoming-request-1.authority()');
-  await answerImport(page, '#borrowed-incoming-request-1.path-with-query()', async (prompt) => {
+  await expect(page.locator('.log-import').filter({ hasText: 'fields@0.2.3.entries(' }).locator('.log-import-output code')).toHaveText('[("x-id", b"hi")]');
+  await answerImport(page, 'wasi:http/types/incoming-request@0.2.3.method(#borrow-incoming-request-1)', (prompt) => choose(picker(prompt), 'get'));
+  await answerImport(page, 'wasi:http/types/incoming-request@0.2.3.scheme(#borrow-incoming-request-1)');
+  await answerImport(page, 'wasi:http/types/incoming-request@0.2.3.authority(#borrow-incoming-request-1)');
+  await answerImport(page, 'wasi:http/types/incoming-request@0.2.3.path-with-query(#borrow-incoming-request-1)', async (prompt) => {
     await prompt.locator('wa-checkbox').click();
     await prompt.locator('wa-input input').fill('/');
   });
-  await answerImport(page, '#borrowed-incoming-request-1.consume()', selectMock('incoming-body'));
-  await answerImport(page, '#borrowed-incoming-body-4.stream()', selectMock('input-stream'));
+  await answerImport(page, 'wasi:http/types/incoming-request@0.2.3.consume(#borrow-incoming-request-1)', selectMock('incoming-body'));
+  await answerImport(page, 'wasi:http/types/incoming-body@0.2.3.stream(#borrow-incoming-body-4)', selectMock('input-stream'));
 
   // The guest builds a real response with the shim, and hands it to the mock outparam: the
   // host can't handle a mock, so that call shows in the console, with the response it sends.
@@ -168,4 +194,60 @@ test('mock host resources stand in for the arguments a host would create', async
   await expect(row(page, 'incoming-request-1').locator('.instance-type')).toHaveText('incoming-request · mock');
   await expect(row(page, 'response-outparam-2').locator('wa-tag')).toHaveText('moved');
   await expect(row(page, 'outgoing-response-7').locator('.instance-type')).toHaveText('outgoing-response');
+});
+
+test('Save writes the console as an answers file the CLI replays', async ({ page }) => {
+  await loadResource(page);
+  await call(funcCard(page, 'test-imports'));
+  for (const [label, answer] of [
+    ['imports/y.get-a(#borrow-y-1)', s32('10')],
+    ['imports/y.get-a(#borrow-y-1)', s32('20')],
+    ['imports/y.add(#y-1, 10)', newMock],
+  ] as const) {
+    await answerImport(page, label, answer);
+  }
+  // The guest waits on the next import, which the file has as an answer still to give.
+  await expect(importPrompt(page)).toBeVisible();
+  const [name, text] = await saveConsole(page);
+  expect(name).toBe('resource.answers.txt');
+  expect(text.split('\n').slice(3)).toEqual([
+    '> exports.test-imports()',
+    '//! new imports/y(10) = #y-1',
+    'imports/y.get-a(#borrow-y-1) = 10',
+    '//! imports/y.set-a(#borrow-y-1, 20)',
+    'imports/y.get-a(#borrow-y-1) = 20',
+    'imports/y.add(#y-1, 10) = #mock-y-2',
+    'imports/y.get-a(#borrow-y-2) = ?  // expects s32',
+    '',
+  ]);
+  expect(text).toMatch(/^\/\/! saved from component-ui's console; replay with: component-ui call resource\.wasm --answers resource\.answers\.txt$/m);
+  // Clear logs, in the settings too, empties the console.
+  const dialog = await consoleSettings(page);
+  await dialog.getByRole('button', { name: 'Clear logs' }).click();
+  await expect(page.locator('console-panel .console-empty')).toBeVisible();
+});
+
+test('defaults answer imports by the happy path, as the CLI does, and Save marks them', async ({ page }) => {
+  await loadResource(page);
+  await setDefaults(page, 'eager');
+  await call(funcCard(page, 'test-imports'));
+  // An s32 has no happy path, so it still asks.
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('10'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('20'));
+  // A y does: a new mock, though the host could return the #y-1 it was given, which Save notes.
+  const add = callEntry(page, 'exports.test-imports()').locator('.log-import', { hasText: 'imports/y.add(#y-1, 10)' });
+  await expect(add.locator('.log-import-output')).toHaveText('= #y-2');
+  await expect(add.locator('.log-default')).toHaveText('// default');
+  await expect(importPrompt(page)).toBeVisible();
+  const [, text] = await saveConsole(page);
+  expect(text).toContain('imports/y.add(#y-1, 10) = #mock-y-2  // default; instances of y: #y-1 (from new imports/y(10); moved into imports/y.add(#y-1, 10))\n');
+});
+
+test('careful defaults ask where there are instances to choose', async ({ page }) => {
+  await loadResource(page);
+  await setDefaults(page, 'careful');
+  await call(funcCard(page, 'test-imports'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('10'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('20'));
+  await answerImport(page, 'imports/y.add(#y-1, 10)', newMock);
 });
