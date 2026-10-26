@@ -16,7 +16,8 @@ changing an answer or rebuilding the component.
 component-ui --help
 ```
 
-If the command isn't found, build it from a checkout of component-ui (it needs Node 23 or later):
+If the command isn't found, build it from a checkout of component-ui (it needs Node 23 or later,
+and restarts itself with `--experimental-wasm-jspi` where Node needs that flag):
 
 ```sh
 npm install && npm run build:cli && npm link
@@ -35,7 +36,8 @@ npm install && npm run build:cli && npm link
    ```
 
 2. **Make the calls, saving the run.** Write each call as the output shows calls (see
-   [Writing calls and values](#writing-calls-and-values)), in single quotes:
+   [Writing calls and values](#writing-calls-and-values)), in single quotes. The calls run in
+   order on one instance of the component, so state carries over from one call to the next:
 
    ```sh
    component-ui call app.wasm 'new exports/x(5)' 'exports.test-imports()' --save run.txt
@@ -72,8 +74,10 @@ npm install && npm run build:cli && npm link
    stateful object, e.g. a getter returning what a setter set, implement it with `--imports`
    instead of answering each call (see [Options worth knowing](#options-worth-knowing)).
 
-4. **Review the defaults.** Imports past your last answer get the happy path: `ok` for results,
-   and new mocks for handles. `--save` marks these `// default`. Look at each one before relying
+4. **Review the defaults.** Imports past your last answer get the happy path where there is one:
+   `ok` for results, and records and tuples of those; a new mock for a handle, or the only
+   instance of a resource that can't be mocked. Other values, e.g. numbers, strings, options and
+   lists, stop the run for you to answer. `--save` marks these `// default`. Look at each one before relying
    on the run, especially those that list other instances:
 
    ```
