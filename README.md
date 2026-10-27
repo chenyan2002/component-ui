@@ -9,7 +9,7 @@ test a subcomponent before composing it with `wac`.
 
 ## Features
 
-- **Forms from WIT types.** Each WIT type maps to a UI widget, so you can enter valid arguments in the browser.
+- **UI widget from WIT types.** Each WIT type maps to a UI widget, so you can enter valid arguments structurally in the browser.
 - **Mock imports interactively.** Any import that hasn't been implemented
   asks for its return value in the console when the guest calls it, and the guest waits for
   your answer. This includes methods of imported/host resources, which can also be passed to exports as mock arguments.
@@ -51,15 +51,12 @@ ln -s "$PWD/skills/component-ui" ~/.claude/skills/component-ui
 1. **WIT → type AST.** [`crates/bindgen`](crates/bindgen) is a Rust component built on
    `wit-parser` and `wit-component`. It decodes the component's WIT and emits JavaScript that
    builds a type description (see [`src/wit.ts`](src/wit.ts)) of its imports and exports. It
-   also reads and writes values in WAVE, with proxy-component's fork of `wasm-wave`, and
-   demangles the function names of traps, with `rustc-demangle` and `cpp_demangle`. It is
-   compiled to `wasm32-wasip2` and transpiled with jco into [`src/obj`](src/obj), so it runs in
-   the browser too.
+   also reads and writes values in WAVE, with proxy-component's fork of `wasm-wave`.
 2. **Transpile.** The component itself is transpiled in the browser by
    [jco](https://github.com/bytecodealliance/jco), with JSPI enabled for imports and exports.
-3. **Instantiate.** WASI imports come from the preview2 shim; other imports come from your
-   JavaScript, with console prompts and mocks standing in for whatever is missing
-   ([`src/dialog.ts`](src/dialog.ts)).
+3. **Instantiate.** WASI imports come from the preview2 shim, unless it is turned off; other
+   imports come from your JavaScript, with console prompts and mocks standing in for whatever is
+   missing ([`src/dialog.ts`](src/dialog.ts)).
 4. **Render.** The UI is built with [Lit](https://lit.dev/) and
    [Web Awesome](https://webawesome.com/), and is essentially an interpreter over WIT types.
 
@@ -101,17 +98,7 @@ npm run build:bindgen
 
 ## Known limitations
 
-- A guest can wait for an import's answer only where jco lets it suspend, i.e. in a call of an
-  export that jco made async. Imports that ask can't be answered, in the UI or the CLI:
-  - from exported resource constructors and static functions, which are called synchronously,
-    as jco emits invalid async code for them (waiting for a new jco release);
-  - during instantiation, which isn't such a call;
-  - from a resource's destructor, which the component model runs synchronously: jco's JSPI
-    trampolines for imports are `async` functions, which return a promise even when the host
-    answers at once, and in a call that can't wait, jco traps with `cannot block a synchronous
-    task before returning`. The CLI, whose answers are all at hand, could avoid this by
-    transpiling without JSPI; a jco whose trampolines return the host's answer synchronously
-    when it isn't a promise would fix it for both.
+- Currently only supports p2 component. Deterministically replaying p3 component is future work.
 - A real host object's method that receives a mock argument isn't routed to a prompt, so it may still fail in the host code.
 - Calls are shown with their versioned interface, e.g. `wasi:http/types/fields@0.2.3.from-list(…)`,
   but the version isn't always the one the guest imported:
@@ -120,16 +107,17 @@ npm run build:bindgen
   - jco merges incompatible versions (e.g., 0.2.0 and 0.3.0) into one unversioned import, so
     a call can't be told apart by version: it is shown with, and a prompt asks for, the types
     of the first version that has the function, which may be the wrong form for the other.
-- jco's async imports hang on failure; the loader patches jco's output to rethrow, which may need updating when jco changes. (waiting for a new jco release)
+- `jco` bugs on JSPI
+  + Async imports hang on failure; the loader patches jco's output to rethrow, which may need updating when jco changes. (waiting for release)
+  + Exported resource constructors and static functions don't emit the correct code (waiting for release)
+  + Calling synchronous imports inside resource destructor and start function traps (waiting for review)
 - The CLI's exit code doesn't reflect a guest calling `wasi:cli/exit`; the call shows the error
   the shim throws. Exiting with the guest's status is future work.
 - The WIT shown, in the UI and by the CLI, is the one embedded in the component, which keeps the
   types but usually not the doc comments of the original WIT.
   Answering such imports well needs the original WIT files or the host's documentation;
   the skill tells agents to ask for them.
-- The CLI's answers files don't record the calls of imports implemented in JavaScript, nor WASI,
-  which the shim provides with real clocks and random numbers; a run can differ where the guest
-  depends on those. Deterministic WASI is future work.
+- The log files don't record the calls of imports implemented in JavaScript, nor WASI (when the shim is enabled).
 - While a call is waiting on an import, other calls are disabled, since the component instance
   can't be re-entered.
 - jco doesn't expose the handle index of a host-implemented resource, so the resource table shows

@@ -46,7 +46,7 @@ async function start(file: string, answer: (call: CallRecord, prompt: ImportProm
     };
   };
   const dialogs = new ImportDialogs(registry, host, component.imports, log);
-  const exports = await instantiate(nodePlatform, component.transpiled, {}, {
+  const exports = await instantiate(nodePlatform, component, {}, {
     stdout: (text) => output.push(text),
     stderr: (text) => output.push(text),
   }, {

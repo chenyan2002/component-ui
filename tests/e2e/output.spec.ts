@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { arg, call, expectCall, funcCard, loadExample, streamEntries } from './helpers';
+import { arg, call, callEntry, expectCall, funcCard, importPrompt, loadExample, streamEntries } from './helpers';
 
 test('stdout and stderr appear in the console', async ({ page }) => {
   await loadExample(page, 'printer.wasm');
@@ -28,4 +28,38 @@ test('stdout and stderr appear in the console', async ({ page }) => {
   await call(warn);
   await expect(streamEntries(page, 'stderr')).toHaveText(['warning: disk almost full']);
   await expect(page.locator('resource-table tr.resource-row', { hasText: 'wasi:cli/stderr@0.2.9.get-stderr()' })).toHaveCount(1);
+});
+
+test('without the WASI shim, WASI imports ask like any other, and the console logs them', async ({ page }) => {
+  await loadExample(page, 'printer.wasm');
+  const settings = async (check: boolean) => {
+    await page.getByRole('button', { name: 'Console settings' }).click();
+    const dialog = page.locator('console-panel wa-dialog.console-settings');
+    await expect(dialog).toHaveAttribute('open');
+    const wasi = dialog.locator('wa-switch.console-wasi-shim');
+    await expect(wasi).toHaveJSProperty('checked', !check);
+    await wasi.locator('[part="control"]').click();
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(dialog).not.toHaveAttribute('open');
+  };
+  await settings(false);
+  // The component restarts with WASI as imports the user can implement.
+  await expect(page.locator('#editImportsButton')).toBeVisible();
+  const greet = funcCard(page, 'greet');
+  await arg(greet, 0).locator('input').fill('Ada');
+  await call(greet);
+  const entry = callEntry(page, 'greet("Ada")');
+  await expect(entry.locator('.log-import .log-call code').first()).toHaveText('wasi:cli/stdout@0.2.9.get-stdout()');
+  await expect(importPrompt(page)).toBeVisible();
+  await expect(streamEntries(page, 'stdout')).toHaveCount(0);
+
+  // The choice is kept for the next component, until it is changed back.
+  await page.reload();
+  await loadExample(page, 'printer.wasm');
+  await expect(page.locator('#editImportsButton')).toBeVisible();
+  await settings(true);
+  await expect(page.locator('#editImportsButton')).toHaveCount(0);
+  await arg(funcCard(page, 'greet'), 0).locator('input').fill('Ada');
+  await call(funcCard(page, 'greet'));
+  await expect(streamEntries(page, 'stdout')).toHaveText(['Hello, Ada!\nsecond line']);
 });

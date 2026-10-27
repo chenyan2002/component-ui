@@ -1,5 +1,6 @@
 import { html, LitElement, nothing, PropertyValues, TemplateResult } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
+import { live } from 'lit/directives/live.js';
 import { writeScript } from './answers';
 import { answerPrompt, defaultAnswer, DEFAULTS_LEVELS, DefaultsLevel } from './answering';
 import { CallLog, ImportEntry, isOwnCall, LogItem, StreamEntry } from './call-log';
@@ -49,6 +50,9 @@ export class ConsolePanel extends LitElement {
   @property({ attribute: false }) accessor saveHeader: string[] | undefined = undefined;
   // The file name Save writes.
   @property() accessor saveName = 'answers.txt';
+  // Whether the preview2 shim provides WASI; the app owns it, and restarts the component with the
+  // `wasi-shim` event's `detail`.
+  @property({ type: Boolean }) accessor wasiShim = true;
   // How imports that ask are answered: by the user, or by the happy path where it has an answer,
   // as the CLI's `--defaults` does past its answers file.
   @state() accessor defaults: DefaultsLevel = storedDefaults();
@@ -129,7 +133,8 @@ export class ConsolePanel extends LitElement {
     localStorage.setItem(DEFAULTS_KEY, level);
   }
 
-  // How imports are answered, and saving or clearing the log; saving writes an answers file.
+  // How imports are answered, where WASI comes from, and saving or clearing the log; saving
+  // writes an answers file.
   private renderSettings() {
     return html`<wa-dialog
       label="Console settings"
@@ -151,6 +156,16 @@ export class ConsolePanel extends LitElement {
         A default answer is final, as the guest goes on with it at once. It is marked <code>// default</code>,
         and Save writes it, for the CLI to replay.
       </p>
+      <wa-switch class="console-wasi-shim" .checked=${live(this.wasiShim)} @change=${(e: Event) => {
+        this.dispatchEvent(new CustomEvent('wasi-shim', { detail: (e.target as HTMLInputElement).checked, bubbles: true }));
+      }}>
+        WASI from the shim
+        <div slot="hint" class="console-defaults-description">
+          The preview2 shim provides WASI with real clocks and random numbers, and shows stdout and stderr,
+          but its calls aren't logged or saved. Without it, WASI imports ask like any other, so every call
+          shows, and a saved run replays exactly. Changing it restarts the component.
+        </div>
+      </wa-switch>
       <div slot="footer" class="func-actions">
         <wa-button appearance="plain" ?disabled=${this.log.entries.length === 0} @click=${() => {
           this.clear();

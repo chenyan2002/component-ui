@@ -58,6 +58,9 @@ export interface LoadedComponent {
   interfaces: WIT.InterfaceClass[];
   // The imported interfaces, named like jco's import specifiers, possibly with a version.
   imports: WIT.InterfaceClass[];
+  // Whether the preview2 shim provides WASI. Without it, WASI imports are like any other: they
+  // ask, and are logged and recorded, so a run is deterministic.
+  wasiShim: boolean;
   // Imports the WASI shim doesn't provide; the user supplies them as JS source.
   customImports: string[];
 }
@@ -109,7 +112,7 @@ function rethrowAsyncImportErrors(transpiled: Transpiled) {
   file[1] = new TextEncoder().encode(js.replace(failed, '$1throw err;'));
 }
 
-export async function loadComponent(platform: Platform, component: Uint8Array): Promise<LoadedComponent> {
+export async function loadComponent(platform: Platform, component: Uint8Array, wasiShim = true): Promise<LoadedComponent> {
   const binding = await platform.importModule(generateAst(component));
   const { exports: interfaces, imports }: Record<'exports' | 'imports', WIT.InterfaceClass[]> = binding.Factory({ IDL: WIT });
   const transpiled = await generate(component, {
@@ -121,8 +124,13 @@ export async function loadComponent(platform: Platform, component: Uint8Array): 
     asyncMode: asyncMode(interfaces, imports),
   });
   rethrowAsyncImportErrors(transpiled);
-  const customImports = transpiled.imports.filter((pkg) => !isWasi(pkg));
-  return { transpiled, interfaces, imports, customImports };
+  return withWasiShim({ transpiled, interfaces, imports, wasiShim, customImports: [] }, wasiShim);
+}
+
+// The component with WASI from the shim, or without it, which needs no new transpilation.
+export function withWasiShim(component: LoadedComponent, wasiShim: boolean): LoadedComponent {
+  const customImports = component.transpiled.imports.filter((pkg) => !wasiShim || !isWasi(pkg));
+  return { ...component, wasiShim, customImports };
 }
 
 // jco checks at instantiation that every imported function exists. Stub the ones the user
@@ -151,7 +159,7 @@ export interface ImportHooks {
 
 export async function instantiate(
   platform: Platform,
-  transpiled: Transpiled,
+  { transpiled, customImports }: LoadedComponent,
   customImportCode: Record<string, string>,
   output: ComponentOutput,
   { complete, wrap }: ImportHooks,
@@ -159,7 +167,7 @@ export async function instantiate(
   const wasi = wasiImports(output);
   const imports: Record<string, unknown> = {};
   for (const pkg of transpiled.imports) {
-    const mod = isWasi(pkg)
+    const mod = !customImports.includes(pkg)
       ? complete(pkg, wasi[unversioned(pkg)] as object, true)
       : complete(pkg, await platform.importModule(customImportCode[pkg] ?? ''), false);
     imports[pkg] = wrap(pkg, mod);

@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import * as WIT from './wit';
 import { CallRecord, qualified, qualifiedResource, unversioned } from './call-record';
-import { CallLine, Divergence, parseAnswer, parseScript, Script, scriptLines, ScriptLine, writeScript } from './answers';
+import { AnswerLine, CallLine, Divergence, parseAnswer, parseScript, Script, scriptLines, ScriptLine, wasiNote, writeScript } from './answers';
 import { Answer, DEFAULTS_LEVELS, DefaultsLevel } from './answering';
 import { answeredValue, CallEntry, CallLog, ImportEntry, isOwnCall, StreamEntry } from './call-log';
 import { Driver, DriverEvent, Stopped } from './driver';
@@ -50,6 +50,10 @@ Options:
                           'answers.txt:12' or '12' for the first --answers file; by default,
                           from the last answer used
   --all                   Prints the whole run
+  --no-wasi-shim          Doesn't provide WASI from the preview2 shim, so that WASI imports ask,
+                          and are recorded, like any other: a run is then fully deterministic,
+                          and shows every WASI call, e.g. writes to stdout. Also for inspect and
+                          template
 In values, '#mock' is a new mock of a host resource, and '#mock-x-2' a new mock that is to get the
 id 'x-2', as --save writes them; a list<u8> of text may be written b"…".
 Exits with 0 when all calls ran, 2 when an import needs an answer, 3 when a call failed, e.g.
@@ -118,8 +122,8 @@ function defines(iface: WIT.InterfaceClass, resource: WIT.ResourceClass): boolea
   return resource._interface === iface._name;
 }
 
-async function inspect(file: string, print: (line: string) => void) {
-  const component = await loadComponent(nodePlatform, await readFile(file));
+async function inspect(file: string, wasiShim: boolean, print: (line: string) => void) {
+  const component = await loadComponent(nodePlatform, await readFile(file), wasiShim);
   const types = new Map<string, WIT.Type>();
   const section = (title: string, funcs: Array<[string, WIT.FuncClass, WIT.ResourceClass?]>) => {
     if (funcs.length > 0) {
@@ -303,10 +307,11 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
     }
     importCode[option.slice(0, eq)] = await readFile(option.slice(eq + 1), 'utf8');
   }
+  const wasiShim = !values['no-wasi-shim'];
   const header = [
-    `//! component-ui call ${file} --defaults ${level}`,
+    `//! component-ui call ${file} --defaults ${level}${wasiShim ? '' : ' --no-wasi-shim'}`,
     `//! imports implemented in JavaScript, whose calls aren't recorded: ${Object.keys(importCode).join(', ') || 'none'}`,
-    '//! WASI comes from the shim and isn\'t recorded; a run may differ where the guest uses it, e.g. its clocks or random numbers',
+    wasiNote(wasiShim),
   ];
   // What the file said of the answers from it, e.g. their comments, which --save writes again.
   const answers = new Map<CallRecord, Answer>();
@@ -315,9 +320,17 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
       answers.set(event.record, event.answer);
     }
     onEvent(event);
-  }, script, importCode);
+  }, script, importCode, wasiShim);
   for (const custom of Object.keys(importCode).filter((pkg) => !driver.component.customImports.includes(pkg))) {
     throw new UsageError(`The component imports no ${custom}; it imports ${driver.component.customImports.join(', ')}`);
+  }
+  // The answers for WASI the shim provides, e.g. of a run saved without it, would never be used.
+  const shimmed = driver.component.transpiled.imports.filter((pkg) => !driver.component.customImports.includes(pkg)).map(unversioned);
+  const ofShim = (line: ScriptLine): line is AnswerLine => line.kind === 'answer'
+    && shimmed.some((pkg) => line.callee.startsWith(pkg) && /^[/@.]/.test(line.callee.slice(pkg.length)));
+  const wasi = lines.find(ofShim);
+  if (wasi) {
+    throw new UsageError(`${wasi.source}: answers ${wasi.callee}, which the WASI shim provides; run with --no-wasi-shim`);
   }
   // The imports whose JavaScript wasn't called, as an argument was a mock.
   const skipped = new Set<string>();
@@ -392,8 +405,8 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
 }
 
 // Prints the JavaScript template for an imported package, as the UI's editor starts with it.
-async function template(file: string, pkg: string | undefined, print: (line: string) => void) {
-  const component = await loadComponent(nodePlatform, await readFile(file));
+async function template(file: string, pkg: string | undefined, wasiShim: boolean, print: (line: string) => void) {
+  const component = await loadComponent(nodePlatform, await readFile(file), wasiShim);
   if (!pkg || !component.customImports.includes(pkg)) {
     throw new UsageError(`Give a package to implement: ${component.customImports.join(', ') || 'the component imports none'}`);
   }
@@ -412,6 +425,7 @@ async function main(argv: string[], print: (line: string) => void = console.log)
       imports: { type: 'string', multiple: true },
       from: { type: 'string' },
       all: { type: 'boolean' },
+      'no-wasi-shim': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -424,11 +438,11 @@ async function main(argv: string[], print: (line: string) => void = console.log)
     throw new UsageError(command ? `Unknown command ${command}` : 'Give a command');
   }
   if (command === 'inspect') {
-    await inspect(file, print);
+    await inspect(file, !values['no-wasi-shim'], print);
     return 0;
   }
   if (command === 'template') {
-    await template(file, calls[0], print);
+    await template(file, calls[0], !values['no-wasi-shim'], print);
     return 0;
   }
   return callCommand(file, calls, values, print);

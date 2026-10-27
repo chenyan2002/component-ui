@@ -189,12 +189,18 @@ settings): it is the same format, so continue it with `--answers` as your own.
   didn't make, your function isn't called: the call asks for an answer instead, and its line says
   `~ your JavaScript … wasn't called, as an argument is a mock`.
 - `--from <line>` prints the run from the answer on that line of the file.
+- `--no-wasi-shim` doesn't provide WASI from the shim: WASI imports ask, and are recorded, like
+  any other, e.g. `wasi:cli/stdout@0.2.9.get-stdout() = #mock-output-stream-1` and the
+  `output-stream.write(…, b"…")` calls that follow, so a run replays exactly. Use it when a run
+  doesn't replay the same way, or to see what the guest does with WASI; expect many more answers,
+  e.g. `ok(4096)` for each `check-write`. Give it to `inspect` and `template` too, to see and
+  implement the WASI imports, and to every replay of a file saved with it.
 
 ## Limits
 
 - WASI comes from a shim, with an in-memory filesystem, and real clocks and random numbers. A
   guest that depends on those may not replay the same way, e.g. iterate a hash map in another
-  order.
+  order; `--no-wasi-shim` answers WASI from the file instead.
 - Imports the component calls while it is instantiated can't ask for answers.
 - Nor can imports a resource's destructor calls: the call fails with
   `cannot block a synchronous task before returning`, e.g. when the guest drops a resource whose

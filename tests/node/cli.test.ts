@@ -252,6 +252,42 @@ test('instances an answer or an argument could use are listed', () => {
   assert.match(owned.err, /instances of x: #x-1 \(from new exports\/x\(5\)\)/);
 });
 
+test('--no-wasi-shim answers WASI like any other import, and records it', () => {
+  const PRINTER = 'public/printer.wasm';
+  // WASI imports ask, and can be implemented in JavaScript.
+  const inspected = cli('inspect', PRINTER, '--no-wasi-shim').out;
+  assert.match(inspected, /^ {2}wasi:cli\/stdout@0\.2\.9\.get-stdout\(\) -> output-stream$/m);
+  assert.match(inspected, /^Packages to implement with --imports: .*wasi:cli\/stdout/m);
+  assert.doesNotMatch(cli('inspect', PRINTER).out, /get-stdout/);
+  const saved = join(dir, 'wasi.txt');
+  const first = cli('call', PRINTER, 'greet("Ada")', '--no-wasi-shim', '--save', saved);
+  assert.equal(first.code, 2);
+  // The writes to stdout are calls, not output.
+  assert.doesNotMatch(first.out, /\[stdout\]/);
+  for (let i = 0; i < 2; i++) {
+    fill(saved, 'ok(4096)');
+    assert.equal(cli('call', PRINTER, '--answers', saved, '--save', saved, '--no-wasi-shim').code, i === 0 ? 2 : 0);
+  }
+  assert.equal(readFileSync(saved, 'utf8'), [
+    '//! component-ui call public/printer.wasm --defaults eager --no-wasi-shim',
+    "//! imports implemented in JavaScript, whose calls aren't recorded: none",
+    "//! WASI doesn't come from the shim: its calls ask, and are recorded, like any other import's",
+    '> greet("Ada")  // = "greeted Ada"',
+    'wasi:cli/stdout@0.2.9.get-stdout() = #mock-output-stream-1  // default',
+    'wasi:io/streams/output-stream@0.2.9.check-write(#borrow-output-stream-1) = ok(4096)',
+    'wasi:io/streams/output-stream@0.2.9.write(#borrow-output-stream-1, b"Hello, Ada!\\n") = ok  // default',
+    'wasi:io/streams/output-stream@0.2.9.blocking-flush(#borrow-output-stream-1) = ok  // default',
+    'wasi:io/streams/output-stream@0.2.9.check-write(#borrow-output-stream-1) = ok(4096)',
+    'wasi:io/streams/output-stream@0.2.9.write(#borrow-output-stream-1, b"second line\\n") = ok  // default',
+    'wasi:io/streams/output-stream@0.2.9.blocking-flush(#borrow-output-stream-1) = ok  // default',
+    '',
+  ].join('\n'));
+  // With the shim, the file's answers for WASI would never be used.
+  const shim = cli('call', PRINTER, '--answers', saved);
+  assert.equal(shim.code, 1);
+  assert.match(shim.err, /wasi\.txt:5: answers wasi:cli\/stdout@0\.2\.9\.get-stdout, which the WASI shim provides; run with --no-wasi-shim/);
+});
+
 test('a list<u8> of text shows as b"…", and answers may use it', () => {
   const { out } = cli('call', 'public/kv-store.wasm', 'fastly:compute/http-req/request@0.1.0.new()',
     'fastly:compute/http-req/request@0.1.0.insert-header(#borrow-request-1, "x", b"MISS\\u{0}")');

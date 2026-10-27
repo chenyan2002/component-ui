@@ -137,12 +137,13 @@ export class Driver {
   }
 
   // Loads and instantiates a component. `importCode` implements imports in JavaScript, by
-  // package as jco names them, e.g. `docs:adder/add`; the others ask `answers`.
+  // package as jco names them, e.g. `docs:adder/add`; the others ask `answers`, including WASI's
+  // without `wasiShim`.
   public static async start(
     platform: Platform, bytes: Uint8Array, onEvent: (event: DriverEvent) => void, answers: AnswerSource,
-    importCode: Record<string, string> = {},
+    importCode: Record<string, string> = {}, wasiShim = true,
   ): Promise<Driver> {
-    const driver = new Driver(await loadComponent(platform, bytes), onEvent, answers);
+    const driver = new Driver(await loadComponent(platform, bytes, wasiShim), onEvent, answers);
     await driver.instantiate(platform, importCode);
     return driver;
   }
@@ -152,7 +153,7 @@ export class Driver {
     const host = new HostResources(registry, component.imports);
     host.log = (record) => this.logImport(record);
     this.dialogs = new ImportDialogs(registry, host, component.imports, (record) => this.logImport(record));
-    const exports = await instantiate(platform, component.transpiled, importCode, {
+    const exports = await instantiate(platform, component, importCode, {
       stdout: (text) => {
         this.log.print('stdout', text);
         this.onEvent({ type: 'output', stream: 'stdout', text });

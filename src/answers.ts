@@ -283,6 +283,14 @@ export class Script implements AnswerSource {
   }
 }
 
+// The header line of an answers file on where WASI came from: the shim, whose calls aren't
+// recorded, or the answers, like any other import's.
+export function wasiNote(wasiShim: boolean): string {
+  return wasiShim
+    ? '//! WASI comes from the shim and isn\'t recorded; a run may differ where the guest uses it, e.g. its clocks or random numbers'
+    : '//! WASI doesn\'t come from the shim: its calls ask, and are recorded, like any other import\'s';
+}
+
 // What an answers file says about a run, besides the log: where the answers came from, e.g. the
 // file's lines, with their comments, and the file's lines of the calls.
 export interface ScriptOptions {

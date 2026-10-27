@@ -3,7 +3,8 @@ import { customElement, query, state } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { keyed } from 'lit/directives/keyed.js';
 import { live } from 'lit/directives/live.js';
-import { instantiate, JSPI_SUPPORTED, loadComponent, LoadedComponent } from './loader';
+import { instantiate, JSPI_SUPPORTED, loadComponent, LoadedComponent, withWasiShim } from './loader';
+import { wasiNote } from './answers';
 import { browserPlatform, readWasm } from './platform-browser';
 import { CallActivity, ExportsContext } from './calls';
 import { ImportDialogs } from './dialog';
@@ -39,6 +40,15 @@ const EXAMPLE_IMPORT_CODE: Record<string, string> = {
     '}',
   ].join('\n'),
 };
+
+// Where the choice of WASI from the shim is kept.
+const WASI_SHIM_KEY = 'component-ui.wasi-shim';
+
+// The commented-out template of each import the user can implement, which implements nothing.
+function importTemplates(component: LoadedComponent): Record<string, string> {
+  const ifaces = byImportName(component.imports);
+  return Object.fromEntries(component.customImports.map((pkg) => [pkg, importTemplate(ifaces.get(unversioned(pkg)) ?? [])]));
+}
 
 interface Session {
   id: number;
@@ -83,6 +93,8 @@ export class ComponentApp extends LitElement {
   // What the exports are filtered by, and whether any of their interfaces is expanded.
   @state() accessor search = '';
   @state() accessor interfacesOpen = true;
+  // Whether the preview2 shim provides WASI, or WASI imports ask like any other.
+  @state() accessor wasiShim = localStorage.getItem(WASI_SHIM_KEY) !== 'false';
 
   // Guards against a slow load finishing after a newer one has started.
   private loadCounter = 0;
@@ -218,7 +230,7 @@ export class ComponentApp extends LitElement {
         </wa-split-panel>
       </div>
       <aside slot="end" class="pane console-pane">
-        <console-panel></console-panel>
+        <console-panel .wasiShim=${this.wasiShim} @wasi-shim=${(e: CustomEvent<boolean>) => this.setWasiShim(e.detail)}></console-panel>
       </aside>
     </wa-split-panel>`;
   }
@@ -364,7 +376,7 @@ export class ComponentApp extends LitElement {
     this.loading = true;
     this.loadError = undefined;
     try {
-      const component = await loadComponent(browserPlatform, await readWasm(file));
+      const component = await loadComponent(browserPlatform, await readWasm(file), this.wasiShim);
       if (id !== this.loadCounter) {
         return;
       }
@@ -372,8 +384,7 @@ export class ComponentApp extends LitElement {
       this.search = '';
       // The editors start with the example code, or a commented-out template, but the component
       // starts without any, so calling an import asks in the console.
-      const ifaces = byImportName(component.imports);
-      const templates = Object.fromEntries(component.customImports.map((pkg) => [pkg, importTemplate(ifaces.get(unversioned(pkg)) ?? [])]));
+      const templates = importTemplates(component);
       const importCode = Object.fromEntries(component.customImports.map((pkg) => [pkg, EXAMPLE_IMPORT_CODE[pkg] ?? templates[pkg]]));
       const session: Session = {
         id, name, fileName: typeof file === 'string' ? file : file.name, component, importCode, appliedCode: {}, templates,
@@ -397,6 +408,22 @@ export class ComponentApp extends LitElement {
     }
   }
 
+  // Restarts the component with WASI from the shim or not. The imports keep their JavaScript, as
+  // edited and as applied; those that become the user's start with their template.
+  private setWasiShim(wasiShim: boolean) {
+    this.wasiShim = wasiShim;
+    localStorage.setItem(WASI_SHIM_KEY, String(wasiShim));
+    const s = this.session;
+    if (!s || s.component.wasiShim === wasiShim) {
+      return;
+    }
+    s.component = withWasiShim(s.component, wasiShim);
+    s.templates = importTemplates(s.component);
+    const kept = (code: Record<string, string>) => Object.fromEntries(s.component.customImports.map((pkg) => [pkg, code[pkg] ?? s.templates[pkg]]));
+    s.importCode = kept(s.importCode);
+    this.instantiate(s, kept(s.appliedCode));
+  }
+
   // Starts the console's log of a new instance, which tells the answers' new mocks, and where
   // instances came from, for Save.
   private logInstance(panel: ConsolePanel, s: Session, registry: ResourceRegistry, code: Record<string, string>) {
@@ -406,9 +433,9 @@ export class ComponentApp extends LitElement {
     const implemented = Object.entries(code).filter(([pkg, text]) => text.trim() !== '' && text !== s.templates[pkg]).map(([pkg]) => pkg);
     panel.saveName = `${s.fileName.replace(/\.wasm$/, '')}.answers.txt`;
     panel.saveHeader = [
-      `//! saved from component-ui's console; replay with: component-ui call ${s.fileName} --answers ${panel.saveName}`,
+      `//! saved from component-ui's console; replay with: component-ui call ${s.fileName} --answers ${panel.saveName}${s.component.wasiShim ? '' : ' --no-wasi-shim'}`,
       `//! imports implemented in JavaScript, whose calls aren't recorded: ${implemented.join(', ') || 'none'}`,
-      '//! WASI comes from the shim and isn\'t recorded; a run may differ where the guest uses it, e.g. its clocks or random numbers',
+      wasiNote(s.component.wasiShim),
     ];
   }
 
@@ -432,7 +459,7 @@ export class ComponentApp extends LitElement {
       // Missing imports and mock resources ask in the console, and the guest waits for the answer.
       const dialogs = new ImportDialogs(registry, host, s.component.imports, (call) => this.consolePanel!.logImport(call));
       s.appliedCode = { ...code };
-      const exports = await instantiate(browserPlatform, s.component.transpiled, s.appliedCode, {
+      const exports = await instantiate(browserPlatform, s.component, s.appliedCode, {
         stdout: (text) => this.consolePanel?.print('stdout', text),
         stderr: (text) => this.consolePanel?.print('stderr', text),
       }, {
