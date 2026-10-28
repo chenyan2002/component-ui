@@ -77,6 +77,9 @@ export class HostResources {
   private readonly classes = new Map<WIT.ResourceClass, Function>();
   // Set while the UI calls the host directly, which isn't the guest using its imports.
   private direct = 0;
+  // Set while the host's own code runs for component-ui, e.g. reading the HTTP response a
+  // handler set to show it, which isn't a call at all.
+  private internal = 0;
   // Whose code implements each imported resource whose class the host has.
   private readonly code = new Map<WIT.ResourceClass, HostCode>();
   // Logs what the guest does with host instances that no import call shows: dropping its
@@ -106,6 +109,17 @@ export class HostResources {
       return call();
     } finally {
       this.direct--;
+    }
+  }
+
+  // Runs the host's own code for component-ui, e.g. to show what a call did; what it calls of
+  // the host is neither logged nor the guest's.
+  public internally<T>(call: () => T): T {
+    this.internal++;
+    try {
+      return this.callDirect(call);
+    } finally {
+      this.internal--;
     }
   }
 
@@ -265,7 +279,7 @@ export class HostResources {
   // logging it with its result as answered by that code, so that answers files record it. A
   // function without a result answers nothing; its call is logged, as one that didn't ask.
   public record(callee: Callee, func: WIT.FuncClass, key: string, args: any[], code: HostCode, invoke: () => any): any {
-    const line = this.log?.(describeCall(this.registry, 'import', callee, func, key, args));
+    const line = this.internal > 0 ? undefined : this.log?.(describeCall(this.registry, 'import', callee, func, key, args));
     if (!line) {
       return invoke();
     }
@@ -307,7 +321,7 @@ export class HostResources {
   // Runs a constructor of the host's own code, logging the call. It needs no answer: a replay
   // without that code constructs a mock.
   private construct(callee: Callee, func: WIT.FuncClass, args: any[], resource: WIT.ResourceClass, invoke: () => object): object {
-    const line = this.log?.(describeCall(this.registry, 'import', callee, func, 'constructor', args));
+    const line = this.internal > 0 ? undefined : this.log?.(describeCall(this.registry, 'import', callee, func, 'constructor', args));
     let obj: object;
     try {
       obj = invoke();

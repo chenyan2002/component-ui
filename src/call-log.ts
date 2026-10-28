@@ -158,7 +158,8 @@ export class CallLog {
         entry.prompt = undefined;
       }),
       detail: (text) => {
-        Object.assign(entry, { status: 'ok', detail: text, prompt: undefined });
+        // It returned nothing; the detail shows what it did instead.
+        Object.assign(entry, { status: 'ok', output: '', detail: text, prompt: undefined });
         this.changed(false);
       },
       note: (text) => {

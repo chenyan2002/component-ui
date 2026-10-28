@@ -228,7 +228,11 @@ function runLines(log: CallLog): RunLine[] {
             lines.push(...outputLines(child.stream, child.text, '  '));
           }
         } else if (isOwnCall(entry, child)) {
+          // Shown as the call itself, with what an import shows of it, e.g. the response it sent.
           own = child;
+          if (child.note) {
+            lines.push({ text: `  ~ ${child.note}` });
+          }
           if (child.prompt) {
             lines.push({ text: `  ? ${child.prompt.type.name}` });
           }
@@ -238,6 +242,7 @@ function runLines(log: CallLog): RunLine[] {
       });
       const by = own?.answered?.by;
       lines.push(...endingLines(entry, by, own && answeredValue(own)).map((text, i) => ({ text: `  ${text}`, source: i === 0 ? by?.source : undefined })));
+      lines.push(...(own?.detail === undefined ? [] : own.detail.split('\n').map((line) => ({ text: `  | ${line}` }))));
     }
   }
   return lines;
@@ -342,13 +347,12 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
   for (const custom of Object.keys(importCode).filter((pkg) => !driver.component.customImports.includes(pkg))) {
     throw new UsageError(`The component imports no ${custom}; it imports ${driver.component.customImports.join(', ')}`);
   }
-  // Answers for WASI the shim provides, e.g. those recorded from it, would never be used: a replay
-  // answers WASI without the shim.
-  const shimmed = driver.component.transpiled.imports.filter((pkg) => !driver.component.customImports.includes(pkg));
-  const ofShim = (line: ScriptLine): line is AnswerLine => line.kind === 'answer' && shimmed.some((pkg) => isOfPackage(line.callee, pkg));
-  const wasi = kept.find(ofShim);
+  // The answers recorded from the shim would never be used with it, as it answers those calls
+  // itself: a replay answers WASI without the shim. Other answers for WASI may answer the calls
+  // that ask with the shim too, e.g. a mock's.
+  const wasi = wasiShim && kept.find((line): line is AnswerLine => line.kind === 'answer' && line.recorded === 'wasi');
   if (wasi) {
-    throw new UsageError(`${wasi.source}: answers ${wasi.callee}, which the WASI shim provides; run with --no-wasi-shim`);
+    throw new UsageError(`${wasi.source}: answers ${wasi.callee} as the WASI shim did; replay with --no-wasi-shim`);
   }
   let stopped: Stopped | undefined;
   // Why the run stopped where the guest's calls differ from the answers, e.g. after an edit.
@@ -359,9 +363,15 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
   // A call that failed, e.g. trapped, leaving answers it would have used: that is why the run
   // differs from the file, not a change of the guest's calls.
   let failed: CallEntry | undefined;
+  // The WASI the shim provides, which answers its calls itself, but not those that ask, e.g. a mock's.
+  const shimmed = driver.component.transpiled.imports.filter((pkg) => !driver.component.customImports.includes(pkg));
   const diverge = (err: unknown) => {
     const line = err instanceof Divergence ? err.line : undefined;
-    if (failed && line) {
+    if (wasiShim && line?.kind === 'answer' && shimmed.some((pkg) => isOfPackage(line.callee, pkg))) {
+      diverged = `${line.source}: no import asked for this answer to ${line.callee}, which the WASI shim may have answered itself; `
+        + 'if the file was saved with --no-wasi-shim, run with it again.';
+      failed = undefined;
+    } else if (failed && line) {
       diverged = `${failed.label} failed, with ${failed.output}, before using the answers from ${line.source} on. `
         + 'Fix the answer that made it fail, e.g. the last it used, or remove the answers it didn\'t use, and run again.';
     } else {

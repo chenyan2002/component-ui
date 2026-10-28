@@ -93,6 +93,12 @@ export class ComponentInstance {
     return this.dialogs.canMock(resource);
   }
 
+  // Once what the calls so far did is all in the log, e.g. the HTTP response a handler set,
+  // which the host reads after the call that set it returned.
+  public settled(): Promise<void> {
+    return this.dialogs.settled();
+  }
+
   // The instances that could be passed as handles in values of the types, one line per resource,
   // e.g. `instances of x: #x-1 (from new exports/x(5))`; none for a resource with none to choose.
   public instancesFor(types: WIT.Type[], giver: Giver): string[] {

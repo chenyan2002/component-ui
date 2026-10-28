@@ -150,7 +150,7 @@ test('the shim\'s WASI is recorded, and a replay answers it without the shim', (
   // A replay needs --no-wasi-shim, as the shim would answer what the file does.
   const shim = cli('call', 'public/printer.wasm', '--answers', saved);
   assert.equal(shim.code, 1);
-  assert.match(shim.err, /shim\.txt:5: answers wasi:cli\/stdout@0\.2\.9\.get-stdout, which the WASI shim provides; run with --no-wasi-shim/);
+  assert.match(shim.err, /shim\.txt:5: answers wasi:cli\/stdout@0\.2\.9\.get-stdout as the WASI shim did; replay with --no-wasi-shim/);
   const replay = cli('call', 'public/printer.wasm', '--answers', saved, '--no-wasi-shim', '--all');
   assert.equal(replay.code, 0, replay.out);
   assert.match(replay.out, /get-stdout\(\)\n {4}= #mock-output-stream-1 {2}\(.*shim\.txt:5\)$/m);
@@ -324,10 +324,40 @@ test('--no-wasi-shim answers WASI like any other import, and records it', () => 
     'wasi:io/streams/output-stream@0.2.9.blocking-flush(#borrow-output-stream-1) = ok  // default',
     '',
   ].join('\n'));
-  // With the shim, the file's answers for WASI would never be used.
+  // With the shim, which answers WASI itself, the file's answers for WASI aren't used.
   const shim = cli('call', PRINTER, '--answers', saved);
   assert.equal(shim.code, 1);
-  assert.match(shim.err, /wasi\.txt:5: answers wasi:cli\/stdout@0\.2\.9\.get-stdout, which the WASI shim provides; run with --no-wasi-shim/);
+  assert.match(shim.out, /^stopped: .*wasi\.txt:5: no import asked for this answer to wasi:cli\/stdout@0\.2\.9\.get-stdout, which the WASI shim may have answered itself; if the file was saved with --no-wasi-shim, run with it again\.$/m);
+});
+
+test('the HTTP response a handler sets on a mock outparam shows, once it is read', () => {
+  const HTTP = 'public/wasi-http.wasm';
+  const answers = file('http.txt', [
+    '> wasi:http/incoming-handler@0.2.3.handle(#mock-incoming-request-1, #mock-response-outparam-2)',
+    'wasi:http/types/incoming-request@0.2.3.headers(#borrow-incoming-request-1) = #mock-fields-3',
+    'wasi:http/types/fields@0.2.3.entries(#borrow-fields-3) = [("x-id", b"hi")]',
+    'wasi:http/types/incoming-request@0.2.3.method(#borrow-incoming-request-1) = get',
+    'wasi:http/types/incoming-request@0.2.3.scheme(#borrow-incoming-request-1) = none',
+    'wasi:http/types/incoming-request@0.2.3.authority(#borrow-incoming-request-1) = none',
+    'wasi:http/types/incoming-request@0.2.3.path-with-query(#borrow-incoming-request-1) = some("/")',
+    'wasi:http/types/incoming-request@0.2.3.consume(#borrow-incoming-request-1) = ok(#mock-incoming-body-4)',
+    'wasi:http/types/incoming-body@0.2.3.stream(#borrow-incoming-body-4) = ok(#mock-input-stream-5)',
+    '',
+  ].join('\n'));
+  const saved = join(dir, 'http-saved.txt');
+  const { code, out } = cli('call', HTTP, '--answers', answers, '--all', '--save', saved);
+  assert.equal(code, 0, out);
+  // The run ends after the host has read the response, which the guest finishes after setting it.
+  assert.match(out, /^ {2}↳ wasi:http\/types\/response-outparam@0\.2\.3\.set\(#response-outparam-2, ok\(#outgoing-response-7\)\)\n {4}= \(\)\n {4}\| HTTP 200\n {4}\| content-length: 30\n {4}\| \n {4}\| Hello, wasi:http\/proxy world!$/m);
+  const text = readFileSync(saved, 'utf8');
+  assert.match(text, /^\/\/! wasi:http\/types\/response-outparam@0\.2\.3\.set\(#response-outparam-2, ok\(#outgoing-response-7\)\)$/m);
+  // Reading the response isn't the guest's call, so the file doesn't have it, and replays.
+  assert.doesNotMatch(text, /fields@0\.2\.3\.entries\(#borrow-fields-6\)/);
+  assert.equal(cli('call', HTTP, '--answers', saved, '--no-wasi-shim').code, 0);
+  // Setting it yourself shows the response too.
+  const set = cli('call', HTTP, 'wasi:http/types/response-outparam@0.2.3.set(#mock, err(internal-error(some("boom"))))');
+  assert.equal(set.code, 0, set.out);
+  assert.match(set.out, /^ {2}= \(\)\n {2}\| HTTP 500\n/m);
 });
 
 test('a list<u8> of text shows as b"…", and answers may use it', () => {

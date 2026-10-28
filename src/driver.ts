@@ -108,8 +108,9 @@ export class Driver {
     return [...this.log.entries].reverse().find((e): e is CallEntry => e.kind === 'call' && e.record !== undefined && e.failed === true);
   }
 
-  // Runs a call written as the console shows it, e.g. `exports/x.get-a(#borrow-x-1)`. Returns
-  // what stopped it, if an import's answer did; then the guest stays suspended in the call.
+  // Runs a call written as the console shows it, e.g. `exports/x.get-a(#borrow-x-1)`, until what
+  // it did is all in the log. Returns what stopped it, if an import's answer did; then the guest
+  // stays suspended in the call.
   public async run(text: string): Promise<Stopped | undefined> {
     // Drops an instance, e.g. `drop #x-1`, as the UI's resource table does: only one the UI holds,
     // not one that moved into a call, say, which the log shows already.
@@ -130,7 +131,7 @@ export class Driver {
     const { target, key, func } = this.resolve(callee);
     const args = this.parseArgs(func, target.type === 'func' ? undefined : target.resource, argText);
     const stopped = new Promise<Stopped>((resolve) => (this.stopped = resolve));
-    const done = call(this.ctx, target, key, func, args).then(() => undefined);
+    const done = call(this.ctx, target, key, func, args).then(() => this.instance.settled()).then(() => undefined);
     try {
       return await Promise.race([done, stopped]);
     } finally {

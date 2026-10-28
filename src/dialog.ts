@@ -40,6 +40,8 @@ export class ImportDialogs implements MockFactory {
   private readonly mockClasses = new Map<WIT.ResourceClass, Function>();
   // Subclasses of the host's classes, for mock instances of resources the host implements.
   private readonly mockSubclasses = new Map<WIT.ResourceClass, Function>();
+  // The host effects still to show, e.g. an HTTP response that is still being read.
+  private readonly effects = new Set<Promise<void>>();
 
   constructor(
     private readonly registry: ResourceRegistry,
@@ -79,6 +81,13 @@ export class ImportDialogs implements MockFactory {
     }
     // Anything the WIT doesn't describe still fails when called.
     return wasi ? completed : stubMissingImports(pkg, completed);
+  }
+
+  // Once the host effects of the calls so far are shown, e.g. the HTTP response a handler set.
+  public async settled(): Promise<void> {
+    while (this.effects.size > 0) {
+      await Promise.all(this.effects);
+    }
   }
 
   // Imported resources can be mocked with the class jco uses for them.
@@ -202,7 +211,10 @@ export class ImportDialogs implements MockFactory {
     const [type] = func._ret;
     if (!type) {
       if (effect) {
-        effect().then((text) => line.detail(text), (err) => line.error(err));
+        // Not the guest's calls: the host reads what the guest gave it, e.g. a response's headers.
+        const shown = this.host.internally(effect).then((text) => line.detail(text), (err) => line.error(err));
+        this.effects.add(shown);
+        void shown.finally(() => this.effects.delete(shown));
       } else {
         line.result('');
       }
