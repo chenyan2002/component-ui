@@ -1,6 +1,7 @@
 import * as WIT from './wit';
 import { CallRecord } from './call-record';
 import { Answer, AnswerContext, AnswerSource, defaultAnswer, DefaultsLevel, RESTART } from './answering';
+import type { HostCode } from './host-resources';
 import { answeredValue, CallEntry, CallLog, ImportEntry, isOwnCall } from './call-log';
 import { canonicalWave, mapHandles } from './wave';
 
@@ -57,6 +58,8 @@ export interface AnswerLine extends LineBase {
   // The value in WAVE; undefined to trap, or for a hole.
   value?: string;
   hole: boolean;
+  // Whose code gave the answer, if it was recorded from a run, e.g. `// javascript`.
+  recorded?: HostCode;
 }
 
 export type ScriptLine = CallLine | AnswerLine;
@@ -67,6 +70,11 @@ const HOLE = '?';
 // answered, the type a hole expects, and a call's result. Its notes on defaults, e.g.
 // `default; instances of x: …`, stay until the user removes them.
 const REWRITTEN = { answer: /^(was |expects |your JavaScript )/, call: /^(= |! )/ };
+// The markers of answers recorded from the host's own code.
+const RECORDED: HostCode[] = ['javascript', 'wasi'];
+// The answers marked as whose they are, e.g. `// default`, rather than an answers file's: the
+// happy path's, and those of the host's own code, which the log records.
+const MARKED = new Set(['default', ...RECORDED]);
 
 // The end of the string or char literal starting at `start`, just past its closing quote.
 function literalEnd(text: string, start: number): number {
@@ -146,9 +154,12 @@ export function parseAnswer(line: string, source: string, comments: string[] = [
   if (value === '') {
     throw fail('Expected a value after =');
   }
+  const own = ownComment(comment, 'answer');
+  const marker = own?.split('; ')[0];
   return {
-    kind: 'answer', source, comments, comment: ownComment(comment, 'answer'), callee, args,
+    kind: 'answer', source, comments, comment: own, callee, args,
     value: value === TRAP || value === HOLE ? undefined : value, hole: value === HOLE,
+    recorded: RECORDED.find((code) => code === marker),
   };
 }
 
@@ -281,12 +292,25 @@ export class Script implements AnswerSource {
   }
 }
 
-// The header line of an answers file on where WASI came from: the shim, whose calls aren't
-// recorded, or the answers, like any other import's.
-export function wasiNote(wasiShim: boolean): string {
-  return wasiShim
-    ? '//! WASI comes from the shim and isn\'t recorded; a run may differ where the guest uses it, e.g. its clocks or random numbers'
-    : '//! WASI doesn\'t come from the shim: its calls ask, and are recorded, like any other import\'s';
+// The packages whose JavaScript implements anything: what is left of it without comments. A
+// template from the UI's editor or `template` is all comments.
+export function implementedImports(code: Record<string, string>): string[] {
+  const stripped = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '').trim();
+  return Object.entries(code).filter(([_, text]) => stripped(text) !== '').map(([pkg]) => pkg);
+}
+
+// The header of an answers file: `command`, which made or replays the run, and where the answers
+// of the imports implemented in JavaScript and of WASI come from.
+export function scriptHeader(command: string, implemented: string[], wasiShim: boolean): string[] {
+  return [
+    `//! ${command}`,
+    implemented.length === 0
+      ? '//! imports implemented in JavaScript: none'
+      : `//! imports implemented in JavaScript: ${implemented.join(', ')}; their answers are recorded, marked // javascript, so a replay needs no --imports`,
+    wasiShim
+      ? '//! WASI comes from the shim; its answers are recorded, marked // wasi, so a replay, which needs --no-wasi-shim, gives the guest the same clocks and random numbers'
+      : '//! WASI doesn\'t come from the shim: its calls ask, and are recorded, like any other import\'s',
+  ];
 }
 
 // What an answers file says about a run, besides the log, which has the answers, e.g. the
@@ -361,10 +385,10 @@ export function scriptLines(log: CallLog, options: ScriptOptions): ScriptText[] 
       if (value === undefined) {
         return;
       }
-      const byDefault = answer?.source === 'default';
-      const unpinned = answer !== undefined && !byDefault && !answer.pinned;
+      const marked = answer !== undefined && MARKED.has(answer.source);
+      const unpinned = answer !== undefined && !marked && !answer.pinned;
       const head = unpinned ? record.callee : record.label;
-      const notes = byDefault ? ['default', answer.note, entry.note]
+      const notes = marked ? [answer.source, answer.note, entry.note]
         : [answer?.comment, unpinned ? `was ${record.label}` : undefined, entry.note];
       const comment = notes.filter(Boolean).join('; ');
       lines.push({ text: `${head} = ${value}${comment ? `  // ${comment}` : ''}` });

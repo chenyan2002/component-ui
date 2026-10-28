@@ -55,11 +55,13 @@ export interface CallEntry extends Entry, Ending {
   imports: ImportEntry[];
 }
 
-// Text the component wrote to stdout or stderr, during the call `call` if it was running.
+// Text the component wrote to stdout or stderr, during the call `call` if it was running: each
+// write by its place in the log, e.g. among the WASI calls that wrote it, and all of them.
 export interface StreamEntry extends Entry {
   kind: 'stream';
   stream: 'stdout' | 'stderr';
   text: string;
+  writes: Array<{ seq: number; text: string }>;
   call?: CallEntry;
 }
 
@@ -190,16 +192,18 @@ export class CallLog {
   }
 
   // Logs what the component wrote; consecutive writes to the same stream, in the same call, share
-  // an entry. Whether it did.
+  // an entry. Whether they did.
   public print(stream: StreamEntry['stream'], text: string): boolean {
     const last = this.entries[this.entries.length - 1];
     const call = this.pending();
     if (last?.kind === 'stream' && last.stream === stream && last.call === call) {
       last.text += text;
+      last.writes.push({ seq: this.seq++, text });
       this.changed(false);
       return true;
     }
-    this.entries = [...this.entries, { kind: 'stream', seq: this.seq++, stream, text, call }];
+    const seq = this.seq++;
+    this.entries = [...this.entries, { kind: 'stream', seq, stream, text, call, writes: [{ seq, text }] }];
     this.changed(true);
     return false;
   }

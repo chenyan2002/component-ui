@@ -3,7 +3,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import * as WIT from './wit';
 import { CallRecord, qualified, qualifiedResource, unversioned } from './call-record';
-import { AnswerLine, CallLine, Divergence, parseAnswer, parseScript, Script, scriptLines, ScriptLine, wasiNote, writeScript } from './answers';
+import {
+  AnswerLine, CallLine, Divergence, implementedImports, parseAnswer, parseScript, Script, scriptHeader, scriptLines, ScriptLine, writeScript,
+} from './answers';
 import { Answer, DEFAULTS_LEVELS, DefaultsLevel } from './answering';
 import { answeredValue, CallEntry, CallLog, ImportEntry, isOwnCall, StreamEntry } from './call-log';
 import { Driver, Stopped } from './driver';
@@ -44,15 +46,17 @@ Options:
   --defaults <level>      Answers past the file's last: 'eager' (the default) takes 'ok' and new
                           mocks, noting other instances; 'careful' stops where there are
                           instances to choose; 'none' stops at every import that asks
-  --imports <pkg>=<file>  Implements an imported package, e.g. 'docs:adder/add=add.js', in JavaScript
+  --imports <pkg>=<file>  Implements an imported package, e.g. 'docs:adder/add=add.js', in JavaScript.
+                          --save records its answers, marked '// javascript', which a replay
+                          uses unless --imports implements the package again
   --from <line>           Prints the run from the import that used this answer, e.g.
                           'answers.txt:12' or '12' for the first --answers file; by default,
                           from the last answer used
   --all                   Prints the whole run
-  --no-wasi-shim          Doesn't provide WASI from the preview2 shim, so that WASI imports ask,
-                          and are recorded, like any other: a run is then fully deterministic,
-                          and shows every WASI call, e.g. writes to stdout. Also for inspect and
-                          template
+  --no-wasi-shim          Doesn't provide WASI from the preview2 shim, so that WASI imports ask
+                          like any other: a run is then fully deterministic. A replay needs it:
+                          the shim's answers that --save records, marked '// wasi', answer them.
+                          Also for inspect and template
 In values, '#mock' is a new mock of a host resource, and '#mock-x-2' a new mock that is to get the
 id 'x-2', as --save writes them; a list<u8> of text may be written b"…".
 Exits with 0 when all calls ran, 2 when an import needs an answer, 3 when a call failed, e.g.
@@ -154,10 +158,18 @@ interface RunLine {
   header?: boolean;
 }
 
-function outputLines(entry: StreamEntry, indent: string): RunLine[] {
-  const lines = entry.text.replace(/\n$/, '').split('\n');
+function outputLines(stream: StreamEntry['stream'], text: string, indent: string): RunLine[] {
+  const lines = text.replace(/\n$/, '').split('\n');
   // Without the colors of the guest's logs; this isn't a terminal's output.
-  return lines.map((line) => ({ text: `${indent}[${entry.stream}] ${line.replace(/\x1b\[[0-9;]*m/g, '')}` }));
+  return lines.map((line) => ({ text: `${indent}[${stream}] ${line.replace(/\x1b\[[0-9;]*m/g, '')}` }));
+}
+
+// A write to stdout or stderr, by its place in the log.
+interface Write {
+  kind: 'write';
+  seq: number;
+  stream: StreamEntry['stream'];
+  text: string;
 }
 
 // How a call or an import ended: its result, e.g. `= 3`, or error and the guest's frames, marked
@@ -195,18 +207,26 @@ function runLines(log: CallLog): RunLine[] {
   for (const entry of log.entries) {
     if (entry.kind === 'stream') {
       if (!entry.call) {
-        lines.push(...outputLines(entry, ''));
+        lines.push(...outputLines(entry.stream, entry.text, ''));
       }
     } else if (entry.kind === 'import') {
       lines.push(...importLines(entry, ''));
     } else {
       lines.push({ text: `› ${entry.label}`, header: true });
-      const output = log.entries.filter((e): e is StreamEntry => e.kind === 'stream' && e.call === entry);
-      const children = [...entry.imports, ...output].sort((a, b) => a.seq - b.seq);
+      // The writes where they happened, e.g. among the WASI calls that wrote them; those with
+      // nothing logged in between print together.
+      const writes = log.entries.filter((e): e is StreamEntry => e.kind === 'stream' && e.call === entry)
+        .flatMap((e) => e.writes.map((w): Write => ({ kind: 'write', stream: e.stream, ...w })));
+      const children = [...entry.imports, ...writes].sort((a, b) => a.seq - b.seq);
       let own: ImportEntry | undefined;
-      for (const child of children) {
-        if (child.kind === 'stream') {
-          lines.push(...outputLines(child, '  '));
+      children.forEach((child, i) => {
+        const next = children[i + 1];
+        if (child.kind === 'write') {
+          if (next?.kind === 'write' && next.stream === child.stream) {
+            next.text = child.text + next.text;
+          } else {
+            lines.push(...outputLines(child.stream, child.text, '  '));
+          }
         } else if (isOwnCall(entry, child)) {
           own = child;
           if (child.prompt) {
@@ -215,7 +235,7 @@ function runLines(log: CallLog): RunLine[] {
         } else {
           lines.push(...importLines(child, '  '));
         }
-      }
+      });
       const by = own?.answered?.by;
       lines.push(...endingLines(entry, by, own && answeredValue(own)).map((text, i) => ({ text: `  ${text}`, source: i === 0 ? by?.source : undefined })));
     }
@@ -270,6 +290,14 @@ function stopHint(driver: Driver, stopped: Stopped, hole: string | undefined): s
   ];
 }
 
+// Whether an answer's callee, e.g. `new imports/y` or `docs:adder/add@0.1.0.add`, is of the
+// imported package, e.g. `docs:adder/add`, with or without its version.
+function isOfPackage(callee: string, pkg: string): boolean {
+  const name = callee.replace(/^new /, '');
+  const unversionedPkg = unversioned(pkg);
+  return name.startsWith(unversionedPkg) && /^[/@.]/.test(name.slice(unversionedPkg.length));
+}
+
 // Where an answer comes from, as `--from` names it: `answers.txt:12`, or `12` in the first file.
 function fromSource(from: string, files: string[]): string {
   return /^\d+$/.test(from) && files.length > 0 ? `${files[0]}:${from}` : from;
@@ -286,16 +314,6 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
     lines.push(...parseScript(await readFile(answers, 'utf8'), answers));
   }
   (values.answer ?? []).forEach((answer: string, i: number) => lines.push(parseAnswer(answer, `--answer ${i + 1}`)));
-  const script = new Script(lines, level);
-  // The calls: those of the command line, or of the file, which must be the same if both have them.
-  const fileCalls = script.calls;
-  if (argCalls.length > 0 && fileCalls.length > 0 && argCalls.join('\n') !== fileCalls.map((line) => line.call).join('\n')) {
-    throw new UsageError(`The calls differ from those of the answers, ${fileCalls.map((line) => line.call).join(', ')}; give either`);
-  }
-  const calls = fileCalls.length > 0 ? fileCalls.map((line) => ({ text: line.call, line })) : argCalls.map((text) => ({ text, line: undefined }));
-  if (calls.length === 0) {
-    throw new UsageError('Give at least one call, on the command line or as `> call` lines of the answers');
-  }
   const importCode: Record<string, string> = {};
   for (const option of values.imports ?? []) {
     const eq = option.lastIndexOf('=');
@@ -305,20 +323,30 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
     importCode[option.slice(0, eq)] = await readFile(option.slice(eq + 1), 'utf8');
   }
   const wasiShim = !values['no-wasi-shim'];
-  const header = [
-    `//! component-ui call ${file} --defaults ${level}${wasiShim ? '' : ' --no-wasi-shim'}`,
-    `//! imports implemented in JavaScript, whose calls aren't recorded: ${Object.keys(importCode).join(', ') || 'none'}`,
-    wasiNote(wasiShim),
-  ];
+  // The answers recorded from the JavaScript of --imports, which runs again, answer nothing.
+  const runsAgain = (line: ScriptLine) => line.kind === 'answer' && line.recorded === 'javascript'
+    && Object.keys(importCode).some((pkg) => isOfPackage(line.callee, pkg));
+  const kept = lines.filter((line) => !runsAgain(line));
+  const script = new Script(kept, level);
+  // The calls: those of the command line, or of the file, which must be the same if both have them.
+  const fileCalls = script.calls;
+  if (argCalls.length > 0 && fileCalls.length > 0 && argCalls.join('\n') !== fileCalls.map((line) => line.call).join('\n')) {
+    throw new UsageError(`The calls differ from those of the answers, ${fileCalls.map((line) => line.call).join(', ')}; give either`);
+  }
+  const calls = fileCalls.length > 0 ? fileCalls.map((line) => ({ text: line.call, line })) : argCalls.map((text) => ({ text, line: undefined }));
+  if (calls.length === 0) {
+    throw new UsageError('Give at least one call, on the command line or as `> call` lines of the answers');
+  }
+  const header = scriptHeader(`component-ui call ${file} --defaults ${level}${wasiShim ? '' : ' --no-wasi-shim'}`, implementedImports(importCode), wasiShim);
   const driver = await Driver.start(nodePlatform, await readFile(file), script, importCode, wasiShim);
   for (const custom of Object.keys(importCode).filter((pkg) => !driver.component.customImports.includes(pkg))) {
     throw new UsageError(`The component imports no ${custom}; it imports ${driver.component.customImports.join(', ')}`);
   }
-  // The answers for WASI the shim provides, e.g. of a run saved without it, would never be used.
-  const shimmed = driver.component.transpiled.imports.filter((pkg) => !driver.component.customImports.includes(pkg)).map(unversioned);
-  const ofShim = (line: ScriptLine): line is AnswerLine => line.kind === 'answer'
-    && shimmed.some((pkg) => line.callee.startsWith(pkg) && /^[/@.]/.test(line.callee.slice(pkg.length)));
-  const wasi = lines.find(ofShim);
+  // Answers for WASI the shim provides, e.g. those recorded from it, would never be used: a replay
+  // answers WASI without the shim.
+  const shimmed = driver.component.transpiled.imports.filter((pkg) => !driver.component.customImports.includes(pkg));
+  const ofShim = (line: ScriptLine): line is AnswerLine => line.kind === 'answer' && shimmed.some((pkg) => isOfPackage(line.callee, pkg));
+  const wasi = kept.find(ofShim);
   if (wasi) {
     throw new UsageError(`${wasi.source}: answers ${wasi.callee}, which the WASI shim provides; run with --no-wasi-shim`);
   }

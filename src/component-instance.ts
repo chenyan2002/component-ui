@@ -75,7 +75,7 @@ export class ComponentInstance {
       stderr: (text) => print('stderr', text),
     }, {
       complete: (pkg, mod, wasi) => dialogs.complete(pkg, mod, wasi),
-      wrap: (pkg, mod) => host.wrap(pkg, mod),
+      wrap: (pkg, mod, wasi) => host.wrap(pkg, mod, wasi),
     });
     instance.ctx = {
       exports, log: (record) => log.logCall(record), registry, host, activity: new CallActivity(), mocks: dialogs, report: options.report,

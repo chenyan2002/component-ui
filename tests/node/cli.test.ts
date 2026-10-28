@@ -122,11 +122,39 @@ test('JavaScript that an argument\'s mock keeps from being called says so', () =
   assert.match(out, /^ {2}the call takes #service-3 \(from fastly:private\/privileged-kv-store-service\.get\(\); held by guest\)$/m);
 });
 
-test('imports can be implemented in JavaScript', () => {
+test('imports implemented in JavaScript are recorded, and replay without it', () => {
   const add = file('add.js', 'export function add(a, b) { return a + b; }');
-  const { code, out } = cli('call', CALC, EVAL, '--imports', `docs:adder/add=${add}`);
+  const saved = join(dir, 'add.txt');
+  const { code, out } = cli('call', CALC, EVAL, '--imports', `docs:adder/add=${add}`, '--save', saved);
   assert.equal(code, 0);
-  assert.equal(out, `› ${EVAL}\n  = 3\n`);
+  assert.equal(out, `› ${EVAL}\n  ↳ docs:adder/add@0.1.0.add(1, 2)\n    = 3  (javascript)\n  = 3\n`);
+  const text = readFileSync(saved, 'utf8');
+  assert.match(text, /^\/\/! imports implemented in JavaScript: docs:adder\/add; their answers are recorded/m);
+  assert.match(text, /^docs:adder\/add@0\.1\.0\.add\(1, 2\) = 3 {2}\/\/ javascript$/m);
+  // The recording answers the import; with --imports again, the JavaScript does.
+  assert.match(cli('call', CALC, '--answers', saved).out, /= 3 {2}\(.*add\.txt:5\)$/m);
+  assert.match(cli('call', CALC, '--answers', saved, '--imports', `docs:adder/add=${add}`).out, /= 3 {2}\(javascript\)$/m);
+  // A template, all comments, implements nothing.
+  const template = file('template.js', cli('template', CALC, 'docs:adder/add').out);
+  cli('call', CALC, EVAL, '--imports', `docs:adder/add=${template}`, '--save', saved);
+  assert.match(readFileSync(saved, 'utf8'), /^\/\/! imports implemented in JavaScript: none$/m);
+});
+
+test('the shim\'s WASI is recorded, and a replay answers it without the shim', () => {
+  const saved = join(dir, 'shim.txt');
+  const { code, out } = cli('call', 'public/printer.wasm', 'greet("Ada")', '--save', saved);
+  assert.equal(code, 0, out);
+  assert.match(out, /^ {2}↳ wasi:io\/streams\/output-stream@0\.2\.9\.write\(#borrow-output-stream-1, b"Hello, Ada!\\n"\)\n {4}= ok {2}\(wasi\)$/m);
+  const text = readFileSync(saved, 'utf8');
+  assert.match(text, /^wasi:cli\/stdout@0\.2\.9\.get-stdout\(\) = #mock-output-stream-1 {2}\/\/ wasi$/m);
+  // A replay needs --no-wasi-shim, as the shim would answer what the file does.
+  const shim = cli('call', 'public/printer.wasm', '--answers', saved);
+  assert.equal(shim.code, 1);
+  assert.match(shim.err, /shim\.txt:5: answers wasi:cli\/stdout@0\.2\.9\.get-stdout, which the WASI shim provides; run with --no-wasi-shim/);
+  const replay = cli('call', 'public/printer.wasm', '--answers', saved, '--no-wasi-shim', '--all');
+  assert.equal(replay.code, 0, replay.out);
+  assert.match(replay.out, /get-stdout\(\)\n {4}= #mock-output-stream-1 {2}\(.*shim\.txt:5\)$/m);
+  assert.match(replay.out, /^ {2}= "greeted Ada"$/m);
 });
 
 test('methods take their instance first, and answers cover the run up to their end', () => {
@@ -169,8 +197,8 @@ test('--save writes a file that reproduces the run, with a ? where it stopped', 
   assert.match(first.out, new RegExp(`replace the \\? at ${saved}:7 with the answer, and run again`));
   assert.equal(readFileSync(saved, 'utf8'), [
     '//! component-ui call public/resource.wasm --defaults eager',
-    "//! imports implemented in JavaScript, whose calls aren't recorded: none",
-    "//! WASI comes from the shim and isn't recorded; a run may differ where the guest uses it, e.g. its clocks or random numbers",
+    '//! imports implemented in JavaScript: none',
+    '//! WASI comes from the shim; its answers are recorded, marked // wasi, so a replay, which needs --no-wasi-shim, gives the guest the same clocks and random numbers',
     '> new exports/x(5)  // = #x-1',
     '> exports.test-imports()',
     // An instance no answer returned: a mock's constructor needs no answer.
@@ -249,7 +277,8 @@ test('calls can drop instances, and pass new mocks, which the file writes as #mo
   const mocks = join(dir, 'mocks.txt');
   assert.equal(cli('call', 'public/kv-store.wasm', 'fastly:compute/http-incoming@0.1.0.handle(#mock, #mock)', '--save', mocks).code, 2);
   assert.match(readFileSync(mocks, 'utf8'), /^> fastly:compute\/http-incoming@0\.1\.0\.handle\(#mock-request-1, #mock-pollable-2\)$/m);
-  assert.equal(cli('call', 'public/kv-store.wasm', '--answers', mocks).code, 2);
+  // The shim's WASI answers are in the file, which a replay without the shim uses.
+  assert.equal(cli('call', 'public/kv-store.wasm', '--answers', mocks, '--no-wasi-shim').code, 2);
 });
 
 test('only instances the UI holds can be dropped; the log shows what happened to the others', () => {
@@ -283,7 +312,7 @@ test('--no-wasi-shim answers WASI like any other import, and records it', () => 
   }
   assert.equal(readFileSync(saved, 'utf8'), [
     '//! component-ui call public/printer.wasm --defaults eager --no-wasi-shim',
-    "//! imports implemented in JavaScript, whose calls aren't recorded: none",
+    '//! imports implemented in JavaScript: none',
     "//! WASI doesn't come from the shim: its calls ask, and are recorded, like any other import's",
     '> greet("Ada")  // = "greeted Ada"',
     'wasi:cli/stdout@0.2.9.get-stdout() = #mock-output-stream-1  // default',

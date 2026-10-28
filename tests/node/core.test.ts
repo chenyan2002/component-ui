@@ -89,7 +89,9 @@ test('stdout and stderr go to the log', async () => {
   const root = s.component.interfaces.find((i) => i.isRoot)!._name;
   await callFunc(s, root, 'greet', ['node']);
   await callFunc(s, root, 'warn', ['careful']);
-  assert.deepEqual(lines(s.log), ['greet("node") -> "greeted node"', 'warn("careful") -> ']);
+  // The calls, among the shim's WASI calls that wrote, which the log records as the shim's answers.
+  assert.deepEqual(lines(s.log).filter((line) => !line.startsWith('wasi:')), ['greet("node") -> "greeted node"', 'warn("careful") -> ']);
+  assert.ok(entries(s.log).some((e) => e.kind === 'import' && e.answered?.by?.source === 'wasi'));
   assert.match(output(s.log), /Hello, node!/);
   assert.match(output(s.log), /careful/);
 });

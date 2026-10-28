@@ -17,6 +17,7 @@ test a subcomponent before composing it with `wac`.
   or dropped, and which handle index it reuses. Live instances can be picked as arguments, and
   dropped from the table.
 - **Deterministic replay.** The call logs can be saved locally and replayed in the [command line](#command-line).
+  The call log of imports implemented in JavaScript and of the WASI shim are also recorded, so a replay is deterministic.
 
 ## Browser support
 
@@ -117,7 +118,6 @@ npm run build:bindgen
   types but usually not the doc comments of the original WIT.
   Answering such imports well needs the original WIT files or the host's documentation;
   the skill tells agents to ask for them.
-- The log files don't record the calls of imports implemented in JavaScript, nor WASI (when the shim is enabled).
 - While a call is waiting on an import, other calls are disabled, since the component instance
   can't be re-entered.
 - jco doesn't expose the handle index of a host-implemented resource, so the resource table shows

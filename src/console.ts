@@ -29,9 +29,11 @@ function storedDefaults(): DefaultsLevel {
   return level && DEFAULTS_LEVELS.includes(level) ? level : 'none';
 }
 
-// Marks an import the happy path answered, which the console can't change.
+// Marks an import that the happy path answered, or the host's own code, e.g. the user's
+// JavaScript, which the console can't change, as Save writes it.
 function renderDefault(entry: ImportEntry | undefined) {
-  return entry?.answered?.by?.source === 'default' ? html`<span class="log-default">// default</span>` : nothing;
+  const source = entry?.answered?.by?.source;
+  return source === 'default' || source === 'javascript' || source === 'wasi' ? html`<span class="log-default">// ${source}</span>` : nothing;
 }
 
 // The guest's frames of a trap, innermost first.
@@ -140,9 +142,10 @@ export class ConsolePanel extends LitElement {
       }}>
         WASI from the shim
         <div slot="hint" class="console-defaults-description">
-          The preview2 shim provides WASI with real clocks and random numbers, and shows stdout and stderr,
-          but its calls aren't logged or saved. Without it, WASI imports ask like any other, so every call
-          shows, and a saved run replays exactly. Changing it restarts the component.
+          The preview2 shim provides WASI with real clocks and random numbers, and shows stdout and stderr.
+          Its calls are logged and saved, marked <code>// wasi</code>, and the CLI replays a saved run without
+          the shim, answering WASI from them. Without it, WASI imports ask like any other. Changing it restarts
+          the component.
         </div>
       </wa-switch>
       <div slot="footer" class="func-actions">

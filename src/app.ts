@@ -4,7 +4,7 @@ import { classMap } from 'lit/directives/class-map.js';
 import { keyed } from 'lit/directives/keyed.js';
 import { live } from 'lit/directives/live.js';
 import { JSPI_SUPPORTED, loadComponent, LoadedComponent, withWasiShim } from './loader';
-import { wasiNote } from './answers';
+import { implementedImports, scriptHeader } from './answers';
 import { defaultsSource } from './answering';
 import { browserPlatform, readWasm } from './platform-browser';
 import { ExportsContext } from './calls';
@@ -326,7 +326,7 @@ export class ComponentApp extends LitElement {
   // Calls to imports ask in the console unless implemented in JavaScript, which the badge counts.
   private renderStubButton(s: Session) {
     const count = s.component.customImports.length;
-    const implemented = Object.entries(s.appliedCode).filter(([pkg, code]) => code.trim() !== '' && code !== s.templates[pkg]).length;
+    const implemented = implementedImports(s.appliedCode).length;
     const title = `Implement the ${count} imported interface${count === 1 ? '' : 's'} in JavaScript; `
       + `the functions you leave out ask for their results in the console`
       + (implemented > 0 ? ` (${implemented} in JavaScript)` : '');
@@ -427,13 +427,10 @@ export class ComponentApp extends LitElement {
 
   // What Save writes of a new instance, besides its log.
   private setSaveHeader(panel: ConsolePanel, s: Session, code: Record<string, string>) {
-    const implemented = Object.entries(code).filter(([pkg, text]) => text.trim() !== '' && text !== s.templates[pkg]).map(([pkg]) => pkg);
     panel.saveName = `${s.fileName.replace(/\.wasm$/, '')}.answers.txt`;
-    panel.saveHeader = [
-      `//! saved from component-ui's console; replay with: component-ui call ${s.fileName} --answers ${panel.saveName}${s.component.wasiShim ? '' : ' --no-wasi-shim'}`,
-      `//! imports implemented in JavaScript, whose calls aren't recorded: ${implemented.join(', ') || 'none'}`,
-      wasiNote(s.component.wasiShim),
-    ];
+    // WASI's answers are recorded too, with the shim or without.
+    const replay = `component-ui call ${s.fileName} --answers ${panel.saveName} --no-wasi-shim`;
+    panel.saveHeader = scriptHeader(`saved from component-ui's console; replay with: ${replay}`, implementedImports(code), s.component.wasiShim);
   }
 
   // Starts a new instance of the component with `code` implementing its imports.

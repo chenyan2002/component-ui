@@ -59,7 +59,11 @@ test('calculator: imports are answered in the console, or implemented in JavaScr
   await expect(implemented).toHaveText('1');
   await expect(dialog.locator('.imports-pending')).toHaveCount(0);
   await add();
-  await expect(callEntries(page).last().locator('.log-import')).toHaveCount(0);
+  // The JavaScript answers the import, which the console shows as its answer, as Save records it.
+  const js = callEntries(page).last().locator('.log-import');
+  await expect(js.locator('.log-call > code')).toHaveText('docs:adder/add@0.1.0.add(2, 3)');
+  await expect(js.locator('.log-import-output')).toHaveText('= 5');
+  await expect(js.locator('.log-default')).toHaveText('// javascript');
   await expectCall(page, 'docs:calculator/calculate@0.1.0.eval-expression(add, 2, 3)', 'ok', '5');
   // Nothing involves resources, so the resource table stays collapsed.
   await expect(page.locator('.resource-pane')).toBeHidden();
@@ -133,13 +137,14 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   await expect(request.locator('.section-summary wa-tag')).toHaveText('resource');
   await request.locator('.section-summary').click();
   await call(funcCard(request, 'new'));
-  await expectCall(page, 'fastly:compute/http-req/request@0.1.0.new()', 'ok', 'ok(#request-1)');
+  // The stub's JavaScript answers the call, which the console marks.
+  await expectCall(page, 'fastly:compute/http-req/request@0.1.0.new()', 'ok', 'ok(#request-1)// javascript');
   await expect(row(page, 'request-1').locator('td.handle')).toHaveText('host');
   await expect(row(page, 'request-1').locator('.instance-holders')).toHaveText('held by you');
   const pollable = resource(page, 'fastly:compute/async-io/pollable@0.1.0');
   await pollable.locator('.section-summary').click();
   await call(funcCard(pollable, 'new-ready'));
-  await expectCall(page, 'fastly:compute/async-io/pollable@0.1.0.new-ready()', 'ok', '#pollable-2');
+  await expectCall(page, 'fastly:compute/async-io/pollable@0.1.0.new-ready()', 'ok', '#pollable-2// javascript');
 
   const setMethod = funcCard(request, 'set-method');
   await choose(picker(arg(setMethod, 0)), 'request-1');
@@ -150,7 +155,7 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   await arg(getMethod, 1).locator('input').fill('10');
   await call(getMethod);
   // A `u64` is a `bigint`, shown as a number.
-  await expectCall(page, 'fastly:compute/http-req/request@0.1.0.get-method(#borrow-request-1, 10)', 'ok', 'ok("POST")');
+  await expectCall(page, 'fastly:compute/http-req/request@0.1.0.get-method(#borrow-request-1, 10)', 'ok', 'ok("POST")// javascript');
 
   // The guest accepts them; imports the stubs leave out ask for their results.
   const handle = funcCard(page, 'handle');

@@ -154,7 +154,7 @@ export interface ImportHooks {
   // Completes the module for `pkg`: the user's, or for `wasi` the shim's.
   complete(pkg: string, mod: object, wasi: boolean): object;
   // Wraps the import object for `pkg`, e.g. to observe the resources it hands out.
-  wrap(pkg: string, mod: object): object;
+  wrap(pkg: string, mod: object, wasi: boolean): object;
 }
 
 export async function instantiate(
@@ -167,10 +167,11 @@ export async function instantiate(
   const wasi = wasiImports(output);
   const imports: Record<string, unknown> = {};
   for (const pkg of transpiled.imports) {
-    const mod = !customImports.includes(pkg)
+    const shim = !customImports.includes(pkg);
+    const mod = shim
       ? complete(pkg, wasi[unversioned(pkg)] as object, true)
       : complete(pkg, await platform.importModule(customImportCode[pkg] ?? ''), false);
-    imports[pkg] = wrap(pkg, mod);
+    imports[pkg] = wrap(pkg, mod, shim);
   }
   const mod = await platform.importModule(fileBytes(transpiled, `${TRANSPILED_NAME}.js`));
   return mod.instantiate((core: string) => WebAssembly.compile(fileBytes(transpiled, core)), imports);

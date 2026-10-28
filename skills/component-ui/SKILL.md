@@ -57,8 +57,13 @@ npm install && npm run build:cli && npm link
    escapes), and run again. With no calls on the command line, the run takes them from the file:
 
    ```sh
-   component-ui call app.wasm --answers run.txt --save run.txt
+   component-ui call app.wasm --answers run.txt --save run.txt --no-wasi-shim
    ```
+
+   Give `--no-wasi-shim` to every rerun. The first run took WASI from the shim, and recorded its
+   answers, marked `// wasi`; a rerun answers WASI from those instead, so the guest gets the same
+   clocks and random numbers. WASI calls past them ask like any other import, e.g. a
+   `check-write` for its `ok(4096)`.
 
    Repeat until the run exits with 0 (all calls returned) or 3 (a call failed, e.g. trapped).
    The output starts at the answer you added; `--all` prints the whole run.
@@ -98,7 +103,8 @@ npm install && npm run build:cli && npm link
 ## Reading a run
 
 - `› call` lines are your calls, `↳ import(…)` the imports the guest made during them, `= value`
-  results, and `! error` failures. `(run.txt:7)` or `(default)` says where an answer came from.
+  results, and `! error` failures. `(run.txt:7)` or `(default)` says where an answer came from;
+  `(javascript)` and `(wasi)` mark the answers of `--imports` and of the WASI shim, which ran.
 - `[stdout]` and `[stderr]` lines are the guest's output. A panic or failed assertion shows there,
   with the guest's source file and line, e.g. `panicked at src/lib.rs:27:15: index out of bounds`,
   or `Assertion failed: …get_a(borrowed_y) == 20`. It is often how you learn what the guest
@@ -168,11 +174,17 @@ settings): it is the same format, so continue it with `--answers` as your own.
   or `//! imports/y.set-a(#borrow-y-1, 20)`, and the guest's drops of host instances, e.g.
   `//! drop #y-2`, so that the file shows all the guest did with the host.
 - `= ?` is an answer still to give.
+- `import(args) = value  // javascript` and `// wasi` are answers recorded from the code that
+  gave them: your `--imports` JavaScript, or the WASI shim. A replay uses them like any other
+  answer, so it needs neither: it runs without `--imports`, e.g. for a file saved in the browser
+  with imports implemented there, and with `--no-wasi-shim`, which it needs for the `// wasi`
+  lines. Given `--imports` for a package, a replay skips its `// javascript` lines, and the
+  JavaScript answers again. Remove the marker to make a line an answer of your own.
 - `--save` writes each new mock as `#mock-<id>`, so that later uses of the id point back to where
   it was created; a replay checks the mock gets that id.
 - All `//!` lines are written anew by each `--save`, as notes for the reader: those imports, the
-  header, and where instances came from that no other line shows, e.g. WASI's. The run doesn't
-  read them. Your own `//` comments are kept.
+  header, and where instances came from that no other line shows. The run doesn't read them.
+  Your own `//` comments are kept.
 
 ## Options worth knowing
 
@@ -185,22 +197,24 @@ settings): it is the same format, so continue it with `--answers` as your own.
   `get-a`, and resources are classes. Values follow jco: records are objects with camelCase
   fields, variants `{ tag, val }`, options `null` or the value, `u64`/`s64` BigInts, `list<u8>` a
   `Uint8Array`; a function returning a `result` returns its `ok` value and throws its `err` value.
-  Their calls aren't recorded in the answers file. Where an argument is a mock, which your code
+  Their calls show in the run, and `--save` records their results, marked `// javascript`, so the
+  file replays without `--imports`. Where an argument is a mock, which your code
   didn't make, your function isn't called: the call asks for an answer instead, and its line says
   `~ your JavaScript … wasn't called, as an argument is a mock`.
 - `--from <line>` prints the run from the answer on that line of the file.
-- `--no-wasi-shim` doesn't provide WASI from the shim: WASI imports ask, and are recorded, like
-  any other, e.g. `wasi:cli/stdout@0.2.9.get-stdout() = #mock-output-stream-1` and the
-  `output-stream.write(…, b"…")` calls that follow, so a run replays exactly. Use it when a run
-  doesn't replay the same way, or to see what the guest does with WASI; expect many more answers,
-  e.g. `ok(4096)` for each `check-write`. Give it to `inspect` and `template` too, to see and
-  implement the WASI imports, and to every replay of a file saved with it.
+- WASI comes from the shim by default. Its calls show in the run, e.g.
+  `wasi:cli/stdout@0.2.9.get-stdout()` and the `output-stream.write(…, b"…")` calls that follow, and
+  `--save` records their results, marked `// wasi`.
+- `--no-wasi-shim` doesn't provide WASI from the shim: WASI imports ask like any other, and the
+  answers file answers them, e.g. `ok(4096)` for each `check-write`, including the `// wasi` lines
+  recorded from the shim, so a replay is exact. Every replay needs it; with the shim, a `// wasi`
+  line is an error. Give it to `inspect` and `template` too, to see and implement the WASI imports.
 
 ## Limits
 
-- WASI comes from a shim, with an in-memory filesystem, and real clocks and random numbers. A
-  guest that depends on those may not replay the same way, e.g. iterate a hash map in another
-  order; `--no-wasi-shim` answers WASI from the file instead.
+- WASI comes from a shim, with an in-memory filesystem, and real clocks and random numbers, in a
+  run's first try. Replays answer WASI from what it recorded, so a guest that depends on those
+  replays the same way, e.g. iterates a hash map in the same order.
 - Imports the component calls while it is instantiated can't ask for answers.
 - Nor can imports a resource's destructor calls: the call fails with
   `cannot block a synchronous task before returning`, e.g. when the guest drops a resource whose

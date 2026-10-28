@@ -220,11 +220,34 @@ test('Save writes the console as an answers file the CLI replays', async ({ page
     'imports/y.get-a(#borrow-y-2) = ?  // expects s32',
     '',
   ]);
-  expect(text).toMatch(/^\/\/! saved from component-ui's console; replay with: component-ui call resource\.wasm --answers resource\.answers\.txt$/m);
+  expect(text).toMatch(/^\/\/! saved from component-ui's console; replay with: component-ui call resource\.wasm --answers resource\.answers\.txt --no-wasi-shim$/m);
   // Clear logs, in the settings too, empties the console.
   const dialog = await consoleSettings(page);
   await dialog.getByRole('button', { name: 'Clear logs' }).click();
   await expect(page.locator('console-panel .console-empty')).toBeVisible();
+});
+
+test('Save records the answers of imports implemented in JavaScript, so the CLI replays them without it', async ({ page }) => {
+  await loadResource(page, [
+    'export class Y {',
+    '  constructor(a) { this.a = a }',
+    '  getA() { return this.a }',
+    '  setA(a) { this.a = a }',
+    '  static add(y, a) { return new Y(y.a + a) }',
+    '}',
+  ].join('\n'));
+  await call(funcCard(page, 'test-imports'));
+  await expectCall(page, 'exports.test-imports()', 'ok', 'ok');
+  const [, text] = await saveConsole(page);
+  expect(text).toMatch(/^\/\/! imports implemented in JavaScript: imports; their answers are recorded, marked \/\/ javascript, so a replay needs no --imports$/m);
+  expect(text.split('\n').slice(3, 9)).toEqual([
+    '> exports.test-imports()  // = ok',
+    '//! new imports/y(10) = #y-1',
+    'imports/y.get-a(#borrow-y-1) = 10  // javascript',
+    '//! imports/y.set-a(#borrow-y-1, 20)',
+    'imports/y.get-a(#borrow-y-1) = 20  // javascript',
+    'imports/y.add(#y-1, 10) = #mock-y-2  // javascript',
+  ]);
 });
 
 test('defaults answer imports by the happy path, as the CLI does, and Save marks them', async ({ page }) => {

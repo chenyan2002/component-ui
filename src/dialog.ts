@@ -2,7 +2,7 @@ import * as WIT from './wit';
 import { CallRecord, Callee, describeCall, unversioned } from './call-record';
 import { ImportLog } from './log';
 import { initDraft, INVALID, MockFactory, parseDraft, randomize } from './draft';
-import { byImportName, HostResources, ownFunc } from './host-resources';
+import { asks, byImportName, HostResources, markAsking, ownFunc } from './host-resources';
 import { stubMissingImports } from './loader';
 import { argHandles, dispose, involvesResources, ResourceRegistry, thrownType } from './resources';
 import { formatHandle, formatValue } from './wave';
@@ -40,8 +40,6 @@ export class ImportDialogs implements MockFactory {
   private readonly mockClasses = new Map<WIT.ResourceClass, Function>();
   // Subclasses of the host's classes, for mock instances of resources the host implements.
   private readonly mockSubclasses = new Map<WIT.ResourceClass, Function>();
-  // The functions that ask for their results, which stand in for those the user didn't write.
-  private readonly prompts = new WeakSet<Function>();
 
   constructor(
     private readonly registry: ResourceRegistry,
@@ -116,21 +114,20 @@ export class ImportDialogs implements MockFactory {
     return cls;
   }
 
-  // Asks instead of calling `fn`, jco's `key`, when one of the arguments is a mock, which the
-  // host's code doesn't know. `name` is the function's `iface#wit-name`, which may have a host
-  // effect to show. The call notes when `fn` is the user's JavaScript rather than WASI's.
+  // Calls `fn`, jco's `key`, the user's JavaScript or for `wasi` the shim's, recording the call
+  // as its answer. Asks instead when one of the arguments is a mock, which the host's code
+  // doesn't know. `name` is the function's `iface#wit-name`, which may have a host effect to
+  // show. The call notes when `fn` is the user's JavaScript rather than WASI's.
   private routing(name: string, func: WIT.FuncClass, key: string, fn: Function, callee: (self: unknown) => Callee, wasi: boolean): Function {
-    if (!involvesResources(func)) {
-      return fn;
-    }
     const dialogs = this;
+    const mocks = involvesResources(func);
     const effect = HOST_EFFECTS[name];
     const note = wasi ? undefined : `your JavaScript ${func.displayName(key)} wasn't called, as an argument is a mock`;
     return function (this: unknown, ...args: any[]) {
-      if (!argHandles(func, args).some(([_, obj]) => MOCK in obj)) {
-        return fn.apply(this, args);
+      if (mocks && argHandles(func, args).some(([_, obj]) => MOCK in obj)) {
+        return dialogs.ask(func, dialogs.describe(callee(this), func, key, args), effect && (() => effect(args)), note);
       }
-      return dialogs.ask(func, dialogs.describe(callee(this), func, key, args), effect && (() => effect(args)), note);
+      return dialogs.host.record(callee(this), func, key, args, wasi ? 'wasi' : 'javascript', () => fn.apply(this, args));
     };
   }
 
@@ -138,7 +135,7 @@ export class ImportDialogs implements MockFactory {
   // `fill` added, which ask anyway.
   private routeStatics(name: string, resource: WIT.ResourceClass, cls: Function, wasi: boolean): Function {
     const statics = new Map(resource.get_static_funcs()
-      .filter(([key, func]) => func.callKind === 'static' && typeof (cls as any)[key] === 'function' && !this.prompts.has((cls as any)[key]))
+      .filter(([key, func]) => func.callKind === 'static' && typeof (cls as any)[key] === 'function' && !asks((cls as any)[key]))
       .map(([key, func]) => [key, this.routing(`${name}#${func._witName}`, func, key, (cls as any)[key].bind(cls), () => ({ callKind: 'static', resource }), wasi)]));
     return statics.size === 0 ? cls : new Proxy(cls, {
       get: (target, key, receiver) => (typeof key === 'string' && statics.get(key)) || Reflect.get(target, key, receiver),
@@ -157,6 +154,7 @@ export class ImportDialogs implements MockFactory {
         }
       };
       define(cls, 'name', resource._name);
+      markAsking(cls);
       this.mockClasses.set(resource, this.fill(resource, cls));
     }
     return cls;
@@ -190,7 +188,7 @@ export class ImportDialogs implements MockFactory {
     const prompt = function (this: unknown, ...args: any[]) {
       return dialogs.ask(func, dialogs.describe(callee(this), func, key, args));
     };
-    this.prompts.add(prompt);
+    markAsking(prompt);
     return prompt;
   }
 
