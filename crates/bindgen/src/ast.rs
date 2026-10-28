@@ -308,19 +308,30 @@ impl<'a> Bindgen<'a> {
         self.src.push_str("});\n}\n");
         identifier
     }
-    fn exported_funcs(&mut self, funcs: &[&Function]) {
+    // The world-level functions, as the interface `UNNAMED`, held in the JS constant `constant`.
+    fn world_funcs(&mut self, constant: &str, funcs: &[&Function]) -> bool {
         if funcs.is_empty() {
-            return;
+            return false;
         }
-        let unnamed = "UNNAMED".to_string();
         self.src.push_str(&format!(
-            "const {unnamed} = IDL.Interface('{unnamed}', {{\n"
+            "const {constant} = IDL.Interface('UNNAMED', {{\n"
         ));
         for func in funcs {
             self.func(func);
         }
         self.src.push_str("});\n");
-        self.export_interfaces.push(unnamed);
+        true
+    }
+    fn exported_funcs(&mut self, funcs: &[&Function]) {
+        if self.world_funcs("UNNAMED", funcs) {
+            self.export_interfaces.push("UNNAMED".to_string());
+        }
+    }
+    // jco imports each world-level function as a module of its own, named as in WIT.
+    fn imported_funcs(&mut self, funcs: &[&Function]) {
+        if self.world_funcs("UNNAMED_IMPORTS", funcs) {
+            self.import_interfaces.push("UNNAMED_IMPORTS".to_string());
+        }
     }
     // Resources are emitted in the interface that defines them, `owner`; others `use` them.
     fn emit_resources(&mut self, resources: &BTreeMap<String, Bindgen>, owner: &str) {
@@ -356,6 +367,7 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
     bindgen
         .src
         .push_str("export const Factory = ({IDL}) => {\n");
+    let mut import_funcs = Vec::new();
     for (name, import) in &world.imports {
         match import {
             WorldItem::Interface { id, .. } => {
@@ -369,9 +381,11 @@ pub fn generate_ast(component: &[u8]) -> Result<String> {
                 bindgen.import_interfaces.push(id);
                 bindgen.local_names = iface.local_names;
             }
+            WorldItem::Function(f) => import_funcs.push(f),
             _ => (),
         }
     }
+    bindgen.imported_funcs(&import_funcs);
     let mut funcs = Vec::new();
     for (name, export) in &world.exports {
         match export {

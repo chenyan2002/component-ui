@@ -65,9 +65,15 @@ export function ownFunc(fields: Record<string, WIT.FuncClass>, key: string): WIT
 // Imported interfaces by unversioned name, as jco keys imports: it gives all versions of an
 // interface one import object. The bindgen already merges semver-compatible versions, e.g.
 // `wasi:io/streams@0.2.0` into `@0.2.3`, so a name only has several for incompatible ones.
+// World-level functions are each an import of their own, named as in WIT, e.g. `log-line`,
+// whose default export is the function.
 export function byImportName(interfaces: WIT.InterfaceClass[]): Map<string, WIT.InterfaceClass[]> {
   const grouped = new Map<string, WIT.InterfaceClass[]>();
   for (const iface of interfaces) {
+    if (iface.isRoot) {
+      Object.values(iface._fields).forEach((func) => grouped.set(func._witName, [WIT.Interface(iface._name, { default: func })]));
+      continue;
+    }
     const name = unversioned(iface._name);
     grouped.set(name, [...(grouped.get(name) ?? []), iface]);
   }

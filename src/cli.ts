@@ -136,8 +136,9 @@ async function inspect(file: string, wasiShim: boolean, print: (line: string) =>
   section('Exports, which `call` calls:', functionsOf(component.interfaces, (r, iface) => definedResources(iface).includes(r)));
   section('Host resources the exports use, whose functions `call` can call too, e.g. to make their arguments:',
     functionsOf(component.interfaces, (r) => !defined.has(r), false));
-  const custom = new Set(component.customImports.map(unversioned));
-  const imported = functionsOf(component.imports.filter((iface) => custom.has(unversioned(iface._name))));
+  // As jco names them: world-level functions are imports of their own, e.g. `log-line`.
+  const ifaces = byImportName(component.imports);
+  const imported = functionsOf(component.customImports.flatMap((pkg) => ifaces.get(unversioned(pkg)) ?? []));
   const asks = (func: WIT.FuncClass) => func._ret.length > 0 && func.callKind !== 'constructor';
   section('Imports that ask for answers, unless implemented with --imports:', imported.filter(([_, func]) => asks(func)));
   section('Imports answered on their own, with a new mock for a constructor, and nothing for a function without a result:',
@@ -297,11 +298,12 @@ function stopHint(driver: Driver, stopped: Stopped, hole: string | undefined): s
 }
 
 // Whether an answer's callee, e.g. `new imports/y` or `docs:adder/add@0.1.0.add`, is of the
-// imported package, e.g. `docs:adder/add`, with or without its version.
+// imported package, e.g. `docs:adder/add`, with or without its version; a world-level function,
+// e.g. `log-line`, is a package of its own.
 function isOfPackage(callee: string, pkg: string): boolean {
   const name = callee.replace(/^new /, '');
   const unversionedPkg = unversioned(pkg);
-  return name.startsWith(unversionedPkg) && /^[/@.]/.test(name.slice(unversionedPkg.length));
+  return name === unversionedPkg || (name.startsWith(unversionedPkg) && /^[/@.]/.test(name.slice(unversionedPkg.length)));
 }
 
 // Where an answer comes from, as `--from` names it: `answers.txt:12`, or `12` in the first file.

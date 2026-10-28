@@ -200,7 +200,9 @@ settings): it is the same format, so continue it with `--answers` as your own.
 - `--imports <pkg>=<file.js>` implements an imported package in JavaScript, e.g. a calculator's
   `docs:adder/add`, when answering by hand gets tedious. `component-ui template app.wasm <pkg>`
   prints a module to start from. Functions and methods are named in camelCase, e.g. `getA` for
-  `get-a`, and resources are classes. Values follow jco: records are objects with camelCase
+  `get-a`, and resources are classes. A function the world imports directly, e.g.
+  `import log-line: func(text: string)`, is a package of its own, `log-line`, whose module exports
+  it as `default`. Values follow jco: records are objects with camelCase
   fields, variants `{ tag, val }`, options `null` or the value, `u64`/`s64` BigInts, `list<u8>` a
   `Uint8Array`; a function returning a `result` returns its `ok` value and throws its `err` value.
   Their calls show in the run, and `--save` records their results, marked `// javascript`, so the

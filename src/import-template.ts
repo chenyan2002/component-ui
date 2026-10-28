@@ -34,8 +34,13 @@ function commented(lines: string[]): string {
 
 function funcTemplate(key: string, func: WIT.FuncClass): string {
   const name = jsIdent(key);
+  const head = `// ${func.displayName(key)}: func(${witArgs(func)})${witResult(func)}`;
+  // A world-level function is the default export of a module of its own, e.g. `log-line`'s.
+  if (key === 'default') {
+    return commented([head, `export default function ${jsIdent(WIT.jsFieldName(func._witName))}${jsArgs(func)} {`, '}']);
+  }
   return commented([
-    `// ${func.displayName(key)}: func(${witArgs(func)})${witResult(func)}`,
+    head,
     ...(name === key
       ? [`export function ${key}${jsArgs(func)} {`, '}']
       : [`function ${name}${jsArgs(func)} {`, '}', `export { ${name} as ${key} };`]),

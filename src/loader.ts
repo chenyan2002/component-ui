@@ -144,7 +144,7 @@ export function stubMissingImports(pkg: string, mod: object): object {
       }
       // A plain function, so it also works where a resource class is expected.
       return function missingImport() {
-        throw new Error(`Import ${pkg}.${WIT.kebabName(key)} is not implemented. Implement it in JavaScript from the Imports bar.`);
+        throw new Error(`Import ${pkg}.${WIT.kebabName(key)} is not implemented`);
       };
     },
   });
