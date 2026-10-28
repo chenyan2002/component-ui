@@ -25,7 +25,7 @@ const CALC = 'public/calculator.wasm';
 const EVAL = 'docs:calculator/calculate@0.1.0.eval-expression(add, 1, 2)';
 const RESOURCE = 'public/resource.wasm';
 
-test('inspect shows the exports, the imports that ask, and the types', () => {
+test('inspect shows the exports, the mocked imports, and the types', () => {
   const { code, out } = cli('inspect', CALC);
   assert.equal(code, 0);
   assert.match(out, /^ {2}docs:calculator\/calculate@0\.1\.0\.eval-expression\(op: op, x: u32, y: u32\) -> u32$/m);
@@ -34,14 +34,14 @@ test('inspect shows the exports, the imports that ask, and the types', () => {
   // A method takes its instance first.
   const resource = cli('inspect', RESOURCE).out;
   assert.match(resource, /^ {2}exports\/x\.get-a\(self: borrow<x>\) -> s32$/m);
-  // Imports that don't ask are listed apart, and so are the host resources the exports use.
-  assert.match(resource, /^Imports answered on their own, .*:\n {2}new imports\/y\(a: s32\)\n {2}imports\/y\.set-a\(self: borrow<y>, a: s32\)$/m);
+  // Imports that need no answer are listed apart, and so are the host resources the exports use.
+  assert.match(resource, /^Mocked imports answered on their own, .*:\n {2}new imports\/y\(a: s32\)\n {2}imports\/y\.set-a\(self: borrow<y>, a: s32\)$/m);
   assert.match(resource, /^Types: none$/m);
   // A resource's constructor and statics come first, then its methods, as the UI shows them.
   assert.match(cli('inspect', 'public/kv-store.wasm').out, /^Host resources the exports use, .*:\n {2}fastly:compute\/async-io\/pollable@0\.1\.0\.new-ready\(\) -> pollable\n {2}fastly:compute\/async-io\/pollable@0\.1\.0\.is-ready\(self: borrow<pollable>\) -> bool$/m);
   // A resource an export defines is the guest's, also where another export `use`s it.
   const wrapped = cli('inspect', 'public/record_imports.wasm').out;
-  const hostResources = wrapped.slice(wrapped.indexOf('Host resources'), wrapped.indexOf('Imports that ask'));
+  const hostResources = wrapped.slice(wrapped.indexOf('Host resources'), wrapped.indexOf('Mocked imports to answer'));
   assert.match(wrapped, /^ {2}wrapped-fastly:compute\/http-resp\/response@0\.1\.0\.new\(\)/m);
   assert.match(hostResources, /^ {2}fastly:compute\/http-resp\/response@0\.1\.0\./m);
   assert.doesNotMatch(hostResources, /wrapped-/);
@@ -91,10 +91,10 @@ test('an answer for another import, or other arguments, stops the run, saying wh
   assert.match(method.err, /Write a method as resource\.method\(#borrow-x-1, …\)/);
 });
 
-test('an answer that no import asked for means the guest\'s calls changed', () => {
+test('an answer that the guest made no call for means the guest\'s calls changed', () => {
   const { code, out } = cli('call', CALC, EVAL, '--answer', 'docs:adder/add@0.1.0.add = 3', '--answer', 'docs:adder/add@0.1.0.add = 4');
   assert.equal(code, 1);
-  assert.match(out, /stopped: --answer 2: no import asked for this answer\. The guest's calls changed here/);
+  assert.match(out, /stopped: --answer 2: the guest made no call for this answer\. The guest's calls changed here/);
 });
 
 test('template prints a module to implement an import with, for --imports', () => {
@@ -195,7 +195,7 @@ imports/y.get-a(#borrow-y-6) = 50
   const lines = out.split('\n');
   assert.deepEqual(lines.slice(0, 4), ['› new exports/x(5)', '  = #x-1', '› exports/x.get-a(#borrow-x-1)', '  = 5']);
   assert.ok(lines.includes('  ↳ imports/y.add(#y-1, 10)'));
-  // The new mock, which `#mock` asked for, as --save writes it.
+  // The new mock, which `#mock` stood for, as --save writes it.
   assert.ok(lines.includes(`    = #mock-y-2  (${answers}:4)`));
   assert.ok(lines.includes(`    = 30  (${answers}:5)`));
   assert.equal(lines.at(-2), '  = ok');
@@ -237,7 +237,7 @@ test('--save writes a file that reproduces the run, with a ? where it stopped', 
   assert.match(text, /^imports\/y\.add\(#y-1, 10\) = #mock-y-2  \/\/ default; instances of y: #y-1 \(from new imports\/y\(10\); moved into imports\/y\.add\(#y-1, 10\)\)$/m);
   assert.match(text, /^imports\/y\.get-a\(#borrow-y-2\) = 30$/m);
   assert.match(text, /^> exports\.test-imports\(\)  \/\/ = ok$/m);
-  // Imports that didn't ask show too, e.g. the set-a that makes the next get-a's answer differ.
+  // Imports that needed no answer show too, e.g. the set-a that makes the next get-a's answer differ.
   assert.match(text, /^imports\/y\.get-a\(#borrow-y-1\) = 10\n\/\/! imports\/y\.set-a\(#borrow-y-1, 20\)\nimports\/y\.get-a\(#borrow-y-1\) = 20$/m);
   assert.match(text, /^\/\/! new imports\/y\(2\) = #y-4$/m);
   // The guest's drops of host instances show too, though they call no import.
@@ -339,7 +339,7 @@ test('instances an answer or an argument could use are listed', () => {
 
 test('--no-wasi-shim answers WASI like any other import, and records it', () => {
   const PRINTER = 'public/printer.wasm';
-  // WASI imports ask, and can be implemented in JavaScript.
+  // WASI imports are mocked, and can be implemented in JavaScript.
   const inspected = cli('inspect', PRINTER, '--no-wasi-shim').out;
   assert.match(inspected, /^ {2}wasi:cli\/stdout@0\.2\.9\.get-stdout\(\) -> output-stream$/m);
   assert.match(inspected, /^Packages to implement with --imports: .*wasi:cli\/stdout/m);
@@ -356,7 +356,7 @@ test('--no-wasi-shim answers WASI like any other import, and records it', () => 
   assert.equal(readFileSync(saved, 'utf8'), [
     '//! component-ui call public/printer.wasm --defaults eager --no-wasi-shim',
     '//! imports implemented in JavaScript: none',
-    "//! WASI doesn't come from the shim: its calls ask, and are recorded, like any other import's",
+    "//! WASI doesn't come from the shim: its calls are mocked, and recorded, like any other import's",
     '> greet("Ada")  // = "greeted Ada"',
     'wasi:cli/stdout@0.2.9.get-stdout() = #mock-output-stream-1  // default',
     'wasi:io/streams/output-stream@0.2.9.check-write(#borrow-output-stream-1) = ok(4096)',
@@ -370,7 +370,7 @@ test('--no-wasi-shim answers WASI like any other import, and records it', () => 
   // With the shim, which answers WASI itself, the file's answers for WASI aren't used.
   const shim = cli('call', PRINTER, '--answers', saved);
   assert.equal(shim.code, 1);
-  assert.match(shim.out, /^stopped: .*wasi\.txt:5: no import asked for this answer to wasi:cli\/stdout@0\.2\.9\.get-stdout, which the WASI shim may have answered itself; if the file was saved with --no-wasi-shim, run with it again\.$/m);
+  assert.match(shim.out, /^stopped: .*wasi\.txt:5: the guest made no call for this answer to wasi:cli\/stdout@0\.2\.9\.get-stdout, which the WASI shim may have answered itself; if the file was saved with --no-wasi-shim, run with it again\.$/m);
 });
 
 test('the HTTP response a handler sets on a mock outparam shows, once it is read', () => {

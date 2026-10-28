@@ -10,9 +10,8 @@ test a subcomponent before composing it with `wac`.
 ## Features
 
 - **UI widget from WIT types.** Each WIT type maps to a UI widget, so you can enter valid arguments structurally in the browser.
-- **Mock imports interactively.** Any import that hasn't been implemented
-  asks for its return value in the console when the guest calls it, and the guest waits for
-  your answer. This includes methods of imported/host resources, which can also be passed to exports as mock arguments.
+- **Mock imports interactively.** Any import that hasn't been implemented is mocked: when the
+  guest calls it, the console prompts for its return value, and the guest waits for your answer. This includes methods of imported/host resources, which can also be passed to exports as mock arguments.
 - **Resource table.** Tracks each resource handle: who created it, whether it is live, moved
   or dropped, and which handle index it reuses. Live instances can be picked as arguments, and
   dropped from the table.
@@ -108,10 +107,9 @@ npm run build:bindgen
   - jco merges incompatible versions (e.g., 0.2.0 and 0.3.0) into one unversioned import, so
     a call can't be told apart by version: it is shown with, and a prompt asks for, the types
     of the first version that has the function, which may be the wrong form for the other.
-- In the UI, imports the guest calls where it can't wait, in a resource destructor or while the
-  component is instantiated, can't be answered in the console: unless the console's "Answering
-  imports" setting answers them, the call fails with `cannot block a synchronous task before
-  returning`. Implementing them in JavaScript works, as does the CLI's answers file.
+- Component instantiation and resource destructor cannot be made asynchronous. This means, in browser,
+  we can't mock import calls inside these two places. We either need a JS stub for these imports or provide
+  the response via the answer file. CLI doesn't have this restriction, as the responses are given from the file.
 - The CLI's exit code doesn't reflect a guest calling `wasi:cli/exit`; the call shows the error
   the shim throws. Exiting with the guest's status is future work.
 - The WIT shown, in the UI and by the CLI, is the one embedded in the component, which keeps the

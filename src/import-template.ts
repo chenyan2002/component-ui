@@ -74,9 +74,9 @@ function firstByKey<T>(entries: Array<readonly [string, T]>): Map<string, T> {
 }
 
 // A commented-out implementation of an imported interface, from the WIT of each of its versions,
-// to start editing from. Left commented out, its calls still ask for their results in the console.
-// `asking` says where the imports left out ask for their results, the UI's console by default.
-export function importTemplate(ifaces: WIT.InterfaceClass[], asking = 'in the console'): string {
+// to start editing from. Left commented out, its calls are still mocked, answered in the console.
+// `answered` says where the mocked imports left out are answered, the UI's console by default.
+export function importTemplate(ifaces: WIT.InterfaceClass[], answered = 'in the console'): string {
   // jco gives all versions of an interface one import object; the first one's types stand for all.
   const funcs = firstByKey(ifaces.flatMap((iface) => Object.entries(iface._fields)));
   // jco takes a resource class from the import that defines it, not those that `use` it.
@@ -86,7 +86,7 @@ export function importTemplate(ifaces: WIT.InterfaceClass[], asking = 'in the co
   return [
     [
       '// Remove the /* */ around a function or class to implement it in JavaScript. Calls to the',
-      `// rest still ask for their results ${asking}, as do the methods a class leaves out.`,
+      `// rest are still mocked, answered ${answered}, as are the methods a class leaves out.`,
     ].join('\n'),
     ...[...funcs].map(([key, func]) => funcTemplate(key, func)),
     ...[...resources.values()].map(resourceTemplate),

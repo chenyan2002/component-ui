@@ -13,10 +13,10 @@ import { clashingNames, Instance, resourcesOf, ResourceRegistry, thrownType } fr
 import { canonicalWave, formatValue, mapHandles, parseWave } from './wave';
 
 // An instance of a component, as the UI and the CLI run it: its resource instances, the host's
-// side of its imports, and the log of what it does. The imports that ask are answered from an
+// side of its imports, and the log of what it does. The mocked imports are answered from an
 // `AnswerSource`; without an answer, they wait, for the user in the UI, while the CLI stops.
 
-// Why an import that asks was left waiting, at the import `record`: the source had no answer, or
+// Why a mocked import was left waiting, at the import `record`: the source had no answer, or
 // one that failed, e.g. for another import.
 export interface Stopped {
   record: CallRecord;
@@ -27,7 +27,7 @@ export interface Stopped {
 
 export interface InstanceOptions {
   // Implements imports in JavaScript, by package as jco names them, e.g. `docs:adder/add`; the
-  // others ask `answers`, including WASI's without the shim.
+  // others are mocked, answered by `answers`, including WASI's without the shim.
   importCode?: Record<string, string>;
   answers: AnswerSource;
   // An import was left waiting, without an answer or with one that failed.
@@ -105,7 +105,7 @@ export class ComponentInstance {
     });
   }
 
-  // Logs an import the guest called, under the pending call it happened in. One that asks gets
+  // Logs an import the guest called, under the pending call it happened in. A mocked one gets
   // its answer from the source.
   private logImport(record: CallRecord): ImportLog {
     const entry = this.log.logImport(record);
@@ -115,8 +115,8 @@ export class ComponentInstance {
         entry.result(text);
         this.checkMocks(record, text);
       },
-      ask: (prompt) => {
-        entry.ask(prompt);
+      prompt: (prompt) => {
+        entry.prompt(prompt);
         // Right away, so that the import returns the answer, also to a guest that can't wait.
         this.answer(record, prompt);
       },
@@ -209,7 +209,7 @@ export class ComponentInstance {
     };
   }
 
-  // Answers an import that asks, or leaves the guest waiting.
+  // Answers a mocked import, or leaves the guest waiting.
   private answer(record: CallRecord, prompt: ImportPrompt) {
     const stop = (unanswered: boolean, reason: string) => this.options.stopped?.({ record, func: prompt.func, unanswered, reason });
     let answer: Answer | undefined;

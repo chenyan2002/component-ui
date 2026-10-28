@@ -5,7 +5,7 @@ import type { HostCode } from './host-resources';
 import { answeredValue, CallEntry, CallLog, ImportEntry, isOwnCall } from './call-log';
 import { canonicalWave, mapHandles } from './wave';
 
-// The answers file: the calls of a run, and the answers to the imports that ask, in the order
+// The answers file: the calls of a run, and the answers to the mocked imports, in the order
 // the guest calls them. `--save` writes it from a run, so that it reproduces the run:
 //
 //     //! component-ui call public/resource.wasm --defaults eager
@@ -20,7 +20,7 @@ import { canonicalWave, mapHandles } from './wave';
 // - `> call` is a call the run makes, written as the console shows it.
 // - `import(args) = value` answers an import, with WAVE of the type it returns, or `!trap` to trap
 //   the guest. It names the call, as the console shows it, so that an answer the guest doesn't
-//   ask for next stops the run rather than answer the wrong call. A method's first argument is
+//   need next stops the run rather than answer the wrong call. A method's first argument is
 //   the instance it is called on, e.g. `#borrow-y-1`. Without the arguments, it answers any call
 //   to the import; `--defaults careful` and `none` don't allow that.
 // - `= ?` is an answer still to be given, which stops the run there.
@@ -28,7 +28,7 @@ import { canonicalWave, mapHandles } from './wave';
 //   the id `y-2`, which `--save` writes for every new mock, so that later uses of `#y-2` show
 //   where it came from. A run where the mock gets another id stops.
 // - Lines starting with `//!` are written by `--save` for the reader, and written anew each time:
-//   the imports that didn't ask, e.g. `//! imports/y.set-a(#borrow-y-1, 20)`, the header, and where
+//   the imports that needed no answer, e.g. `//! imports/y.set-a(#borrow-y-1, 20)`, the header, and where
 //   instances came from that no other line shows, e.g. WASI's. Other `//` comments, and
 //   those after a call or answer, are kept, including `--save`'s notes on the happy path's
 //   answers, e.g. `// default; instances of x: …`, until the user removes them.
@@ -250,8 +250,8 @@ export class Script implements AnswerSource {
     return this.lines.filter((line): line is CallLine => line.kind === 'call');
   }
 
-  // Before running a call: the file's line for it, if it has one. Answers before it that no
-  // import asked for mean the guest's calls changed. Without call lines, the calls are the
+  // Before running a call: the file's line for it, if it has one. Answers before it that the
+  // guest didn't need mean its calls changed. Without call lines, the calls are the
   // command line's, and the answers one sequence across them.
   public beginCall(call: string): CallLine | undefined {
     const line = this.lines[this.next];
@@ -260,7 +260,7 @@ export class Script implements AnswerSource {
       return line;
     }
     if (line && this.next < this.recordedEnd && this.calls.length > 0) {
-      throw divergence(line, `no import asked for this answer before the next call, ${call}`);
+      throw divergence(line, `the guest made no call for this answer before the next call, ${call}`);
     }
     return undefined;
   }
@@ -269,7 +269,7 @@ export class Script implements AnswerSource {
   public finish() {
     const line = this.lines.slice(this.next, this.recordedEnd).find((l) => l.kind === 'answer');
     if (line) {
-      throw divergence(line, 'no import asked for this answer');
+      throw divergence(line, 'the guest made no call for this answer');
     }
   }
 
@@ -282,7 +282,7 @@ export class Script implements AnswerSource {
         throw divergence(line, `the guest called ${record.label}, but the file has the next call here`);
       }
       if (this.hasWasi && line.recorded === 'wasi') {
-        throw divergence(line, `the file has the WASI shim's answer here, but the guest called ${record.label}, which asks`);
+        throw divergence(line, `the file has the WASI shim's answer here, but the guest called ${record.label}, which is mocked`);
       }
       if (line.callee !== record.callee) {
         throw divergence(line, `the answer is for ${line.callee}, but the guest called ${record.label}`);
@@ -336,7 +336,7 @@ export function scriptHeader(command: string, implemented: string[], wasiShim: b
       : `//! imports implemented in JavaScript: ${implemented.join(', ')}; their answers are recorded, marked // javascript, so a replay needs no --imports`,
     wasiShim
       ? '//! WASI comes from the shim; its answers are recorded, marked // wasi, which a replay gives the guest in place of the shim\'s, e.g. the same clocks and random numbers'
-      : '//! WASI doesn\'t come from the shim: its calls ask, and are recorded, like any other import\'s',
+      : '//! WASI doesn\'t come from the shim: its calls are mocked, and recorded, like any other import\'s',
   ];
 }
 
@@ -371,8 +371,8 @@ function newMocks(log: CallLog): Map<string, CallEntry> {
 }
 
 // The lines of an answers file that reproduces the run of a log: its calls; each import the guest
-// made, in order, as the answer it got, with new mocks as `#mock-x-2`, as a `?` if it still asks,
-// or as a `//!` line if it didn't ask; and where other instances came from, e.g. WASI's.
+// made, in order, as the answer it got, with new mocks as `#mock-x-2`, as a `?` if it still needs
+// one, or as a `//!` line if it needed none; and where other instances came from, e.g. WASI's.
 export function scriptLines(log: CallLog, options: ScriptOptions): ScriptText[] {
   const lines: ScriptText[] = options.header.map((text) => ({ text }));
   // The current component instance's part of the log.
@@ -420,7 +420,7 @@ export function scriptLines(log: CallLog, options: ScriptOptions): ScriptText[] 
       const comment = notes.filter(Boolean).join('; ');
       lines.push({ text: `${head} = ${value}${comment ? `  // ${comment}` : ''}` });
     } else if (entry.status !== 'pending' && !(entry.parent && isOwnCall(entry.parent, entry))) {
-      // An import that didn't ask, e.g. a constructor, or a function without a result.
+      // An import that needed no answer, e.g. a constructor, or a function without a result.
       const result = entry.status === 'error' ? `  ! ${entry.output}` : entry.output ? ` = ${entry.output}` : '';
       lines.push({ text: `//! ${record.label}${result}` });
     }

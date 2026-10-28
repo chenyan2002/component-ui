@@ -30,7 +30,7 @@ test('stdout and stderr appear in the console', async ({ page }) => {
   await expect(page.locator('resource-table tr.resource-row', { hasText: 'wasi:cli/stderr@0.2.9.get-stderr()' })).toHaveCount(1);
 });
 
-test('without the WASI shim, WASI imports ask like any other, and the console logs them', async ({ page }) => {
+test('without the WASI shim, WASI imports are mocked like any other, and the console logs them', async ({ page }) => {
   await loadExample(page, 'printer.wasm');
   const settings = async (check: boolean) => {
     await page.getByRole('button', { name: 'Console settings' }).click();

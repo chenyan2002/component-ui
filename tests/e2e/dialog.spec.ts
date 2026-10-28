@@ -45,7 +45,7 @@ const newMock = async (prompt: ReturnType<typeof importPrompt>) => {
   await choose(picker(prompt), { label: 'New mock y' });
 };
 
-test('a missing host resource is mocked, and its calls ask for their results', async ({ page }) => {
+test('a missing host resource is mocked, and its calls are mocked', async ({ page }) => {
   await loadResource(page);
   await call(funcCard(page, 'test-imports'));
   const entry = callEntry(page, 'exports.test-imports()');
@@ -53,7 +53,7 @@ test('a missing host resource is mocked, and its calls ask for their results', a
   // The guest is suspended, so other calls wait.
   await expect(funcCard(page, 'consume').locator('wa-button', { hasText: 'Call' })).toHaveAttribute('disabled');
 
-  // Constructors return a new mock and void methods return right away, without asking.
+  // Constructors return a new mock and void methods return right away, without an answer.
   await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('10'));
   await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('20'));
   await answerImport(page, 'imports/y.add(#y-1, 10)', newMock);
@@ -105,7 +105,7 @@ test('an import returns instances the host owns, not those the guest holds', asy
     .toHaveText(['dropped', 'moved', 'moved', 'dropped', 'dropped']);
 });
 
-test('a partial stub only asks for what it leaves out', async ({ page }) => {
+test('a partial stub only mocks what it leaves out', async ({ page }) => {
   await loadResource(page, [
     'export class Y {',
     '  constructor(a) { this.a = a }',
@@ -116,7 +116,7 @@ test('a partial stub only asks for what it leaves out', async ({ page }) => {
   await call(funcCard(page, 'test-imports'));
   await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('10'));
   await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('20'));
-  // `Y.add` is implemented, so it doesn't ask; its result is a real `Y`.
+  // `Y.add` is implemented, so it isn't mocked; its result is a real `Y`.
   await answerImport(page, 'imports/y.get-a(#borrow-y-2)', s32('30'));
   await expect(row(page, 'y-2').locator('.instance-type')).toHaveText('y');
 });
@@ -142,7 +142,7 @@ test('mock host resources stand in for the arguments a host would create', async
   await expect(chosen(picker(arg(handle, 1)))).toHaveText('New mock response-outparam');
   await call(handle);
 
-  // Their methods ask, as do the mocks they return.
+  // Their methods are mocked, as are those of the mocks they return.
   const selectMock = (resource: string) => async (prompt: ReturnType<typeof importPrompt>) => {
     await choose(picker(prompt), 'ok');
     await choose(picker(prompt, 1), { label: `New mock ${resource}` });
@@ -261,7 +261,7 @@ test('defaults answer imports by the happy path, as the CLI does, and Save marks
   await loadResource(page);
   await setDefaults(page, 'eager');
   await call(funcCard(page, 'test-imports'));
-  // An s32 has no happy path, so it still asks.
+  // An s32 has no happy path, so it still needs an answer.
   await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('10'));
   await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('20'));
   // A y does: a new mock, though the host could return the #y-1 it was given, which Save notes.
@@ -273,7 +273,7 @@ test('defaults answer imports by the happy path, as the CLI does, and Save marks
   expect(text).toContain('imports/y.add(#y-1, 10) = #mock-y-2  // default; instances of y: #y-1 (from new imports/y(10); moved into imports/y.add(#y-1, 10))\n');
 });
 
-test('careful defaults ask where there are instances to choose', async ({ page }) => {
+test('careful defaults stop where there are instances to choose', async ({ page }) => {
   await loadResource(page);
   await setDefaults(page, 'careful');
   await call(funcCard(page, 'test-imports'));

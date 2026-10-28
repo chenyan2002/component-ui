@@ -6,7 +6,7 @@ description: Run and debug a WebAssembly component (.wasm, component model / WIT
 # Debugging a WebAssembly component with component-ui
 
 `component-ui` runs a component on its own. You make the calls; every import the component
-makes that nothing implements stops the run and asks you for its result. Your answers go in a
+makes that nothing implements is mocked: its call stops the run for you to give its result. Your answers go in a
 file that reproduces the run, so you build the run up one answer at a time, and replay it after
 changing an answer or rebuilding the component.
 
@@ -26,8 +26,8 @@ npm install && npm run build:cli && npm link
 ## The loop
 
 1. **See what the component has.** This shows the exports to call; the functions of host
-   resources the exports use, which you can call to make their arguments; the imports that will ask
-   for answers, and those answered on their own (constructors return a new mock, and functions
+   resources the exports use, which you can call to make their arguments; the mocked imports you will
+   answer, and those answered on their own (constructors return a new mock, and functions
    without a result return nothing); and the named types they use. It shows the component's
    interfaces, not what it's built from: a component composed of others shows as one.
 
@@ -72,9 +72,9 @@ npm install && npm run build:cli && npm link
    `#backend-4 is from …open-backend(#borrow-service-3, "kiad700…")`, which often is the answer,
    e.g. for the backend's name.
 
-   **To save runs, answer ahead.** Once you can tell what the guest will ask next, write those
-   answers after the one you filled in, in the order it will ask, each naming its call. The answers
-   are a sequence: every import that asks, up to the file's last answer, needs a line, so keep the
+   **To save runs, answer ahead.** Once you can tell what the guest will call next, write those
+   answers after the one you filled in, in the order it will call, each naming its call. The answers
+   are a sequence: every call to a mocked import that needs an answer, up to the file's last one, takes a line, so keep the
    `// default` lines `--save` wrote between them. And once an import turns out to be a simple
    stateful object, e.g. a getter returning what a setter set, implement it with `--imports`
    instead of answering each call (see [Options worth knowing](#options-worth-knowing)).
@@ -92,7 +92,7 @@ npm install && npm run build:cli && npm link
    Here the host could have returned the `#y-1` it was given. Ask whether the guest expects one of
    the listed instances, e.g. when an import returns something it was given, or looks up an
    existing object. If so, change the value, e.g. to `#y-1`, and run again. A mock the guest then
-   uses asks for its methods' results, so a wrong mock usually shows at the next stop; one the
+   uses stops for its methods' results, so a wrong mock usually shows at the next stop; one the
    guest only passes back to the host or compares doesn't, so the note is the only sign.
 
 5. **Change answers to explore.** Edit any answer, e.g. to `err(…)` or `!trap` to test the
@@ -172,7 +172,7 @@ settings): it is the same format, so continue it with `--answers` as your own.
 - `import(args) = value` answers one call: `value` is WAVE of the type the import returns, or
   `!trap` to trap the guest. Without `(args)`, it answers the next call to the import, whatever its
   arguments, which is only for arguments that differ from run to run; it still answers one call.
-- `//! import(args) = value` lines are the imports that didn't ask, e.g. `//! new imports/y(10) = #y-1`
+- `//! import(args) = value` lines are the imports that needed no answer, e.g. `//! new imports/y(10) = #y-1`
   or `//! imports/y.set-a(#borrow-y-1, 20)`, and the guest's drops of host instances, e.g.
   `//! drop #y-2`, so that the file shows all the guest did with the host.
 - `= ?` is an answer still to give.
@@ -197,7 +197,7 @@ settings): it is the same format, so continue it with `--answers` as your own.
 ## Options worth knowing
 
 - `--defaults careful` stops wherever an answer could return one of several instances, rather
-  than taking a mock; `--defaults none` stops at every import that asks. Both need every answer to
+  than taking a mock; `--defaults none` stops at every mocked import that needs an answer. Both need every answer to
   give its arguments. Use them when a run behaves oddly around resources.
 - `--imports <pkg>=<file.js>` implements an imported package in JavaScript, e.g. a calculator's
   `docs:adder/add`, when answering by hand gets tedious. `component-ui template app.wasm <pkg>`
@@ -209,13 +209,13 @@ settings): it is the same format, so continue it with `--answers` as your own.
   `Uint8Array`; a function returning a `result` returns its `ok` value and throws its `err` value.
   Their calls show in the run, and `--save` records their results, marked `// javascript`, so the
   file replays without `--imports`. Where an argument is a mock, which your code
-  didn't make, your function isn't called: the call asks for an answer instead, and its line says
+  didn't make, your function isn't called: the call is mocked instead, and its line says
   `~ your JavaScript … wasn't called, as an argument is a mock`.
 - `--from <line>` prints the run from the answer on that line of the file.
 - WASI comes from the shim by default. Its calls show in the run, e.g.
   `wasi:cli/stdout@0.2.9.get-stdout()` and the `output-stream.write(…, b"…")` calls that follow, and
   `--save` records their results, marked `// wasi`, which a replay gives the guest again.
-- `--no-wasi-shim` doesn't provide WASI from the shim: WASI imports ask like any other, and the
+- `--no-wasi-shim` doesn't provide WASI from the shim: WASI imports are mocked like any other, and the
   answers file answers them, `// wasi` lines included; past them, you answer each, e.g. `ok(4096)`
   for a `check-write`. Use it to answer WASI yourself, e.g. to make a write fail. Give it to
   `inspect` and `template` too, to see and implement the WASI imports.

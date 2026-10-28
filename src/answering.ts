@@ -5,7 +5,7 @@ import { errorText, ImportPrompt } from './log';
 import { describeInstance, Instance } from './resources';
 import { parseWave } from './wave';
 
-// Answering the imports that ask, as the CLI does from its answers file, and both the CLI and
+// Answering the mocked imports, as the CLI does from its answers file, and both the CLI and
 // the UI do by the happy path, at the level of `--defaults` or of the console's choice.
 
 export type DefaultsLevel = 'none' | 'careful' | 'eager';
@@ -45,7 +45,7 @@ export interface AnswerContext {
   canMock(resource: WIT.ResourceClass): boolean;
 }
 
-// Answers the imports that ask, in the order the guest calls them, with a value of the type
+// Answers the mocked imports, in the order the guest calls them, with a value of the type
 // `func` returns. Returns undefined when it has no answer, and throws when it can't answer, e.g.
 // as its next answer is for another import.
 export interface AnswerSource {
@@ -129,7 +129,7 @@ export function defaultAnswer(t: WIT.Type, context: AnswerContext, level: Defaul
   return happy && { source: 'default', value: happy.value, note: happy.notes.join('; ') || undefined };
 }
 
-// Answers by the happy path alone, at the level `level` gives as the import asks, e.g. the one
+// Answers by the happy path alone, at the level `level` gives when the import is called, e.g. the one
 // chosen in the console's settings.
 export function defaultsSource(level: () => DefaultsLevel): AnswerSource {
   return { answer: (_record, func, context) => defaultAnswer(func._ret[0], context, level()) };

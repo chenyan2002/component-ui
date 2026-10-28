@@ -124,7 +124,7 @@ kebab case (`src/codegen/util.rs`, `wit_func_name`), which loses information:
   `@bytecodealliance/preview2-shim`, and logs each of its calls with the shim's answer, as
   proxy-component records it. A component-ui replay still runs the shim, but gives the guest the
   recorded answers in place of the shim's, and the shim's own objects for answers with handles;
-  past the recording, the shim answers. Without the shim, WASI imports ask like any other.
+  past the recording, the shim answers. Without the shim, WASI imports are mocked like any other.
 - **Methods of guest-exported resources.** proxy-component records them but can't replay them
   (`src/codegen/mod.rs`, `export_funcs` skips methods). component-ui calls them.
 - **Mock resources passed to exports.** component-ui writes them as owned handles. That matches
@@ -142,7 +142,7 @@ an answer line for an `ImportArgs` and its `ImportRet`. The differences:
 
 - An answers file records every import the guest makes, as proxy-component does. The answers of
   imports implemented in JavaScript and of the WASI shim are marked, `// javascript` and
-  `// wasi`, and imports that didn't ask, e.g. those without a result, are written as `//!` lines,
+  `// wasi`, and imports that needed no answer, e.g. those without a result, are written as `//!` lines,
   which a replay doesn't read; proxy-component has an `ImportRet` for each.
 - It doesn't record export results (`ExportRet`), but writes them as comments.
 - Its names, handles and values differ as above: versioned interfaces, `#mock` and `#mock-<id>`,
@@ -158,7 +158,7 @@ an answer line for an `ImportArgs` and its `ImportRet`. The differences:
    log already has every import call, WASI and JavaScript included, with its answer; what
    remains is writing it in proxy-component's format.
 4. A component-ui replayer that answers imports from a trace in order. It already does so from
-   its own answers files, WASI included, and asks for whatever a file doesn't cover; what
+   its own answers files, WASI included, and stops for whatever a file doesn't cover; what
    remains is reading proxy-component's format.
 5. Agreement on the parts that are lossy or unverified: versioned names, interface-qualified
    handle labels, how host resource handles are numbered, and whether jco's handle indices for

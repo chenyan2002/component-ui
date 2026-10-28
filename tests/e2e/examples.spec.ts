@@ -157,7 +157,7 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   // A `u64` is a `bigint`, shown as a number.
   await expectCall(page, 'fastly:compute/http-req/request@0.1.0.get-method(#borrow-request-1, 10)', 'ok', 'ok("POST")// javascript');
 
-  // The guest accepts them; imports the stubs leave out ask for their results.
+  // The guest accepts them; imports the stubs leave out are mocked.
   const handle = funcCard(page, 'handle');
   await choose(picker(arg(handle, 0)), 'request-1');
   await choose(picker(arg(handle, 1)), 'pollable-2');
@@ -173,13 +173,13 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
   await expectCall(page, 'fastly:compute/http-incoming@0.1.0.handle(#request-1, #pollable-2)', 'error', /^Trapped at /);
 });
 
-test('kv-store: a host resource function the UI calls asks in the call entry, not again under it', async ({ page }) => {
+test('kv-store: a host resource function the UI calls prompts in the call entry, not again under it', async ({ page }) => {
   await loadExample(page, 'kv-store.wasm');
   const hostResources = page.locator('wa-details.interface').first();
   await hostResources.locator(':scope > .section-summary').click();
   const pollable = resource(page, 'fastly:compute/async-io/pollable@0.1.0');
   await pollable.locator('.section-summary').click();
-  // Without a stub for `Pollable`, `new-ready` asks for its result.
+  // Without a stub for `Pollable`, `new-ready` is mocked.
   await call(funcCard(pollable, 'new-ready'));
   const entry = callEntry(page, 'fastly:compute/async-io/pollable@0.1.0.new-ready()');
   await expect(entry.locator('.import-prompt')).toBeVisible();
@@ -253,7 +253,7 @@ test.describe('variants', () => {
     }
   });
 
-  test('an unimplemented import asks for its result only when called', async ({ page }) => {
+  test('an unimplemented import prompts for its result only when called', async ({ page }) => {
     await call(funcCard(page, 'test-imports'));
     const entry = callEntry(page, 'test-imports()');
     await expect(entry.locator('.log-meta')).toHaveText('waiting for an import');

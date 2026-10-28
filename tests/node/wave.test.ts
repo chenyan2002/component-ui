@@ -121,7 +121,7 @@ test('handles select instances by id', () => {
   ] as const) {
     assert.throws(() => parseWave(t, text), /Expected a handle like #(borrow-)?y-1/, text);
   }
-  // `#mock` asks for a new mock, which only resources the host implements can have.
+  // `#mock` stands for a new mock, which only resources the host implements can have.
   assert.equal((parseWave(WIT.Owned(rec), '#mock') as TextDraft).text, NEW_MOCK);
   assert.equal(parseDraft(WIT.Owned(rec), parseWave(WIT.Owned(rec), '#y-2'), registry), INVALID);
 });

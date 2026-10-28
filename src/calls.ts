@@ -14,7 +14,7 @@ export interface ExportsContext {
   registry: ResourceRegistry;
   host: HostResources;
   activity: CallActivity;
-  // Mock instances of host resources, whose methods ask in the console.
+  // Mock instances of host resources, whose methods are mocked in the console.
   mocks: MockFactory;
   // Reports an error a call failed with, e.g. a trap's stack; the browser's console by default.
   report?: (err: unknown) => void;

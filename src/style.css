@@ -557,7 +557,7 @@ resource-table {
   font-size: var(--wa-font-size-xs);
   color: var(--wa-color-warning-on-quiet);
 }
-/* Imports the guest called during a call, and the form asking for a missing one's result. */
+/* Imports the guest called during a call, and the form prompting for a mocked one's result. */
 .log-imports {
   display: flex;
   flex-direction: column;

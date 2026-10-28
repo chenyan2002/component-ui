@@ -91,7 +91,7 @@ export class ComponentApp extends LitElement {
   // What the exports are filtered by, and whether any of their interfaces is expanded.
   @state() accessor search = '';
   @state() accessor interfacesOpen = true;
-  // Whether the preview2 shim provides WASI, or WASI imports ask like any other.
+  // Whether the preview2 shim provides WASI, or WASI imports are mocked like any other.
   @state() accessor wasiShim = localStorage.getItem(WASI_SHIM_KEY) !== 'false';
 
   // Guards against a slow load finishing after a newer one has started.
@@ -199,7 +199,7 @@ export class ComponentApp extends LitElement {
   }
 
   // The exports and the resource table side by side, above a full-width console, which also
-  // asks for the results of missing imports.
+  // prompts for the results of mocked imports.
   private renderWorkspace(s: Session) {
     // Shown for exports involving resources, or once the guest gets one, e.g. a stdout stream.
     // It is collapsed rather than removed, so the export cards keep their state.
@@ -234,7 +234,7 @@ export class ComponentApp extends LitElement {
     </wa-split-panel>`;
   }
 
-  // Calls to imports ask in the console by default. The dialog implements them in JavaScript
+  // Imports are mocked in the console by default. The dialog implements them in JavaScript
   // instead, and restarts the component with them; it stays open if that fails.
   private renderImports(s: Session) {
     const pending = s.component.customImports.some((pkg) => (s.importCode[pkg] ?? '') !== (s.appliedCode[pkg] ?? ''));
@@ -251,7 +251,7 @@ export class ComponentApp extends LitElement {
     >
       <p class="muted imports-help">
         Each interface is an ES module exporting its functions and resource classes. The functions
-        you leave out ask for their results in the console.
+        you leave out are mocked: the console prompts for their results.
       </p>
       ${s.status === 'failed'
         ? html`<wa-callout variant="danger"><strong>Instantiation failed</strong><br />${errorText(s.error)}</wa-callout>`
@@ -321,12 +321,12 @@ export class ComponentApp extends LitElement {
     </div>`;
   }
 
-  // Calls to imports ask in the console unless implemented in JavaScript, which the badge counts.
+  // Imports are mocked in the console unless implemented in JavaScript, which the badge counts.
   private renderStubButton(s: Session) {
     const count = s.component.customImports.length;
     const implemented = implementedImports(s.appliedCode).length;
     const title = `Implement the ${count} imported interface${count === 1 ? '' : 's'} in JavaScript; `
-      + `the functions you leave out ask for their results in the console`
+      + `the functions you leave out are mocked in the console`
       + (implemented > 0 ? ` (${implemented} in JavaScript)` : '');
     return html`<wa-button id="editImportsButton" size="s" appearance="outlined" title=${title} @click=${() => (this.editingImports = true)}>
       <wa-icon slot="start" name="code"></wa-icon>
@@ -382,7 +382,7 @@ export class ComponentApp extends LitElement {
       this.consolePanel?.clear();
       this.search = '';
       // The editors start with the example code, or a commented-out template, but the component
-      // starts without any, so calling an import asks in the console.
+      // starts without any, so its imports are mocked in the console.
       const templates = importTemplates(component);
       const importCode = Object.fromEntries(component.customImports.map((pkg) => [pkg, EXAMPLE_IMPORT_CODE[pkg] ?? templates[pkg]]));
       const session: Session = {
@@ -448,8 +448,8 @@ export class ComponentApp extends LitElement {
       const panel = this.consolePanel!;
       this.setSaveHeader(panel, s, code);
       s.appliedCode = { ...code };
-      // Imports that ask get the happy path's answer at the level of the console's settings, if
-      // there is one, and ask in the console otherwise; the guest waits for the answer.
+      // Mocked imports get the happy path's answer at the level of the console's settings, if
+      // there is one, and are answered in the console otherwise; the guest waits for the answer.
       const instance = await ComponentInstance.create(browserPlatform, s.component, panel.log, {
         importCode: s.appliedCode,
         answers: defaultsSource(() => panel.defaults),

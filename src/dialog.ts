@@ -2,7 +2,7 @@ import * as WIT from './wit';
 import { CallRecord, Callee, describeCall, unversioned } from './call-record';
 import { ImportLog } from './log';
 import { initDraft, INVALID, MockFactory, parseDraft, randomize } from './draft';
-import { asks, byImportName, HostResources, markAsking, ownFunc } from './host-resources';
+import { byImportName, HostResources, isMocked, markMocked, ownFunc } from './host-resources';
 import { stubMissingImports } from './loader';
 import { argHandles, dispose, involvesResources, ResourceRegistry, thrownType } from './resources';
 import { formatHandle, formatValue } from './wave';
@@ -31,7 +31,7 @@ function define(obj: object, key: PropertyKey, value: unknown) {
 }
 
 // Stands in for the imports the user's stubs don't implement, like proxy-component's dialog
-// mode: a call with a return value asks the user for it in the console and waits for the
+// mode: a call with a return value prompts the user for it in the console and waits for the
 // answer. Mock instances of host resources work the same way. JSPI lets the guest wait on the
 // returned promise, unless the answer is given right away.
 export class ImportDialogs implements MockFactory {
@@ -95,7 +95,7 @@ export class ImportDialogs implements MockFactory {
     return this.host.isImported(t) && this.host.hostClass(t) !== undefined;
   }
 
-  // A mock instance, e.g. for an export's argument or an import's result; its methods ask.
+  // A mock instance, e.g. for an export's argument or an import's result; its methods are mocked.
   public create(t: WIT.ResourceClass): object {
     const mock = Object.create(this.mockSubclass(t).prototype);
     mock[MOCK] = true;
@@ -103,7 +103,7 @@ export class ImportDialogs implements MockFactory {
   }
 
   // The class of mocks of a resource: a subclass of the host's, so jco's `instanceof` checks
-  // pass, whose methods all ask instead of running host code.
+  // pass, whose methods are all mocked instead of running host code.
   private mockSubclass(resource: WIT.ResourceClass): Function {
     const base = this.host.hostClass(resource)!;
     if ([...this.mockClasses.values()].includes(base)) {
@@ -124,7 +124,7 @@ export class ImportDialogs implements MockFactory {
   }
 
   // Calls `fn`, jco's `key`, the user's JavaScript or for `wasi` the shim's, recording the call
-  // as its answer. Asks instead when one of the arguments is a mock, which the host's code
+  // as its answer. Mocks the call instead when one of the arguments is a mock, which the host's code
   // doesn't know. `name` is the function's `iface#wit-name`, which may have a host effect to
   // show. The call notes when `fn` is the user's JavaScript rather than WASI's.
   private routing(name: string, func: WIT.FuncClass, key: string, fn: Function, callee: (self: unknown) => Callee, wasi: boolean): Function {
@@ -134,17 +134,17 @@ export class ImportDialogs implements MockFactory {
     const note = wasi ? undefined : `your JavaScript ${func.displayName(key)} wasn't called, as an argument is a mock`;
     return function (this: unknown, ...args: any[]) {
       if (mocks && argHandles(func, args).some(([_, obj]) => MOCK in obj)) {
-        return dialogs.ask(func, dialogs.describe(callee(this), func, key, args), effect && (() => effect(args)), note);
+        return dialogs.mockCall(func, dialogs.describe(callee(this), func, key, args), effect && (() => effect(args)), note);
       }
       return dialogs.host.record(callee(this), func, key, args, wasi ? 'wasi' : 'javascript', () => fn.apply(this, args));
     };
   }
 
   // Routes the static functions of a host class, e.g. `ResponseOutparam.set(mock, …)`; not those
-  // `fill` added, which ask anyway.
+  // `fill` added, which are mocked anyway.
   private routeStatics(name: string, resource: WIT.ResourceClass, cls: Function, wasi: boolean): Function {
     const statics = new Map(resource.get_static_funcs()
-      .filter(([key, func]) => func.callKind === 'static' && typeof (cls as any)[key] === 'function' && !asks((cls as any)[key]))
+      .filter(([key, func]) => func.callKind === 'static' && typeof (cls as any)[key] === 'function' && !isMocked((cls as any)[key]))
       .map(([key, func]) => [key, this.routing(`${name}#${func._witName}`, func, key, (cls as any)[key].bind(cls), () => ({ callKind: 'static', resource }), wasi)]));
     return statics.size === 0 ? cls : new Proxy(cls, {
       get: (target, key, receiver) => (typeof key === 'string' && statics.get(key)) || Reflect.get(target, key, receiver),
@@ -163,7 +163,7 @@ export class ImportDialogs implements MockFactory {
         }
       };
       define(cls, 'name', resource._name);
-      markAsking(cls);
+      markMocked(cls);
       this.mockClasses.set(resource, this.fill(resource, cls));
     }
     return cls;
@@ -191,19 +191,19 @@ export class ImportDialogs implements MockFactory {
     queueMicrotask(() => line.result(formatHandle(this.registry, obj, resource)));
   }
 
-  // A function, jco's `key`, that asks for its result; `callee` gets the instance it is called on.
+  // A mocked function, jco's `key`, that prompts for its result; `callee` gets the instance it is called on.
   private prompting(func: WIT.FuncClass, key: string, callee: (self: unknown) => Callee): Function {
     const dialogs = this;
     const prompt = function (this: unknown, ...args: any[]) {
-      return dialogs.ask(func, dialogs.describe(callee(this), func, key, args));
+      return dialogs.mockCall(func, dialogs.describe(callee(this), func, key, args));
     };
-    markAsking(prompt);
+    markMocked(prompt);
     return prompt;
   }
 
-  // Asks for the return value of an import call; one without a return value returns right away,
+  // Prompts for the return value of a mocked import call; one without a return value returns right away,
   // showing what the host would do with it if there is an `effect` to show.
-  private ask(func: WIT.FuncClass, call: CallRecord, effect?: () => Promise<string>, note?: string): any {
+  private mockCall(func: WIT.FuncClass, call: CallRecord, effect?: () => Promise<string>, note?: string): any {
     const line = this.log(call);
     if (note) {
       line.note(note);
@@ -222,14 +222,14 @@ export class ImportDialogs implements MockFactory {
     }
     // jco returns the `ok` payload of a `result` and throws the `err` payload.
     const isResult = thrownType(func) !== undefined;
-    // An answer given while asking, e.g. an answers file's, is returned right away, so that it
+    // An answer given while prompting, e.g. an answers file's, is returned right away, so that it
     // also reaches a guest that can't wait, e.g. in a destructor; for a later one, the guest
     // waits on a promise.
     let settled: { value: any } | { err: unknown } | undefined;
     let resolve: (value: any) => void = (value) => (settled = { value });
     let reject: (err: unknown) => void = (err) => (settled = { err });
     const draft = initDraft(type);
-    line.ask({
+    line.prompt({
       func,
       type,
       draft,

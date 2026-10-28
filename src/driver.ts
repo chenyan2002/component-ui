@@ -15,7 +15,7 @@ import { canonicalWave, parseWave } from './wave';
 export type { Stopped };
 
 // Runs a component without the UI, for frontends like the CLI: calls written as the console shows
-// them, logged in `log`, and answers to the imports that ask from an `AnswerSource`.
+// them, logged in `log`, and answers to the mocked imports from an `AnswerSource`.
 
 function byCallee(callables: Callable[]): Map<string, Callable> {
   return new Map(callables.map((callable) => [callable.callee, callable]));
@@ -45,7 +45,7 @@ export class Driver {
   }
 
   // Loads and instantiates a component. `importCode` implements imports in JavaScript, by
-  // package as jco names them, e.g. `docs:adder/add`; the others ask `answers`, including WASI's
+  // package as jco names them, e.g. `docs:adder/add`; the others are mocked, answered by `answers`, including WASI's
   // without `wasiShim`.
   public static async start(
     platform: Platform, bytes: Uint8Array, answers: AnswerSource, importCode: Record<string, string> = {}, wasiShim = true,

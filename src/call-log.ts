@@ -35,9 +35,9 @@ export interface ImportEntry extends Entry, Ending {
   detail?: string;
   // Something to know about the call, e.g. why the user's JavaScript wasn't called.
   note?: string;
-  // Asking for the result, until it is answered.
+  // Prompting for the result, until it is answered.
   prompt?: ImportPrompt;
-  // How it was answered, if it asked: with a value, when the ids in `before` were those of the
+  // How it was answered, if it was mocked: with a value, when the ids in `before` were those of the
   // instances there were, so that others in its result are the answer's new mocks; or by
   // trapping the guest. `by` is the answer if it wasn't the user's, e.g. `default`, or an answers
   // file's line with its comments.
@@ -162,7 +162,7 @@ export class CallLog {
         entry.note = text;
         this.changed(false);
       },
-      ask: (prompt) => {
+      prompt: (prompt) => {
         entry.prompt = prompt;
         this.changed(false);
       },

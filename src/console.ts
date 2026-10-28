@@ -10,11 +10,11 @@ import { ImportPrompt, LogEntry } from './log';
 
 // The choices of how imports are answered, as the CLI's `--defaults` levels.
 const LEVELS: Array<{ level: DefaultsLevel; label: string; description: TemplateResult }> = [
-  { level: 'none', label: 'Ask for every result', description: html`Every import that asks for its result shows a form for it.` },
+  { level: 'none', label: 'Answer every result', description: html`Every mocked import with a result shows a form for it.` },
   {
     level: 'careful', label: 'Fill in obvious results',
     description: html`An import returning a <code>result</code> gets <code>ok</code>, and one returning a resource a new
-      mock where nothing else could be returned; the others ask.`,
+      mock where nothing else could be returned; the others show a form.`,
   },
   {
     level: 'eager', label: 'Fill in, preferring new mocks',
@@ -55,9 +55,9 @@ export class ConsolePanel extends LitElement {
   // Whether the preview2 shim provides WASI; the app owns it, and restarts the component with the
   // `wasi-shim` event's `detail`.
   @property({ type: Boolean }) accessor wasiShim = true;
-  // How imports that ask are answered: by the user, or by the happy path where it has an answer,
+  // How mocked imports are answered: by the user, or by the happy path where it has an answer,
   // as the CLI's `--defaults` does past its answers file. The app answers by it (see
-  // `defaultsSource`), and the console asks the user for the rest.
+  // `defaultsSource`), and the console prompts the user for the rest.
   @state() accessor defaults: DefaultsLevel = storedDefaults();
   @state() accessor settingsOpen = false;
   public readonly log = new CallLog((added) => {
@@ -146,7 +146,7 @@ export class ConsolePanel extends LitElement {
         <div slot="hint" class="console-defaults-description">
           The preview2 shim provides WASI with real clocks and random numbers, and shows stdout and stderr.
           Its calls are logged and saved, marked <code>// wasi</code>, and the CLI's replay of a saved run gives
-          the guest the same answers. Without it, WASI imports ask like any other. Changing it restarts the
+          the guest the same answers. Without it, WASI imports are mocked like any other. Changing it restarts the
           component.
         </div>
       </wa-switch>
@@ -299,7 +299,7 @@ export class ConsolePanel extends LitElement {
       </div>`;
     }
     const waiting = entry.imports.some((i) => i.prompt);
-    // A call of the UI's to the host may reach an import: a mock's, which asks, or the host
+    // A call of the UI's to the host may reach an import: a mock's method, which prompts, or the host
     // effect of one. Only its prompt and detail show; the call itself is already shown.
     const isCall = (i: ImportEntry) => isOwnCall(entry, i);
     const imports = entry.imports.filter((i) => !isCall(i) || i.prompt || i.detail !== undefined);

@@ -31,16 +31,16 @@ function errorPayload(err: any): any {
   return err instanceof Error ? undefined : err;
 }
 
-// The functions that ask for their results, e.g. those standing in for the ones the user didn't
-// write, which log their calls themselves.
-const asking = new WeakSet<Function>();
+// The mocked functions, which prompt for their results, e.g. those standing in for the ones the
+// user didn't write, and log their calls themselves.
+const mocked = new WeakSet<Function>();
 
-export function markAsking(fn: Function) {
-  asking.add(fn);
+export function markMocked(fn: Function) {
+  mocked.add(fn);
 }
 
-export function asks(fn: Function): boolean {
-  return asking.has(fn);
+export function isMocked(fn: Function): boolean {
+  return mocked.has(fn);
 }
 
 // Whether jco passes what an import threw to the guest as the `err` of a `result`, rather than
@@ -195,7 +195,7 @@ export class HostResources {
         }
         const callee: Callee = { callKind: 'constructor', resource };
         // A mock class logs its constructions itself.
-        const run = asks(cls) ? construct : () => this.construct(callee, ctor, args, resource, construct);
+        const run = isMocked(cls) ? construct : () => this.construct(callee, ctor, args, resource, construct);
         return this.observe(ctor, args, run, () => this.label(callee, ctor, 'constructor', args), resource);
       },
       get: (target, key, receiver) => {
@@ -232,8 +232,8 @@ export class HostResources {
     const { resource } = instance;
     for (const [name, func] of resource.get_method_funcs()) {
       const method = obj[name];
-      // Methods that ask, e.g. a mock's, log their calls themselves.
-      const prompts = typeof method === 'function' && asks(method);
+      // Mocked methods, e.g. a mock's, log their calls themselves.
+      const prompts = typeof method === 'function' && isMocked(method);
       if (typeof method !== 'function' || (prompts && !involvesResources(func))) {
         continue;
       }
@@ -292,7 +292,7 @@ export class HostResources {
 
   // Runs an import call that the host's own code answers, the user's JavaScript or the shim's,
   // logging it with its result as answered by that code, so that answers files record it. A
-  // function without a result answers nothing; its call is logged, as one that didn't ask.
+  // function without a result answers nothing; its call is logged, as one that needed no answer.
   public record(callee: Callee, func: WIT.FuncClass, key: string, args: any[], code: HostCode, invoke: () => any): any {
     if (this.internal > 0 || !this.log) {
       return invoke();

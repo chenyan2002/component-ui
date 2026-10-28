@@ -24,15 +24,15 @@ import { allCallables, Callable, exportCallables, interfaceCallables } from './c
 //     component-ui inspect calc.wasm
 //     component-ui call calc.wasm 'docs:calc/calc@0.1.0.eval-expression(add, 1, 2)' --answers answers.txt
 //
-// Calls are written as the console shows them, and run in order on one instance. The imports
-// that ask, i.e. those not implemented in JavaScript, are answered from `--answers` and
+// Calls are written as the console shows them, and run in order on one instance. The mocked
+// imports, i.e. those not implemented in JavaScript, are answered from `--answers` and
 // `--answer`, in the order the guest calls them, then from the happy path (see src/answers.ts).
 // A run stops at the first import without an answer, which it reports with the type of value
 // it expects, and the instances the answer could use.
 
 const USAGE = `Usage:
   component-ui inspect <component.wasm>
-      Shows the exports to call, the imports that ask for answers, and the types they use.
+      Shows the exports to call, the mocked imports to answer, and the types they use.
   component-ui template <component.wasm> <pkg>
       Prints a module implementing an imported package, e.g. 'docs:adder/add', in JavaScript,
       with each function and class commented out, for --imports.
@@ -48,7 +48,7 @@ Options:
                           --answers file. Where the run stopped, it writes the answer as '?'
   --defaults <level>      Answers past the file's last: 'eager' (the default) takes 'ok' and new
                           mocks, noting other instances; 'careful' stops where there are
-                          instances to choose; 'none' stops at every import that asks
+                          instances to choose; 'none' stops at every mocked import
   --imports <pkg>=<file>  Implements an imported package, e.g. 'docs:adder/add=add.js', in JavaScript.
                           --save records its answers, marked '// javascript', which a replay
                           uses unless --imports implements the package again
@@ -56,8 +56,8 @@ Options:
                           'answers.txt:12' or '12' for the first --answers file; by default,
                           from the last answer used
   --all                   Prints the whole run
-  --no-wasi-shim          Doesn't provide WASI from the preview2 shim, so that WASI imports ask
-                          like any other, and the answers file answers them. With the shim, a
+  --no-wasi-shim          Doesn't provide WASI from the preview2 shim, so that WASI imports are
+                          mocked like any other, and the answers file answers them. With the shim, a
                           replay gives the guest the shim's answers that --save recorded, marked
                           '// wasi', in place of the shim's, and the shim answers past them.
                           Also for inspect and template
@@ -115,10 +115,10 @@ async function inspect(file: string, wasiShim: boolean, print: (line: string) =>
   // As jco names them: world-level functions are imports of their own, e.g. `log-line`.
   const ifaces = byImportName(component.imports);
   const imported = allCallables(component.customImports.flatMap((pkg) => ifaces.get(unversioned(pkg)) ?? []).map(interfaceCallables));
-  const asks = ({ func }: Callable) => func._ret.length > 0 && func.callKind !== 'constructor';
-  section('Imports that ask for answers, unless implemented with --imports:', imported.filter(asks));
-  section('Imports answered on their own, with a new mock for a constructor, and nothing for a function without a result:',
-    imported.filter((callable) => !asks(callable)));
+  const needsAnswer = ({ func }: Callable) => func._ret.length > 0 && func.callKind !== 'constructor';
+  section('Mocked imports to answer, unless implemented with --imports:', imported.filter(needsAnswer));
+  section('Mocked imports answered on their own, with a new mock for a constructor, and nothing for a function without a result:',
+    imported.filter((callable) => !needsAnswer(callable)));
   if (component.customImports.length > 0) {
     print(`Packages to implement with --imports: ${component.customImports.join(', ')}`);
   }
@@ -164,7 +164,7 @@ function endingLines(entry: CallEntry | ImportEntry, by: Answer | undefined, sho
   return [marked(`! ${entry.output}`), ...collapsedFrames(entry.frames).map((frame) => `  at ${frame}`)];
 }
 
-// An import, e.g. `↳ add(1, 2)` and `= 3  (answers.txt:1)`; still asking, `? u32`.
+// An import, e.g. `↳ add(1, 2)` and `= 3  (answers.txt:1)`; still unanswered, `? u32`.
 function importLines(entry: ImportEntry, indent: string): RunLine[] {
   const by = entry.answered?.by;
   const lines = [
@@ -251,7 +251,7 @@ function stopHint(driver: Driver, stopped: Stopped, hole: string | undefined): s
   const [type] = stopped.func._ret;
   const types = new Map<string, WIT.Type>();
   namedTypes(type, types);
-  // Where the instances the call takes came from, e.g. the backend whose name it asks for.
+  // Where the instances the call takes came from, e.g. the backend whose name it wants.
   const given = new Set<string>();
   stopped.record.args.forEach((arg) => mapHandles(arg, (label) => {
     given.add(label.replace(/^borrow-/, ''));
@@ -335,12 +335,12 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
   // A call that failed, e.g. trapped, leaving answers it would have used: that is why the run
   // differs from the file, not a change of the guest's calls.
   let failed: CallEntry | undefined;
-  // The WASI the shim provides, which answers its calls itself, but not those that ask, e.g. a mock's.
+  // The WASI the shim provides, which answers its calls itself, but not those that are mocked, e.g. a mock's.
   const shimmed = driver.component.transpiled.imports.filter((pkg) => !driver.component.customImports.includes(pkg));
   const diverge = (err: unknown) => {
     const line = err instanceof Divergence ? err.line : undefined;
     if (wasiShim && line?.kind === 'answer' && shimmed.some((pkg) => isOfPackage(line.callee, pkg))) {
-      diverged = `${line.source}: no import asked for this answer to ${line.callee}, which the WASI shim may have answered itself; `
+      diverged = `${line.source}: the guest made no call for this answer to ${line.callee}, which the WASI shim may have answered itself; `
         + 'if the file was saved with --no-wasi-shim, run with it again.';
       failed = undefined;
     } else if (failed && line) {
@@ -381,7 +381,7 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
   const imports = driver.log.entries.flatMap((e) => (e.kind === 'call' ? e.imports : e.kind === 'import' ? [e] : []));
   const skipped = new Set(imports.filter((entry) => entry.note !== undefined).map((entry) => entry.record.callee));
   if (skipped.size > 0) {
-    print(`warning: your JavaScript of ${[...skipped].join(', ')} wasn't called where an argument was a mock; those calls asked for answers instead`);
+    print(`warning: your JavaScript of ${[...skipped].join(', ')} wasn't called where an argument was a mock; those calls were mocked instead`);
   }
   const saved = values.save && !diverged && (!stopped || stopped.unanswered);
   if (saved) {

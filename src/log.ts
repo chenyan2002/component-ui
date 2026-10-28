@@ -17,7 +17,7 @@ export interface LogEntry {
   error(err: unknown): void;
 }
 
-// Asks for the return value of an import the guest called.
+// Prompts for the return value of a mocked import the guest called.
 export interface ImportPrompt {
   // The import, and the type of the value it returns.
   func: WIT.FuncClass;
@@ -35,7 +35,7 @@ export interface ImportPrompt {
 
 export interface ImportLog extends LogEntry {
   // Shows the prompt until the import gets a result or an error.
-  ask(prompt: ImportPrompt): void;
+  prompt(prompt: ImportPrompt): void;
   // A result shown below the call rather than after it, e.g. an HTTP response.
   detail(text: string): void;
   // Something to know about the call, e.g. why the user's JavaScript wasn't called.

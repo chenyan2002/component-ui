@@ -38,7 +38,7 @@ function jcoNames(iface: WIT.InterfaceClass): string[] {
     .map((func) => (iface.isRoot ? func._witName : `${iface._name}#${func._witName}`));
 }
 
-// Any import may wait for the user: missing ones ask for their results, and so do the methods
+// Any import may wait for the user: missing ones are mocked, waiting for their results, and so are the methods
 // of mock host resources, which the UI can hand to exports. The exports that can call them
 // must be async too.
 function asyncMode(exports: WIT.InterfaceClass[], imports: WIT.InterfaceClass[]) {
@@ -57,7 +57,7 @@ export interface LoadedComponent {
   // The imported interfaces, named like jco's import specifiers, possibly with a version.
   imports: WIT.InterfaceClass[];
   // Whether the preview2 shim provides WASI. Without it, WASI imports are like any other: they
-  // ask, and are logged and recorded, so a run is deterministic.
+  // are mocked, logged and recorded, so a run is deterministic.
   wasiShim: boolean;
   // Imports the WASI shim doesn't provide; the user supplies them as JS source.
   customImports: string[];
