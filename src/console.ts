@@ -5,6 +5,7 @@ import { writeScript } from './answers';
 import { DEFAULTS_LEVELS, DefaultsLevel } from './answering';
 import { CallLog, ImportEntry, isOwnCall, LogItem, StreamEntry } from './call-log';
 import { FormContext, renderField, typeName } from './form';
+import { collapsedFrames } from './frames';
 import { ImportPrompt, LogEntry } from './log';
 
 // The choices of how imports are answered, as the CLI's `--defaults` levels.
@@ -36,9 +37,9 @@ function renderDefault(entry: ImportEntry | undefined) {
   return source === 'default' || source === 'javascript' || source === 'wasi' ? html`<span class="log-default">// ${source}</span>` : nothing;
 }
 
-// The guest's frames of a trap, innermost first.
+// The guest's frames of a trap, innermost first, as the CLI prints them.
 function renderFrames(frames: string[]) {
-  return frames.length === 0 ? nothing : html`<div class="log-frames">${frames.map((frame) => html`<div>at ${frame}</div>`)}</div>`;
+  return frames.length === 0 ? nothing : html`<div class="log-frames">${collapsedFrames(frames).map((frame) => html`<div>at ${frame}</div>`)}</div>`;
 }
 
 @customElement('console-panel')
@@ -115,7 +116,8 @@ export class ConsolePanel extends LitElement {
   }
 
   // How imports are answered, where WASI comes from, and saving or clearing the log; saving
-  // writes an answers file.
+  // writes an answers file. Clearing restarts the component, which the app does on the `restart`
+  // event, so that a saved run starts where its instance does.
   private renderSettings() {
     return html`<wa-dialog
       label="Console settings"
@@ -149,10 +151,11 @@ export class ConsolePanel extends LitElement {
         </div>
       </wa-switch>
       <div slot="footer" class="func-actions">
-        <wa-button appearance="plain" ?disabled=${this.log.entries.length === 0} @click=${() => {
-          this.clear();
-          this.settingsOpen = false;
-        }}>Clear logs</wa-button>
+        <wa-button appearance="plain" title="Clear the logs and start a new instance of the component, so that Save writes a run from its start"
+          ?disabled=${this.log.entries.length === 0} @click=${() => {
+            this.dispatchEvent(new CustomEvent('restart', { bubbles: true }));
+            this.settingsOpen = false;
+          }}>Clear and restart</wa-button>
         ${this.saveHeader === undefined ? nothing : html`<wa-button
           title="Save the calls and the answers to imports as an answers file, which the CLI replays"
           ?disabled=${this.log.entries.length === 0} @click=${() => {

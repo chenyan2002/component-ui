@@ -111,7 +111,9 @@ npm install && npm run build:cli && npm link
   expected, so a wrong answer is a way to find the right one.
 - A trap lists the guest's stack under its `!` line, innermost first, e.g.
   `at kv_store_component.wasm: …Entry::dtor`, then `at kv_test….wasm: kv_test::write_entry`. Its
-  frames name the components a composed one is built from.
+  frames name the components a composed one is built from. A run of the same frame shows once,
+  with a count, e.g. a recursion's `at app.wasm: app::recurse  (×200)`; the engine keeps at most
+  200 frames, so a stack overflow's outer frames, e.g. the export's, are lost.
 - **A guest panic right after one of your answers may be your answer breaking the host's
   contract, not a bug in the guest.** E.g. a host API that returns NUL-terminated strings; read
   the guest's message and the import's documentation before blaming the guest.

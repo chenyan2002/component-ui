@@ -34,3 +34,18 @@ export function wasmFrames(err: unknown): string[] {
     return [module ? `${module}: ${name}` : name];
   });
 }
+
+// The frames to show, all of them, with each run of the same frame as one that says how many
+// there were, e.g. a recursion's `rootimp.wasm: rootimp::recurse  (×200)`.
+export function collapsedFrames(frames: string[]): string[] {
+  const runs: Array<{ frame: string; count: number }> = [];
+  for (const frame of frames) {
+    const last = runs[runs.length - 1];
+    if (last?.frame === frame) {
+      last.count++;
+    } else {
+      runs.push({ frame, count: 1 });
+    }
+  }
+  return runs.map(({ frame, count }) => (count === 1 ? frame : `${frame}  (×${count})`));
+}

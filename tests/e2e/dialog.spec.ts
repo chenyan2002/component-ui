@@ -221,10 +221,17 @@ test('Save writes the console as an answers file the CLI replays', async ({ page
     '',
   ]);
   expect(text).toMatch(/^\/\/! saved from component-ui's console; replay with: component-ui call resource\.wasm --answers resource\.answers\.txt$/m);
-  // Clear logs, in the settings too, empties the console.
+  // Clear and restart, in the settings too, empties the console and starts a new instance, so
+  // the guest no longer waits, and the next run starts over, as a saved one does.
   const dialog = await consoleSettings(page);
-  await dialog.getByRole('button', { name: 'Clear logs' }).click();
+  await dialog.getByRole('button', { name: 'Clear and restart' }).click();
   await expect(page.locator('console-panel .console-empty')).toBeVisible();
+  await expect(importPrompt(page)).toHaveCount(0);
+  await expect(row(page, 'y-2')).toHaveCount(0);
+  await call(funcCard(page, 'test-imports'));
+  await answerImport(page, 'imports/y.get-a(#borrow-y-1)', s32('10'));
+  const [, again] = await saveConsole(page);
+  expect(again.split('\n').slice(3, 6)).toEqual(['> exports.test-imports()', '//! new imports/y(10) = #y-1', 'imports/y.get-a(#borrow-y-1) = 10']);
 });
 
 test('Save records the answers of imports implemented in JavaScript, so the CLI replays them without it', async ({ page }) => {

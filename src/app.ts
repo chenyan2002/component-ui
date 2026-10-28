@@ -231,7 +231,8 @@ export class ComponentApp extends LitElement {
         </wa-split-panel>
       </div>
       <aside slot="end" class="pane console-pane">
-        <console-panel .wasiShim=${this.wasiShim} @wasi-shim=${(e: CustomEvent<boolean>) => this.setWasiShim(e.detail)}></console-panel>
+        <console-panel .wasiShim=${this.wasiShim} @wasi-shim=${(e: CustomEvent<boolean>) => this.setWasiShim(e.detail)}
+          @restart=${() => this.restart(s)}></console-panel>
       </aside>
     </wa-split-panel>`;
   }
@@ -407,6 +408,13 @@ export class ComponentApp extends LitElement {
         this.loading = false;
       }
     }
+  }
+
+  // Clears the logs, and starts a new instance with the JavaScript applied, so that the log, and
+  // what Save writes of it, starts where the instance does.
+  private restart(s: Session) {
+    this.consolePanel?.clear();
+    this.instantiate(s, s.appliedCode);
   }
 
   // Restarts the component with WASI from the shim or not. The imports keep their JavaScript, as

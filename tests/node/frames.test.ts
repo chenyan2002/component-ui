@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { demangle, wasmFrames } from '../../src/frames';
+import { collapsedFrames, demangle, wasmFrames } from '../../src/frames';
 
 test('Rust legacy symbols are demangled, without their hashes', () => {
   assert.equal(demangle('_ZN4core3fmt5Write9write_fmt17h7aff65a257b1f7edE'), 'core::fmt::Write::write_fmt');
@@ -29,4 +29,13 @@ test('a trap\'s wasm frames, without the runtime\'s and unnamed ones', () => {
     '    at trampoline166 (file:///tmp/module-23.mjs:63784:22)',
   ].join('\n');
   assert.deepEqual(wasmFrames(err), ['kv_store_component.wasm: kv_store_component::Entry::dtor', 'fastly:compute/http-incoming@0.1.0#handle']);
+});
+
+test('all frames show, with a run of the same frame as one, e.g. of a recursion', () => {
+  const recursion = Array.from({ length: 200 }, () => 'app.wasm: app::recurse');
+  assert.deepEqual(collapsedFrames(['app.wasm: app::leaf', ...recursion, 'app.wasm: app::run']), [
+    'app.wasm: app::leaf', 'app.wasm: app::recurse  (×200)', 'app.wasm: app::run',
+  ]);
+  // Only runs: a frame that comes back later shows again.
+  assert.deepEqual(collapsedFrames(['a', 'b', 'a']), ['a', 'b', 'a']);
 });

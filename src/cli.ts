@@ -9,6 +9,7 @@ import {
 import { Answer, DEFAULTS_LEVELS, DefaultsLevel } from './answering';
 import { answeredValue, CallEntry, CallLog, ImportEntry, isOwnCall, StreamEntry } from './call-log';
 import { Driver, Stopped } from './driver';
+import { collapsedFrames } from './frames';
 import { JSPI_SUPPORTED, loadComponent } from './loader';
 import { mapHandles } from './wave';
 import { byImportName } from './host-resources';
@@ -63,9 +64,6 @@ In values, '#mock' is a new mock of a host resource, and '#mock-x-2' a new mock 
 id 'x-2', as --save writes them; a list<u8> of text may be written b"…".
 Exits with 0 when all calls ran, 2 when an import needs an answer, 3 when a call failed, e.g.
 trapped, and 1 on errors.`;
-
-// The most frames of a trap to print.
-const MAX_FRAMES = 20;
 
 // Exit codes.
 const FAILED = 1;
@@ -162,9 +160,7 @@ function endingLines(entry: CallEntry | ImportEntry, by: Answer | undefined, sho
   if (entry.status === 'ok') {
     return [marked(`= ${shown ?? (entry.output === '' ? '()' : entry.output)}`)];
   }
-  const frames = entry.frames.slice(0, MAX_FRAMES).map((frame) => `  at ${frame}`);
-  const more = entry.frames.length > MAX_FRAMES ? [`  … ${entry.frames.length - MAX_FRAMES} more frames`] : [];
-  return [marked(`! ${entry.output}`), ...frames, ...more];
+  return [marked(`! ${entry.output}`), ...collapsedFrames(entry.frames).map((frame) => `  at ${frame}`)];
 }
 
 // An import, e.g. `↳ add(1, 2)` and `= 3  (answers.txt:1)`; still asking, `? u32`.
