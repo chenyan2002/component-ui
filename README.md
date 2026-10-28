@@ -108,10 +108,10 @@ npm run build:bindgen
   - jco merges incompatible versions (e.g., 0.2.0 and 0.3.0) into one unversioned import, so
     a call can't be told apart by version: it is shown with, and a prompt asks for, the types
     of the first version that has the function, which may be the wrong form for the other.
-- `jco` bugs on JSPI
-  + Async imports hang on failure; the loader patches jco's output to rethrow, which may need updating when jco changes. (waiting for release)
-  + Exported resource constructors and static functions don't emit the correct code (waiting for release)
-  + Calling synchronous imports inside resource destructor and start function traps (waiting for review)
+- In the UI, imports the guest calls where it can't wait, in a resource destructor or while the
+  component is instantiated, can't be answered in the console: unless the console's "Answering
+  imports" setting answers them, the call fails with `cannot block a synchronous task before
+  returning`. Implementing them in JavaScript works, as does the CLI's answers file.
 - The CLI's exit code doesn't reflect a guest calling `wasi:cli/exit`; the call shows the error
   the shim throws. Exiting with the guest's status is future work.
 - The WIT shown, in the UI and by the CLI, is the one embedded in the component, which keeps the

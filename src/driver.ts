@@ -51,12 +51,21 @@ export class Driver {
     platform: Platform, bytes: Uint8Array, answers: AnswerSource, importCode: Record<string, string> = {}, wasiShim = true,
   ): Promise<Driver> {
     const driver = new Driver(await loadComponent(platform, bytes, wasiShim));
-    driver.instance = await ComponentInstance.create(platform, driver.component, driver.log, {
-      importCode, answers,
-      stopped: (stopped) => driver.stopped?.(stopped),
-      // A trap's frames are in the log.
-      report: () => {},
-    });
+    // The guest can't wait while it is instantiated: an import left without an answer traps it.
+    let stop: Stopped | undefined;
+    driver.stopped = (stopped) => (stop ??= stopped);
+    try {
+      driver.instance = await ComponentInstance.create(platform, driver.component, driver.log, {
+        importCode, answers,
+        stopped: (stopped) => driver.stopped?.(stopped),
+        // A trap's frames are in the log.
+        report: () => {},
+      });
+    } catch (err) {
+      throw stop ? new Error(`${stop.reason}, which the guest called while it was instantiated`) : err;
+    } finally {
+      driver.stopped = undefined;
+    }
     return driver;
   }
 
@@ -89,8 +98,15 @@ export class Driver {
       if (reason) {
         throw new Error(`No instance #${instance.id} to drop: ${reason}`);
       }
-      drop(this.ctx, dropped[1]);
-      return undefined;
+      // The guest can't wait in a destructor: an import left without an answer traps it.
+      let stop: Stopped | undefined;
+      this.stopped = (stopped) => (stop ??= stopped);
+      try {
+        drop(this.ctx, dropped[1]);
+      } finally {
+        this.stopped = undefined;
+      }
+      return stop;
     }
     const [callee, argText] = splitCall(text);
     const { target, key, func } = this.resolve(callee);

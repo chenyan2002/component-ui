@@ -33,7 +33,7 @@ function define(obj: object, key: PropertyKey, value: unknown) {
 // Stands in for the imports the user's stubs don't implement, like proxy-component's dialog
 // mode: a call with a return value asks the user for it in the console and waits for the
 // answer. Mock instances of host resources work the same way. JSPI lets the guest wait on the
-// returned promise.
+// returned promise, unless the answer is given right away.
 export class ImportDialogs implements MockFactory {
   private readonly interfaces: Map<string, WIT.InterfaceClass[]>;
   // Generated for resource classes the user's stubs lack; their instances are all mocks.
@@ -222,39 +222,53 @@ export class ImportDialogs implements MockFactory {
     }
     // jco returns the `ok` payload of a `result` and throws the `err` payload.
     const isResult = thrownType(func) !== undefined;
-    return new Promise((resolve, reject) => {
-      const draft = initDraft(type);
-      line.ask({
-        func,
-        type,
-        draft,
-        registry: this.registry,
-        mock: this,
-        answer: (given = draft, by) => {
-          const value = parseDraft(type, given, this.registry, this, 'host');
-          if (value === INVALID) {
-            return false;
-          }
-          // Before the host wrapper registers the mocks the value returns, so they can be told.
-          line.answered(false, by);
-          if (isResult && value.tag === 'err') {
-            reject(Object.assign(new Error(formatValue(this.registry, type, value)), { payload: value.val }));
-          } else {
-            resolve(isResult ? value.val : value);
-          }
-          // After the host wrapper registers returned resources, so they show by id.
-          queueMicrotask(() => line.result(formatValue(this.registry, type, value)));
-          return true;
-        },
-        random: () => randomize(type, draft, this.registry, this, 'host'),
-        trap: (by) => {
-          // jco treats a runtime error as a trap of the component instance.
-          const err = new WebAssembly.RuntimeError(`Trapped at ${call.label}`);
-          line.answered(true, by);
-          reject(err);
-          line.error(err);
-        },
-      });
+    // An answer given while asking, e.g. an answers file's, is returned right away, so that it
+    // also reaches a guest that can't wait, e.g. in a destructor; for a later one, the guest
+    // waits on a promise.
+    let settled: { value: any } | { err: unknown } | undefined;
+    let resolve: (value: any) => void = (value) => (settled = { value });
+    let reject: (err: unknown) => void = (err) => (settled = { err });
+    const draft = initDraft(type);
+    line.ask({
+      func,
+      type,
+      draft,
+      registry: this.registry,
+      mock: this,
+      answer: (given = draft, by) => {
+        const value = parseDraft(type, given, this.registry, this, 'host');
+        if (value === INVALID) {
+          return false;
+        }
+        // Before the host wrapper registers the mocks the value returns, so they can be told.
+        line.answered(false, by);
+        if (isResult && value.tag === 'err') {
+          reject(Object.assign(new Error(formatValue(this.registry, type, value)), { payload: value.val }));
+        } else {
+          resolve(isResult ? value.val : value);
+        }
+        // After the host wrapper registers returned resources, so they show by id.
+        queueMicrotask(() => line.result(formatValue(this.registry, type, value)));
+        return true;
+      },
+      random: () => randomize(type, draft, this.registry, this, 'host'),
+      trap: (by) => {
+        // jco treats a runtime error as a trap of the component instance.
+        const err = new WebAssembly.RuntimeError(`Trapped at ${call.label}`);
+        line.answered(true, by);
+        reject(err);
+        line.error(err);
+      },
+    });
+    if (settled) {
+      if ('err' in settled) {
+        throw settled.err;
+      }
+      return settled.value;
+    }
+    return new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
     });
   }
 

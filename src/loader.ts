@@ -32,23 +32,21 @@ function isWasi(pkg: string): boolean {
 export const JSPI_SUPPORTED = typeof (WebAssembly as any).Suspending === 'function' && typeof (WebAssembly as any).promising === 'function';
 
 // jco refers to functions as `iface#name`, or `name` at the root, e.g. `wasi:io/poll#[method]pollable.block`.
-function jcoNames(iface: WIT.InterfaceClass, include: (func: WIT.FuncClass) => boolean = () => true): string[] {
+function jcoNames(iface: WIT.InterfaceClass): string[] {
   const resourceFuncs = iface.get_resources().flatMap((resource) => Object.values(resource._fields));
   return [...Object.values(iface._fields), ...resourceFuncs]
-    .filter(include)
     .map((func) => (iface.isRoot ? func._witName : `${iface._name}#${func._witName}`));
 }
 
 // Any import may wait for the user: missing ones ask for their results, and so do the methods
 // of mock host resources, which the UI can hand to exports. The exports that can call them
-// must be async too. jco emits invalid async code for resource constructors and statics, so
-// those stay synchronous.
+// must be async too.
 function asyncMode(exports: WIT.InterfaceClass[], imports: WIT.InterfaceClass[]) {
   return {
     tag: 'jspi' as const,
     val: {
       imports: imports.flatMap((iface) => jcoNames(iface)),
-      exports: exports.flatMap((iface) => jcoNames(iface, (func) => func.callKind === 'func' || func.callKind === 'method')),
+      exports: exports.flatMap((iface) => jcoNames(iface)),
     },
   };
 }
@@ -103,15 +101,6 @@ function wasiImports(output: ComponentOutput): Record<string, unknown> {
   }).getImportObject();
 }
 
-// jco's async (JSPI) import trampolines answer a failed import with a promise that never
-// settles, leaving the guest suspended forever; its sync ones rethrow, as these now do.
-function rethrowAsyncImportErrors(transpiled: Transpiled) {
-  const file = transpiled.files.find(([name]) => name === `${TRANSPILED_NAME}.js`)!;
-  const js = new TextDecoder().decode(file[1]);
-  const failed = /(markTrapped\(err\);\s*task\.setErrored\(err\);\s*task\.reject\(err\);\s*task\.exit\(\);\s*)return task\.completionPromise\(\);/g;
-  file[1] = new TextEncoder().encode(js.replace(failed, '$1throw err;'));
-}
-
 export async function loadComponent(platform: Platform, component: Uint8Array, wasiShim = true): Promise<LoadedComponent> {
   const binding = await platform.importModule(generateAst(component));
   const { exports: interfaces, imports }: Record<'exports' | 'imports', WIT.InterfaceClass[]> = binding.Factory({ IDL: WIT });
@@ -123,7 +112,6 @@ export async function loadComponent(platform: Platform, component: Uint8Array, w
     instantiation: { tag: 'async' },
     asyncMode: asyncMode(interfaces, imports),
   });
-  rethrowAsyncImportErrors(transpiled);
   return withWasiShim({ transpiled, interfaces, imports, wasiShim, customImports: [] }, wasiShim);
 }
 

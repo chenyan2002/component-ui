@@ -227,11 +227,9 @@ settings): it is the same format, so continue it with `--answers` as your own.
   same way, e.g. iterates a hash map in the same order; past the recording, they are new.
 - A replay without the shim doesn't show the HTTP response a handler sends: turning it into HTTP
   needs the shim.
-- Imports the component calls while it is instantiated can't ask for answers.
-- Nor can imports a resource's destructor calls: the call fails with
-  `cannot block a synchronous task before returning`, e.g. when the guest drops a resource whose
-  destructor closes a host object. That's component-ui's limit, not the guest's bug; the run can't
-  get past it, so report what happened up to there.
+- An import the component calls while it is instantiated needs its answer before the run: without
+  one, the run fails with `No answer for …, which the guest called while it was instantiated`,
+  and `--save` writes nothing. Add the answer, with `--answer` or to the answers file, and run again.
 - A guest calling `wasi:cli/exit` shows as an error; the exit code doesn't follow it.
 
 ## Exit codes

@@ -3,7 +3,7 @@ import { CallRecord, Callee, describeCall, describeDrop } from './call-record';
 import { LogEntry } from './log';
 import { MOCK } from './dialog';
 import { MockFactory } from './draft';
-import { HostResources } from './host-resources';
+import { HostResources, isThenable } from './host-resources';
 import { argHandles, ownedHandles, ResourceRegistry, returnedType, thrownType } from './resources';
 import { formatHandle, formatResult, formatThrown } from './wave';
 
@@ -171,7 +171,12 @@ async function run(ctx: ExportsContext, target: CallTarget, name: string, func: 
   registry.transfer(owned, fate, toHost ? 'host' : 'guest');
   let result: any;
   try {
-    result = await (toHost ? ctx.host.callDirect(invoke) : invoke());
+    result = toHost ? ctx.host.callDirect(invoke) : invoke();
+    // An import answered right away returns its value, which is registered before the
+    // import's log line shows it.
+    if (isThenable(result)) {
+      result = await result;
+    }
   } catch (err) {
     registry.settle(fate);
     entry.error(errorText(ctx, func, err));

@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { parse } from '@bytecodealliance/jco';
 
 // The CLI, as built into dist-cli by `npm run build:cli`, run as an agent would.
 
@@ -307,6 +308,27 @@ test('only instances the UI holds can be dropped; the log shows what happened to
   assert.equal(moved.code, 1);
   assert.match(moved.err, /No instance #x-1 to drop: it was moved into exports\.consume\(#x-1\)/);
   assert.match(cli('call', RESOURCE, 'new exports/x(5)', 'drop #x-1', 'drop #x-1').err, /No instance #x-1 to drop: it was dropped$/m);
+});
+
+test('imports the guest can\'t wait in, as it is instantiated or in a destructor, take their answers', async () => {
+  const component = join(dir, 'cannot-wait.wasm');
+  writeFileSync(component, await parse(readFileSync('tests/node/fixtures/cannot-wait.wat', 'utf8')));
+  const calls = ['test:cannot-wait/api.started()', 'new test:cannot-wait/api/r(5)', 'drop #r-1'];
+  const started = ['--answer', 'test:cannot-wait/host.log(1) = 42'];
+  const run = cli('call', component, ...calls, ...started, '--answer', 'test:cannot-wait/host.log(5) = 0', '--all');
+  assert.equal(run.code, 0, run.out);
+  assert.match(run.out, /^↳ test:cannot-wait\/host\.log\(1\)\n {2}= 42 {2}\(--answer 1\)\n› test:cannot-wait\/api\.started\(\)\n {2}= 42$/m);
+  assert.match(run.out, /^› drop #r-1\n {2}↳ test:cannot-wait\/host\.log\(5\)\n {4}= 0 {2}\(--answer 2\)\n {2}= dropped$/m);
+  // Without its answer, the component can't be instantiated.
+  const unstarted = cli('call', component, ...calls, '--defaults', 'none');
+  assert.equal(unstarted.code, 1);
+  assert.match(unstarted.err, /No answer for test:cannot-wait\/host\.log\(1\), which the guest called while it was instantiated/);
+  // A destructor's import stops the run like any other, with a ? to fill in.
+  const saved = join(dir, 'cannot-wait.txt');
+  const undropped = cli('call', component, ...calls, ...started, '--defaults', 'none', '--save', saved);
+  assert.equal(undropped.code, 2, undropped.out);
+  assert.match(undropped.out, /stopped: No answer for test:cannot-wait\/host\.log\(5\)/);
+  assert.match(readFileSync(saved, 'utf8'), /^test:cannot-wait\/host\.log\(5\) = \? /m);
 });
 
 test('instances an answer or an argument could use are listed', () => {

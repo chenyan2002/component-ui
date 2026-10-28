@@ -26,8 +26,8 @@
   },
   "dependencies": {
     "@awesome.me/webawesome": "^3.14.0",
-    "@bytecodealliance/jco": "^1.39.0",
-    "@bytecodealliance/preview2-shim": "^0.30.0",
+    "@bytecodealliance/jco": "^1.40.0",
+    "@bytecodealliance/preview2-shim": "^0.31.0",
     "lit": "^3.3.3"
   }
 }

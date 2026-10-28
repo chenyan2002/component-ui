@@ -19,7 +19,7 @@ export type Replayed = 'stop' | { by: Answer; returns?: () => any };
 // last received it, in case the host shares an object between instances.
 const observers = new WeakMap<object, HostResources>();
 
-function isThenable(value: any): value is PromiseLike<any> {
+export function isThenable(value: any): value is PromiseLike<any> {
   return typeof value?.then === 'function';
 }
 

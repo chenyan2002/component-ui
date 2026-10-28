@@ -117,9 +117,8 @@ export class ComponentInstance {
       },
       ask: (prompt) => {
         entry.ask(prompt);
-        // Once the import call has returned its promise, as a user would answer, so that the host
-        // wrapper has hooked it to register the instances the answer returns.
-        queueMicrotask(() => this.answer(record, prompt));
+        // Right away, so that the import returns the answer, also to a guest that can't wait.
+        this.answer(record, prompt);
       },
     };
   }
