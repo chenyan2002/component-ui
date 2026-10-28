@@ -9,6 +9,7 @@ import {
 import { Answer, DEFAULTS_LEVELS, DefaultsLevel } from './answering';
 import { answeredValue, CallEntry, CallLog, ImportEntry, isOwnCall, StreamEntry } from './call-log';
 import { Driver, Stopped } from './driver';
+import { errorText } from './log';
 import { collapsedFrames } from './frames';
 import { JSPI_SUPPORTED, loadComponent } from './loader';
 import { mapHandles } from './wave';
@@ -238,7 +239,9 @@ function printRun(lines: RunLine[], print: (line: string) => void, from?: string
   const kept = lines[header].header && header < start ? [lines[header]] : [];
   const skipped = start - kept.length;
   kept.forEach((line) => print(line.text));
-  print(`${kept.length > 0 ? '  ' : ''}… ${skipped} earlier line${skipped === 1 ? '' : 's'}; --all prints them`);
+  if (skipped > 0) {
+    print(`${kept.length > 0 ? '  ' : ''}… ${skipped} earlier line${skipped === 1 ? '' : 's'}; --all prints them`);
+  }
   lines.slice(start).forEach((line) => print(line.text));
 }
 
@@ -464,7 +467,7 @@ async function run() {
   try {
     code = await main(process.argv.slice(2));
   } catch (err) {
-    console.error(`error: ${err instanceof Error ? err.message : err}`);
+    console.error(`error: ${errorText(err)}`);
     if (err instanceof UsageError || (err as any)?.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') {
       console.error(`\n${USAGE}`);
     }

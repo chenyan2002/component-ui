@@ -1,7 +1,7 @@
 import * as WIT from './wit';
 import type { CallRecord } from './call-record';
 import { draftErrors, instanceChoices } from './draft';
-import { ImportPrompt } from './log';
+import { errorText, ImportPrompt } from './log';
 import { describeInstance, Instance } from './resources';
 import { parseWave } from './wave';
 
@@ -133,10 +133,6 @@ export function defaultAnswer(t: WIT.Type, context: AnswerContext, level: Defaul
 // chosen in the console's settings.
 export function defaultsSource(level: () => DefaultsLevel): AnswerSource {
   return { answer: (_record, func, context) => defaultAnswer(func._ret[0], context, level()) };
-}
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 // Answers a prompt, or traps the guest, as the answer says; why it couldn't, if the answer isn't a

@@ -15,6 +15,7 @@ import { renderExports, search } from './exports-view';
 import { unversioned } from './call-record';
 import { byImportName } from './host-resources';
 import { importTemplate } from './import-template';
+import { errorText } from './log';
 import { usesResources } from './resources';
 import './resource-table';
 
@@ -69,10 +70,6 @@ interface Session {
   generation: number;
   ctx?: ExportsContext;
   error?: unknown;
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 function isWasm(file: File): boolean {
@@ -197,7 +194,7 @@ export class ComponentApp extends LitElement {
 
   private renderError(title: string, err: unknown) {
     return html`<wa-callout id="loadError" variant="danger">
-      <strong>${title}</strong><br />${errorMessage(err)}
+      <strong>${title}</strong><br />${errorText(err)}
     </wa-callout>`;
   }
 
@@ -257,7 +254,7 @@ export class ComponentApp extends LitElement {
         you leave out ask for their results in the console.
       </p>
       ${s.status === 'failed'
-        ? html`<wa-callout variant="danger"><strong>Instantiation failed</strong><br />${errorMessage(s.error)}</wa-callout>`
+        ? html`<wa-callout variant="danger"><strong>Instantiation failed</strong><br />${errorText(s.error)}</wa-callout>`
         : nothing}
       <div class="imports">
         ${s.component.customImports.map((pkg) => html`<wa-textarea

@@ -1,7 +1,7 @@
 import type { Answer } from './answering';
 import { CallRecord } from './call-record';
 import { wasmFrames } from './frames';
-import { ImportLog, ImportPrompt, LogEntry } from './log';
+import { errorText, ImportLog, ImportPrompt, LogEntry } from './log';
 import { Instance } from './resources';
 import { mapHandles } from './wave';
 
@@ -70,10 +70,6 @@ export type LogItem = CallEntry | ImportEntry | StreamEntry;
 // An instance created, e.g. a mock an answer returned, by its place in the log.
 export interface InstanceItem extends Entry {
   instance: Instance;
-}
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 // The import that is a call of the UI's to the host itself, e.g. a mock's method, or a host

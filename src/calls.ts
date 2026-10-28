@@ -131,11 +131,14 @@ function resolveCall(ctx: ExportsContext, target: CallTarget, name: string, func
   }
 }
 
-export function call(ctx: ExportsContext, target: CallTarget, name: string, func: WIT.FuncClass, args: any[]) {
-  return ctx.activity.track(() => run(ctx, target, name, func, args));
+// Calls `name`, jco's name for `func`, with `args`. `check`, if given, sees the call as it is
+// about to be made, with its arguments' new mocks by the ids they got, and can keep it from
+// being made, e.g. as a replay expected other ids.
+export function call(ctx: ExportsContext, target: CallTarget, name: string, func: WIT.FuncClass, args: any[], check?: (record: CallRecord) => boolean) {
+  return ctx.activity.track(() => run(ctx, target, name, func, args, check));
 }
 
-async function run(ctx: ExportsContext, target: CallTarget, name: string, func: WIT.FuncClass, args: any[]) {
+async function run(ctx: ExportsContext, target: CallTarget, name: string, func: WIT.FuncClass, args: any[], check?: (record: CallRecord) => boolean) {
   const { registry } = ctx;
   const funcArgs = target.type === 'method' ? args.slice(1) : args;
   // Mocks the user picked for arguments are theirs until the call takes them; registered
@@ -151,6 +154,9 @@ async function run(ctx: ExportsContext, target: CallTarget, name: string, func: 
   }
   const toHost = callsHost(ctx, target, args);
   const record = describeCall(registry, toHost ? 'host' : 'export', callee(target, args), func, name, funcArgs);
+  if (check && !check(record)) {
+    return;
+  }
   let invoke: () => any;
   try {
     invoke = resolveCall(ctx, target, name, func, args);

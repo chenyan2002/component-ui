@@ -5,6 +5,11 @@ import { ResourceRegistry } from './resources';
 
 // How calls are logged, by the console in the app or by another frontend.
 
+// How an error shows, e.g. in the log or a stop's reason: its message.
+export function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export interface LogEntry {
   // `text` is the formatted result, in WAVE; empty for a function without one.
   result(text: string): void;

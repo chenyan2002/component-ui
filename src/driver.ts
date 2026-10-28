@@ -1,24 +1,21 @@
 import * as WIT from './wit';
 import { AnswerSource } from './answering';
 import { CallEntry, CallLog } from './call-log';
-import { callTypes } from './call-record';
+import { CallRecord, callTypes } from './call-record';
 import { allCallables, Callable, ExportCallables, exportCallables, heldResources } from './callables';
 import { call, drop, ExportsContext } from './calls';
 import { ComponentInstance, Stopped } from './component-instance';
 import { draftErrors, Giver, INVALID, parseDraft } from './draft';
+import { errorText } from './log';
 import { LoadedComponent, loadComponent } from './loader';
 import { Platform } from './platform';
 import { ResourceRegistry, undroppable } from './resources';
-import { parseWave } from './wave';
+import { canonicalWave, parseWave } from './wave';
 
 export type { Stopped };
 
 // Runs a component without the UI, for frontends like the CLI: calls written as the console shows
 // them, logged in `log`, and answers to the imports that ask from an `AnswerSource`.
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 function byCallee(callables: Callable[]): Map<string, Callable> {
   return new Map(callables.map((callable) => [callable.callee, callable]));
@@ -99,12 +96,38 @@ export class Driver {
     const { target, key, func } = this.resolve(callee);
     const args = this.parseArgs(func, target.type === 'func' ? undefined : target.resource, argText);
     const stopped = new Promise<Stopped>((resolve) => (this.stopped = resolve));
-    const done = call(this.ctx, target, key, func, args).then(() => this.instance.settled()).then(() => undefined);
+    const check = (record: CallRecord) => this.checkMocks(argText, func, target.type === 'func' ? undefined : target.resource, record);
+    const done = call(this.ctx, target, key, func, args, check).then(() => this.instance.settled()).then(() => undefined);
     try {
       return await Promise.race([done, stopped]);
     } finally {
       this.stopped = undefined;
     }
+  }
+
+  // Whether the new mocks the arguments say the ids of, e.g. `#mock-x-2`, as --save writes them,
+  // got them; if not, the run stops before the call. Arguments with a plain `#mock` aren't checked.
+  private checkMocks(argText: string, func: WIT.FuncClass, resource: WIT.ResourceClass | undefined, record: CallRecord): boolean {
+    if (!/#(borrow-)?mock-/.test(argText) || /#(borrow-)?mock\b(?!-)/.test(argText)) {
+      return true;
+    }
+    const expected = `(${argText.replace(/#(borrow-)?mock-/g, '#$1')})`;
+    const got = `(${record.args.join(', ')})`;
+    const tuple = WIT.Tuple(callTypes(func, resource));
+    let same: boolean;
+    try {
+      same = canonicalWave(tuple, expected) === canonicalWave(tuple, got);
+    } catch {
+      same = expected === got;
+    }
+    if (!same) {
+      this.stopped?.({
+        record, func, unanswered: false,
+        reason: `the new mocks of ${record.label} got other ids than ${argText} gives them, so the run differs from the file before this call, `
+          + 'e.g. after an earlier answer was edited: remove this call and the lines after it, and run again.',
+      });
+    }
+    return same;
   }
 
   private resolve(callee: string): Callable {

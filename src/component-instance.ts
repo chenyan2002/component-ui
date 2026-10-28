@@ -6,7 +6,7 @@ import { CallActivity, ExportsContext } from './calls';
 import { ImportDialogs } from './dialog';
 import { draftErrors, Giver, INVALID, instanceChoices, parseDraft } from './draft';
 import { HostResources, Replayed } from './host-resources';
-import { ImportLog, ImportPrompt } from './log';
+import { errorText, ImportLog, ImportPrompt } from './log';
 import { instantiate, LoadedComponent } from './loader';
 import { Platform } from './platform';
 import { clashingNames, Instance, resourcesOf, ResourceRegistry, thrownType } from './resources';
@@ -36,10 +36,6 @@ export interface InstanceOptions {
   print?: (stream: 'stdout' | 'stderr', text: string) => void;
   // Reports an error a call failed with, e.g. a trap's stack; the browser's console by default.
   report?: (err: unknown) => void;
-}
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 export class ComponentInstance {

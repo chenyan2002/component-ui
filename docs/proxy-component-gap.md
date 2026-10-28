@@ -80,8 +80,9 @@ prefix, e.g. `#host-y-1`; proxy-component would reject both.
 ### `#mock-<id>`
 
 component-ui's answers files write a new mock as `#mock-<id>`, e.g. `#mock-y-2` for a new mock
-that is to get the id `y-2`, and read it as a new mock, checking it gets that id. Like `#mock`,
-it's an extension of WAVE's handle labels, which proxy-component doesn't read.
+that is to get the id `y-2`, and read it as a new mock, checking it gets that id, in an answer or
+in a call's arguments. Like `#mock`, it's an extension of WAVE's handle labels, which
+proxy-component doesn't read.
 
 ### `b"…"` for bytes
 
@@ -120,7 +121,10 @@ kebab case (`src/codegen/util.rs`, `wit_func_name`), which loses information:
 
 - **WASI.** proxy-component instruments every import, WASI included, so a replay needs an
   `ImportRet` for each WASI call. component-ui serves WASI from
-  `@bytecodealliance/preview2-shim` and doesn't log those calls.
+  `@bytecodealliance/preview2-shim`, and logs each of its calls with the shim's answer, as
+  proxy-component records it. A component-ui replay still runs the shim, but gives the guest the
+  recorded answers in place of the shim's, and the shim's own objects for answers with handles;
+  past the recording, the shim answers. Without the shim, WASI imports ask like any other.
 - **Methods of guest-exported resources.** proxy-component records them but can't replay them
   (`src/codegen/mod.rs`, `export_funcs` skips methods). component-ui calls them.
 - **Mock resources passed to exports.** component-ui writes them as owned handles. That matches
@@ -136,8 +140,10 @@ and so does the UI's console, with **Save logs** in its settings:
 `import(args) = value`. That is close to proxy-component's trace: a call line for `ExportArgs`,
 an answer line for an `ImportArgs` and its `ImportRet`. The differences:
 
-- An answers file records only the imports that ask for answers: not those implemented in
-  JavaScript, those without a result, or WASI, which proxy-component records too.
+- An answers file records every import the guest makes, as proxy-component does. The answers of
+  imports implemented in JavaScript and of the WASI shim are marked, `// javascript` and
+  `// wasi`, and imports that didn't ask, e.g. those without a result, are written as `//!` lines,
+  which a replay doesn't read; proxy-component has an `ImportRet` for each.
 - It doesn't record export results (`ExportRet`), but writes them as comments.
 - Its names, handles and values differ as above: versioned interfaces, `#mock` and `#mock-<id>`,
   `b"…"`, and comments, e.g. where instances came from.
@@ -148,10 +154,12 @@ an answer line for an `ImportArgs` and its `ImportRet`. The differences:
 2. Done: structured call records in component-ui ([`src/call-record.ts`](../src/call-record.ts)),
    with the interface, resource, kind, function and WAVE arguments of each call, so a trace
    can be written from them.
-3. A component-ui recorder that writes the four entry types with proxy-component's names,
-   including WASI calls.
-4. A component-ui replayer that answers imports from a trace in order, WASI included, and
-   asks for whatever the trace doesn't cover.
+3. A component-ui recorder that writes the four entry types with proxy-component's names. Its
+   log already has every import call, WASI and JavaScript included, with its answer; what
+   remains is writing it in proxy-component's format.
+4. A component-ui replayer that answers imports from a trace in order. It already does so from
+   its own answers files, WASI included, and asks for whatever a file doesn't cover; what
+   remains is reading proxy-component's format.
 5. Agreement on the parts that are lossy or unverified: versioned names, interface-qualified
    handle labels, how host resource handles are numbered, and whether jco's handle indices for
    guest resources match wasmtime's.

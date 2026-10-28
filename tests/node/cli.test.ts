@@ -61,6 +61,12 @@ test('a run stops at an import without an answer, and says what it expects', () 
   ].join('\n'));
 });
 
+test('a run printed from its first import has no note on earlier lines', () => {
+  const { code, out } = cli('call', CALC, EVAL, '--answer', 'docs:adder/add@0.1.0.add(1, 2) = 3');
+  assert.equal(code, 0);
+  assert.equal(out, `› ${EVAL}\n  ↳ docs:adder/add@0.1.0.add(1, 2)\n    = 3  (--answer 1)\n  = 3\n`);
+});
+
 test('answers are used in order, and show where they came from', () => {
   const { code, out } = cli('call', CALC, EVAL, EVAL, '--all', '--answer', 'docs:adder/add@0.1.0.add = 3', '--answer', 'docs:adder/add@0.1.0.add(1, 2) = 4');
   assert.equal(code, 0);
@@ -288,6 +294,12 @@ test('calls can drop instances, and pass new mocks, which the file writes as #mo
   assert.match(readFileSync(mocks, 'utf8'), /^> fastly:compute\/http-incoming@0\.1\.0\.handle\(#mock-request-1, #mock-pollable-2\)$/m);
   // The shim's WASI answers are in the file, which a replay without the shim uses.
   assert.equal(cli('call', 'public/kv-store.wasm', '--answers', mocks, '--no-wasi-shim').code, 2);
+  // New mocks that would get other ids than the call gives them stop the run before it.
+  const swapped = cli('call', 'public/kv-store.wasm', 'fastly:compute/http-incoming@0.1.0.handle(#mock-request-2, #mock-pollable-1)');
+  assert.equal(swapped.code, 1);
+  assert.equal(swapped.out, 'stopped: the new mocks of fastly:compute/http-incoming@0.1.0.handle(#request-1, #pollable-2) got other ids than '
+    + '#mock-request-2, #mock-pollable-1 gives them, so the run differs from the file before this call, e.g. after an earlier answer was '
+    + 'edited: remove this call and the lines after it, and run again.\n');
 });
 
 test('only instances the UI holds can be dropped; the log shows what happened to the others', () => {
