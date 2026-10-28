@@ -54,8 +54,9 @@ Options:
                           from the last answer used
   --all                   Prints the whole run
   --no-wasi-shim          Doesn't provide WASI from the preview2 shim, so that WASI imports ask
-                          like any other: a run is then fully deterministic. A replay needs it:
-                          the shim's answers that --save records, marked '// wasi', answer them.
+                          like any other, and the answers file answers them. With the shim, a
+                          replay gives the guest the shim's answers that --save recorded, marked
+                          '// wasi', in place of the shim's, and the shim answers past them.
                           Also for inspect and template
 In values, '#mock' is a new mock of a host resource, and '#mock-x-2' a new mock that is to get the
 id 'x-2', as --save writes them; a list<u8> of text may be written b"…".
@@ -332,7 +333,7 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
   const runsAgain = (line: ScriptLine) => line.kind === 'answer' && line.recorded === 'javascript'
     && Object.keys(importCode).some((pkg) => isOfPackage(line.callee, pkg));
   const kept = lines.filter((line) => !runsAgain(line));
-  const script = new Script(kept, level);
+  const script = new Script(kept, level, wasiShim);
   // The calls: those of the command line, or of the file, which must be the same if both have them.
   const fileCalls = script.calls;
   if (argCalls.length > 0 && fileCalls.length > 0 && argCalls.join('\n') !== fileCalls.map((line) => line.call).join('\n')) {
@@ -346,13 +347,6 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
   const driver = await Driver.start(nodePlatform, await readFile(file), script, importCode, wasiShim);
   for (const custom of Object.keys(importCode).filter((pkg) => !driver.component.customImports.includes(pkg))) {
     throw new UsageError(`The component imports no ${custom}; it imports ${driver.component.customImports.join(', ')}`);
-  }
-  // The answers recorded from the shim would never be used with it, as it answers those calls
-  // itself: a replay answers WASI without the shim. Other answers for WASI may answer the calls
-  // that ask with the shim too, e.g. a mock's.
-  const wasi = wasiShim && kept.find((line): line is AnswerLine => line.kind === 'answer' && line.recorded === 'wasi');
-  if (wasi) {
-    throw new UsageError(`${wasi.source}: answers ${wasi.callee} as the WASI shim did; replay with --no-wasi-shim`);
   }
   let stopped: Stopped | undefined;
   // Why the run stopped where the guest's calls differ from the answers, e.g. after an edit.

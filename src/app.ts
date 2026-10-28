@@ -429,7 +429,7 @@ export class ComponentApp extends LitElement {
   private setSaveHeader(panel: ConsolePanel, s: Session, code: Record<string, string>) {
     panel.saveName = `${s.fileName.replace(/\.wasm$/, '')}.answers.txt`;
     // WASI's answers are recorded too, with the shim or without.
-    const replay = `component-ui call ${s.fileName} --answers ${panel.saveName} --no-wasi-shim`;
+    const replay = `component-ui call ${s.fileName} --answers ${panel.saveName}${s.component.wasiShim ? '' : ' --no-wasi-shim'}`;
     panel.saveHeader = scriptHeader(`saved from component-ui's console; replay with: ${replay}`, implementedImports(code), s.component.wasiShim);
   }
 

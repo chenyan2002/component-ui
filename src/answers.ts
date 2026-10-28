@@ -232,8 +232,14 @@ export class Script implements AnswerSource {
   // The last answer used.
   public lastUsed?: AnswerLine;
 
-  constructor(private readonly lines: ScriptLine[], private readonly level: DefaultsLevel) {
+  // Whether the file has the WASI shim's answers, which a replay gives the guest in place of the
+  // shim's; a file without, e.g. from before they were recorded, leaves WASI to the shim.
+  private readonly hasWasi: boolean;
+
+  // `wasiShim` says whether the shim answers WASI, or the file does, as any other import's.
+  constructor(private readonly lines: ScriptLine[], private readonly level: DefaultsLevel, wasiShim = false) {
     this.recordedEnd = lines.reduce((end, line, i) => (line.kind === 'answer' ? i + 1 : end), 0);
+    this.hasWasi = wasiShim && lines.some((line) => line.kind === 'answer' && line.recorded === 'wasi');
     const unpinned = level === 'eager' ? undefined : lines.find((line) => line.kind === 'answer' && line.args === undefined);
     if (unpinned) {
       throw new Error(`${unpinned.source}: --defaults ${level} needs the arguments of each answer, e.g. ${(unpinned as AnswerLine).callee}(…) = …`);
@@ -275,6 +281,9 @@ export class Script implements AnswerSource {
         // come between its line and the next.
         throw divergence(line, `the guest called ${record.label}, but the file has the next call here`);
       }
+      if (this.hasWasi && line.recorded === 'wasi') {
+        throw divergence(line, `the file has the WASI shim's answer here, but the guest called ${record.label}, which asks`);
+      }
       if (line.callee !== record.callee) {
         throw divergence(line, `the answer is for ${line.callee}, but the guest called ${record.label}`);
       }
@@ -289,6 +298,24 @@ export class Script implements AnswerSource {
       };
     }
     return defaultAnswer(func._ret[0], context, this.level);
+  }
+
+  // A call the WASI shim answers: the file's `// wasi` line for it, if the file has the shim's
+  // answers and isn't past its last, which the guest gets in place of the shim's answer.
+  public recorded(record: CallRecord, func: WIT.FuncClass): Answer | undefined {
+    if (!this.hasWasi || this.next >= this.recordedEnd) {
+      return undefined;
+    }
+    const line = this.lines[this.next];
+    if (line.kind !== 'answer' || line.recorded !== 'wasi') {
+      throw divergence(line, `the WASI shim answered ${record.label}, which the file doesn't have here`);
+    }
+    if (line.callee !== record.callee || (line.args !== undefined && !sameArgs(func, line.args, record))) {
+      throw divergence(line, `the answer is for ${line.callee}${line.args === undefined ? '' : `(${line.args})`}, but the guest called ${record.label}`);
+    }
+    this.next++;
+    this.lastUsed = line;
+    return { source: line.source, value: line.value, comments: line.comments, comment: line.comment, pinned: true };
   }
 }
 
@@ -308,7 +335,7 @@ export function scriptHeader(command: string, implemented: string[], wasiShim: b
       ? '//! imports implemented in JavaScript: none'
       : `//! imports implemented in JavaScript: ${implemented.join(', ')}; their answers are recorded, marked // javascript, so a replay needs no --imports`,
     wasiShim
-      ? '//! WASI comes from the shim; its answers are recorded, marked // wasi, so a replay, which needs --no-wasi-shim, gives the guest the same clocks and random numbers'
+      ? '//! WASI comes from the shim; its answers are recorded, marked // wasi, which a replay gives the guest in place of the shim\'s, e.g. the same clocks and random numbers'
       : '//! WASI doesn\'t come from the shim: its calls ask, and are recorded, like any other import\'s',
   ];
 }

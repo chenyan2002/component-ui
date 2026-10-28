@@ -1,4 +1,5 @@
 import * as WIT from './wit';
+import type { Answer } from './answering';
 import { CallRecord, Callee, describeCall, describeDrop, unversioned } from './call-record';
 import { ImportLog } from './log';
 import { dispose, Instance, involvesResources, ownedHandles, ResourceRegistry, returnedType, thrownType } from './resources';
@@ -7,6 +8,12 @@ import { formatHandle, formatResult, formatThrown } from './wave';
 // Who answers an import call the host's own code runs: the user's JavaScript, or the WASI shim.
 // The log records the call as their answer, marked as theirs, so that a replay can answer it.
 export type HostCode = 'javascript' | 'wasi';
+
+// What a replay says of a call the WASI shim answers: that the run differs there, or the answer
+// recorded of it, `by`. With `returns`, the guest gets the recorded value in place of the shim's:
+// it returns it, or throws, e.g. the `err` of a `result`. Without, the guest gets the shim's, e.g.
+// a stream, as a value with handles needs the shim's own objects.
+export type Replayed = 'stop' | { by: Answer; returns?: () => any };
 
 // Hooks are installed on a host object once; they report to the component instance that
 // last received it, in case the host shares an object between instances.
@@ -85,6 +92,8 @@ export class HostResources {
   // Logs what the guest does with host instances that no import call shows: dropping its
   // handles on them, which the component model does without calling an import.
   public log?: (record: CallRecord) => ImportLog;
+  // Replays the shim's calls that return a value, from what a run recorded of them.
+  public replay?: (record: CallRecord, func: WIT.FuncClass) => Replayed | undefined;
 
   constructor(private readonly registry: ResourceRegistry, interfaces: WIT.InterfaceClass[]) {
     // jco may key imports without their version.
@@ -279,11 +288,17 @@ export class HostResources {
   // logging it with its result as answered by that code, so that answers files record it. A
   // function without a result answers nothing; its call is logged, as one that didn't ask.
   public record(callee: Callee, func: WIT.FuncClass, key: string, args: any[], code: HostCode, invoke: () => any): any {
-    const line = this.internal > 0 ? undefined : this.log?.(describeCall(this.registry, 'import', callee, func, key, args));
-    if (!line) {
+    if (this.internal > 0 || !this.log) {
       return invoke();
     }
-    const by = { source: code };
+    const record = describeCall(this.registry, 'import', callee, func, key, args);
+    const line = this.log(record);
+    const replayed = code === 'wasi' && func._ret.length > 0 ? this.replay?.(record, func) : undefined;
+    if (replayed === 'stop') {
+      // Where the run differs from the replay, the guest waits, as for an answer.
+      return new Promise(() => {});
+    }
+    const by: Answer = replayed?.by ?? { source: code };
     // Before the host wrapper registers the instances it returns, so that they are new in the
     // answer; the result after, so that they show by id.
     const returned = (value: any) => {
@@ -303,12 +318,30 @@ export class HostResources {
         line.error(err);
       }
     };
+    const returns = replayed?.returns;
     let result: any;
     try {
       result = invoke();
     } catch (err) {
-      threw(err);
-      throw err;
+      if (!returns) {
+        threw(err);
+        throw err;
+      }
+    }
+    if (returns) {
+      // The shim ran, for its state; the guest gets the recorded answer.
+      const give = () => {
+        let value: any;
+        try {
+          value = returns();
+        } catch (err) {
+          threw(err);
+          throw err;
+        }
+        returned(value);
+        return value;
+      };
+      return isThenable(result) ? result.then(give, give) : give();
     }
     if (isThenable(result)) {
       result.then(returned, threw);

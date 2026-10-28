@@ -143,9 +143,9 @@ export class ConsolePanel extends LitElement {
         WASI from the shim
         <div slot="hint" class="console-defaults-description">
           The preview2 shim provides WASI with real clocks and random numbers, and shows stdout and stderr.
-          Its calls are logged and saved, marked <code>// wasi</code>, and the CLI replays a saved run without
-          the shim, answering WASI from them. Without it, WASI imports ask like any other. Changing it restarts
-          the component.
+          Its calls are logged and saved, marked <code>// wasi</code>, and the CLI's replay of a saved run gives
+          the guest the same answers. Without it, WASI imports ask like any other. Changing it restarts the
+          component.
         </div>
       </wa-switch>
       <div slot="footer" class="func-actions">

@@ -140,21 +140,29 @@ test('imports implemented in JavaScript are recorded, and replay without it', ()
   assert.match(readFileSync(saved, 'utf8'), /^\/\/! imports implemented in JavaScript: none$/m);
 });
 
-test('the shim\'s WASI is recorded, and a replay answers it without the shim', () => {
+test('the shim\'s WASI is recorded, and a replay gives the guest the same answers', () => {
   const saved = join(dir, 'shim.txt');
   const { code, out } = cli('call', 'public/printer.wasm', 'greet("Ada")', '--save', saved);
   assert.equal(code, 0, out);
   assert.match(out, /^ {2}↳ wasi:io\/streams\/output-stream@0\.2\.9\.write\(#borrow-output-stream-1, b"Hello, Ada!\\n"\)\n {4}= ok {2}\(wasi\)$/m);
   const text = readFileSync(saved, 'utf8');
   assert.match(text, /^wasi:cli\/stdout@0\.2\.9\.get-stdout\(\) = #mock-output-stream-1 {2}\/\/ wasi$/m);
-  // A replay needs --no-wasi-shim, as the shim would answer what the file does.
-  const shim = cli('call', 'public/printer.wasm', '--answers', saved);
-  assert.equal(shim.code, 1);
-  assert.match(shim.err, /shim\.txt:5: answers wasi:cli\/stdout@0\.2\.9\.get-stdout as the WASI shim did; replay with --no-wasi-shim/);
-  const replay = cli('call', 'public/printer.wasm', '--answers', saved, '--no-wasi-shim', '--all');
+  // With the shim, the guest gets the recorded answers in place of the shim's, e.g. another
+  // `check-write`; the stream is the shim's own, with the id the file says.
+  const replayed = file('shim-4k.txt', text.replace(/ok\(\d+\)  \/\/ wasi/g, 'ok(4096)  // wasi'));
+  const replay = cli('call', 'public/printer.wasm', '--answers', replayed, '--all', '--save', replayed);
   assert.equal(replay.code, 0, replay.out);
-  assert.match(replay.out, /get-stdout\(\)\n {4}= #mock-output-stream-1 {2}\(.*shim\.txt:5\)$/m);
-  assert.match(replay.out, /^ {2}= "greeted Ada"$/m);
+  assert.match(replay.out, /get-stdout\(\)\n {4}= #mock-output-stream-1 {2}\(.*shim-4k\.txt:5\)$/m);
+  assert.match(replay.out, /check-write\(#borrow-output-stream-1\)\n {4}= ok\(4096\) {2}\(.*shim-4k\.txt:6\)$/m);
+  assert.match(replay.out, /^ {2}\[stdout\] Hello, Ada!$/m);
+  assert.match(readFileSync(replayed, 'utf8'), /^wasi:io\/streams\/output-stream@0\.2\.9\.check-write\(#borrow-output-stream-1\) = ok\(4096\) {2}\/\/ wasi$/m);
+  // Without the shim, the file answers WASI as any other import.
+  assert.equal(cli('call', 'public/printer.wasm', '--answers', saved, '--no-wasi-shim').code, 0);
+  // A guest whose WASI calls differ stops where they do.
+  const bob = file('shim-bob.txt', text.replace('greet("Ada")', 'greet("Bob")'));
+  const changed = cli('call', 'public/printer.wasm', '--answers', bob);
+  assert.equal(changed.code, 1, changed.out);
+  assert.match(changed.out, /^stopped: .*shim-bob\.txt:7: the answer is for wasi:io\/streams\/output-stream@0\.2\.9\.write\(#borrow-output-stream-1, b"Hello, Ada!\\n"\), but the guest called .*b"Hello, Bob!\\n"\)/m);
 });
 
 test('methods take their instance first, and answers cover the run up to their end', () => {
@@ -198,7 +206,7 @@ test('--save writes a file that reproduces the run, with a ? where it stopped', 
   assert.equal(readFileSync(saved, 'utf8'), [
     '//! component-ui call public/resource.wasm --defaults eager',
     '//! imports implemented in JavaScript: none',
-    '//! WASI comes from the shim; its answers are recorded, marked // wasi, so a replay, which needs --no-wasi-shim, gives the guest the same clocks and random numbers',
+    "//! WASI comes from the shim; its answers are recorded, marked // wasi, which a replay gives the guest in place of the shim's, e.g. the same clocks and random numbers",
     '> new exports/x(5)  // = #x-1',
     '> exports.test-imports()',
     // An instance no answer returned: a mock's constructor needs no answer.

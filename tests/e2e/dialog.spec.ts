@@ -220,7 +220,7 @@ test('Save writes the console as an answers file the CLI replays', async ({ page
     'imports/y.get-a(#borrow-y-2) = ?  // expects s32',
     '',
   ]);
-  expect(text).toMatch(/^\/\/! saved from component-ui's console; replay with: component-ui call resource\.wasm --answers resource\.answers\.txt --no-wasi-shim$/m);
+  expect(text).toMatch(/^\/\/! saved from component-ui's console; replay with: component-ui call resource\.wasm --answers resource\.answers\.txt$/m);
   // Clear logs, in the settings too, empties the console.
   const dialog = await consoleSettings(page);
   await dialog.getByRole('button', { name: 'Clear logs' }).click();

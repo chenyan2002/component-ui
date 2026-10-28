@@ -50,6 +50,9 @@ export interface AnswerContext {
 // as its next answer is for another import.
 export interface AnswerSource {
   answer(record: CallRecord, func: WIT.FuncClass, context: AnswerContext): Answer | undefined;
+  // For a call the WASI shim answers, which returns a value: the answer recorded of it, if any,
+  // which the guest gets in place of the shim's, as a replay. Throws where the run differs.
+  recorded?(record: CallRecord, func: WIT.FuncClass): Answer | undefined;
 }
 
 // What the happy path and messages can know of the instances an answer could return: those of

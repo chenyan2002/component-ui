@@ -4,13 +4,13 @@ import { CallLog } from './call-log';
 import { CallRecord } from './call-record';
 import { CallActivity, ExportsContext } from './calls';
 import { ImportDialogs } from './dialog';
-import { Giver, instanceChoices } from './draft';
-import { HostResources } from './host-resources';
+import { draftErrors, Giver, INVALID, instanceChoices, parseDraft } from './draft';
+import { HostResources, Replayed } from './host-resources';
 import { ImportLog, ImportPrompt } from './log';
 import { instantiate, LoadedComponent } from './loader';
 import { Platform } from './platform';
-import { clashingNames, Instance, resourcesOf, ResourceRegistry } from './resources';
-import { canonicalWave } from './wave';
+import { clashingNames, Instance, resourcesOf, ResourceRegistry, thrownType } from './resources';
+import { canonicalWave, formatValue, mapHandles, parseWave } from './wave';
 
 // An instance of a component, as the UI and the CLI run it: its resource instances, the host's
 // side of its imports, and the log of what it does. The imports that ask are answered from an
@@ -63,6 +63,7 @@ export class ComponentInstance {
     this.registry.onInstance = (instance) => log.instance(instance);
     this.host = new HostResources(this.registry, component.imports);
     this.host.log = (record) => this.logImport(record);
+    this.host.replay = (record, func) => this.replay(record, func);
     this.dialogs = new ImportDialogs(this.registry, this.host, component.imports, (record) => this.logImport(record));
   }
 
@@ -149,6 +150,68 @@ export class ComponentInstance {
         reason: `${answer.source}: the guest got ${result}, not ${value}, as the new mocks got other ids. ${RESTART}.`,
       });
     }
+  }
+
+  // Replays a call the WASI shim answers from the answer recorded of it, if the source has one:
+  // the guest gets the recorded value, or for a value with handles, the shim's own objects, which
+  // are to get the ids the answer says, e.g. `#mock-output-stream-1`. Where the run differs, it
+  // stops, and the guest waits.
+  private replay(record: CallRecord, func: WIT.FuncClass): Replayed | undefined {
+    const stop = (reason: string): Replayed => {
+      this.options.stopped?.({ record, func, unanswered: false, reason });
+      return 'stop';
+    };
+    let answer: Answer | undefined;
+    try {
+      answer = this.options.answers.recorded?.(record, func);
+    } catch (err) {
+      return stop(errorText(err));
+    }
+    if (!answer) {
+      return undefined;
+    }
+    const [type] = func._ret;
+    if (answer.value === undefined) {
+      return { by: answer, returns: () => { throw new WebAssembly.RuntimeError(`Trapped at ${record.label}`); } };
+    }
+    // A value with handles, e.g. `ok(#mock-output-stream-1)`, takes the shim's own objects; others,
+    // e.g. the `ok(4096)` of a `result` whose `err` could hold one, are given as recorded.
+    let handles = false;
+    mapHandles(answer.value, (label) => {
+      handles = true;
+      return label;
+    });
+    if (handles) {
+      if (/#mock-/.test(answer.value)) {
+        this.expected.set(record, { answer, type, func });
+      }
+      return { by: answer };
+    }
+    let value: any = INVALID;
+    let errors: string[] = [];
+    try {
+      const draft = parseWave(type, answer.value);
+      value = parseDraft(type, draft, this.registry, this.dialogs, 'host');
+      errors = draftErrors(draft);
+    } catch (err) {
+      errors = [errorText(err)];
+    }
+    if (value === INVALID) {
+      return stop(`${answer.source}: ${answer.value} is no ${type.name}: ${errors.join('; ')}`);
+    }
+    // jco returns the `ok` payload of a `result` and throws the `err` payload.
+    if (thrownType(func) === undefined) {
+      return { by: answer, returns: () => value };
+    }
+    return {
+      by: answer,
+      returns: () => {
+        if (value.tag === 'err') {
+          throw Object.assign(new Error(formatValue(this.registry, type, value)), { payload: value.val });
+        }
+        return value.val;
+      },
+    };
   }
 
   // Answers an import that asks, or leaves the guest waiting.
