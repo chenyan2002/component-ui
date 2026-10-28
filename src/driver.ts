@@ -1,8 +1,9 @@
 import * as WIT from './wit';
 import { AnswerSource } from './answering';
 import { CallEntry, CallLog } from './call-log';
-import { callTypes, qualified, qualifiedResource } from './call-record';
-import { call, CallTarget, drop, ExportsContext } from './calls';
+import { callTypes } from './call-record';
+import { allCallables, Callable, ExportCallables, exportCallables, heldResources } from './callables';
+import { call, drop, ExportsContext } from './calls';
 import { ComponentInstance, Stopped } from './component-instance';
 import { draftErrors, Giver, INVALID, parseDraft } from './draft';
 import { LoadedComponent, loadComponent } from './loader';
@@ -19,12 +20,8 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// What a call written as the console shows it, e.g. `iface.func(1, 2)`, calls.
-interface Callable {
-  target: CallTarget;
-  // jco's name for the function.
-  key: string;
-  func: WIT.FuncClass;
+function byCallee(callables: Callable[]): Map<string, Callable> {
+  return new Map(callables.map((callable) => [callable.callee, callable]));
 }
 
 // Splits a call into what is called and its arguments, e.g. `new x` and `1, 2` for `new x(1, 2)`.
@@ -36,47 +33,18 @@ export function splitCall(text: string): [string, string] {
   return [text.slice(0, open).trim(), text.trimEnd().slice(open + 1, -1)];
 }
 
-// Adds the functions of a resource, e.g. `new exports/x`, `exports/x.add` and `exports/x.get-a`;
-// constructors and statics only with the interface they are called through.
-function addResource(map: Map<string, Callable>, iface: WIT.InterfaceClass | undefined, resource: WIT.ResourceClass) {
-  const name = qualifiedResource(resource);
-  for (const [key, func] of Object.entries(resource._fields)) {
-    const callKind = func.callKind;
-    if (callKind === 'method') {
-      map.set(`${name}.${func.displayName(key)}`, { target: { type: 'method', resource }, key, func });
-    } else if (iface && (callKind === 'constructor' || callKind === 'static')) {
-      map.set(callKind === 'constructor' ? `new ${name}` : `${name}.${func.displayName(key)}`, { target: { type: callKind, iface, resource }, key, func });
-    }
-  }
-}
-
-// The callables of the exports by callee, as the console shows them: functions, e.g.
-// `docs:calc/calc@0.1.0.eval`, and the functions of resources, e.g. `new exports/x` and
-// `exports/x.get-a`, including the imported resources the exports use.
-function callables(interfaces: WIT.InterfaceClass[]): Map<string, Callable> {
-  const map = new Map<string, Callable>();
-  const seen = new Set<WIT.ResourceClass>();
-  for (const iface of interfaces) {
-    for (const [key, func] of Object.entries(iface._fields)) {
-      map.set(qualified(iface._name, func.displayName(key)), { target: { type: 'func', iface }, key, func });
-    }
-    for (const resource of iface.get_resources().filter((r) => !seen.has(r))) {
-      seen.add(resource);
-      addResource(map, iface, resource);
-    }
-  }
-  return map;
-}
-
 export class Driver {
   // The calls, the imports the guest made during them, and its output, in order.
   public readonly log = new CallLog();
   private instance!: ComponentInstance;
+  private readonly exports: ExportCallables;
+  // The functions of the exports and of the resources they use, by callee.
   private readonly callables: Map<string, Callable>;
   private stopped?: (stopped: Stopped) => void;
 
   private constructor(public readonly component: LoadedComponent) {
-    this.callables = callables(component.interfaces);
+    this.exports = exportCallables(component.interfaces);
+    this.callables = byCallee(allCallables(this.exports.interfaces, this.exports.hostResources));
   }
 
   // Loads and instantiates a component. `importCode` implements imports in JavaScript, by
@@ -145,8 +113,7 @@ export class Driver {
       return found;
     }
     // Methods of the host resources the exports don't use, but whose instances the UI holds.
-    const runtime = new Map<string, Callable>();
-    this.registry.resources().forEach((resource) => addResource(runtime, undefined, resource));
+    const runtime = byCallee(allCallables([], heldResources(this.registry, this.exports)));
     const method = runtime.get(callee);
     if (method) {
       return method;

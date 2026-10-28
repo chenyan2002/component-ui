@@ -2,9 +2,9 @@ import { spawnSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import * as WIT from './wit';
-import { CallRecord, qualified, qualifiedResource, unversioned } from './call-record';
+import { unversioned } from './call-record';
 import {
-  AnswerLine, CallLine, Divergence, implementedImports, parseAnswer, parseScript, Script, scriptHeader, scriptLines, ScriptLine, writeScript,
+  CallLine, Divergence, implementedImports, parseAnswer, parseScript, Script, scriptHeader, scriptLines, ScriptLine, writeScript,
 } from './answers';
 import { Answer, DEFAULTS_LEVELS, DefaultsLevel } from './answering';
 import { answeredValue, CallEntry, CallLog, ImportEntry, isOwnCall, StreamEntry } from './call-log';
@@ -14,7 +14,8 @@ import { mapHandles } from './wave';
 import { byImportName } from './host-resources';
 import { importTemplate } from './import-template';
 import { nodePlatform } from './platform-node';
-import { definedResources, describeInstance } from './resources';
+import { describeInstance } from './resources';
+import { allCallables, Callable, exportCallables, interfaceCallables } from './callables';
 
 // The command line of component-ui, for running a component without the UI, e.g. by an agent:
 //
@@ -97,52 +98,28 @@ function signature(callee: string, func: WIT.FuncClass, types: Map<string, WIT.T
   return `${callee}(${[...self, ...func._args.map(([name, ty]) => `${name}: ${ty.name}`)].join(', ')})${ret}`;
 }
 
-// The functions of interfaces, as a call to them is written, with the resource of a method; of
-// the resources `include` takes, e.g. those the interfaces define.
-function functionsOf(
-  interfaces: WIT.InterfaceClass[], include: (resource: WIT.ResourceClass, iface: WIT.InterfaceClass) => boolean = () => true, funcs = true,
-): Array<[string, WIT.FuncClass, WIT.ResourceClass?]> {
-  const found: Array<[string, WIT.FuncClass, WIT.ResourceClass?]> = [];
-  const seen = new Set<WIT.ResourceClass>();
-  for (const iface of interfaces) {
-    if (funcs) {
-      for (const [key, func] of Object.entries(iface._fields)) {
-        found.push([qualified(iface._name, func.displayName(key)), func]);
-      }
-    }
-    for (const resource of iface.get_resources().filter((r) => !seen.has(r) && include(r, iface))) {
-      seen.add(resource);
-      const name = qualifiedResource(resource);
-      for (const [key, func] of Object.entries(resource._fields)) {
-        found.push([func.callKind === 'constructor' ? `new ${name}` : `${name}.${func.displayName(key)}`, func, resource]);
-      }
-    }
-  }
-  return found;
-}
-
 async function inspect(file: string, wasiShim: boolean, print: (line: string) => void) {
   const component = await loadComponent(nodePlatform, await readFile(file), wasiShim);
   const types = new Map<string, WIT.Type>();
-  const section = (title: string, funcs: Array<[string, WIT.FuncClass, WIT.ResourceClass?]>) => {
-    if (funcs.length > 0) {
+  const section = (title: string, callables: Callable[]) => {
+    if (callables.length > 0) {
       print(title);
-      funcs.forEach(([callee, func, resource]) => print(`  ${signature(callee, func, types, resource)}`));
+      callables.forEach(({ callee, func, target }) => print(`  ${signature(callee, func, types, target.type === 'func' ? undefined : target.resource)}`));
     }
   };
-  // The guest's resources, as the UI shows them: under the export that defines them, which others
-  // may `use`. The rest are the host's, defined by imports.
-  const defined = new Set(component.interfaces.flatMap(definedResources));
-  section('Exports, which `call` calls:', functionsOf(component.interfaces, (r, iface) => definedResources(iface).includes(r)));
+  // As the UI shows them: the guest's resources under the export that defines them, which
+  // others may `use`, and the host's, defined by imports, apart.
+  const exports = exportCallables(component.interfaces);
+  section('Exports, which `call` calls:', allCallables(exports.interfaces));
   section('Host resources the exports use, whose functions `call` can call too, e.g. to make their arguments:',
-    functionsOf(component.interfaces, (r) => !defined.has(r), false));
+    allCallables([], exports.hostResources));
   // As jco names them: world-level functions are imports of their own, e.g. `log-line`.
   const ifaces = byImportName(component.imports);
-  const imported = functionsOf(component.customImports.flatMap((pkg) => ifaces.get(unversioned(pkg)) ?? []));
-  const asks = (func: WIT.FuncClass) => func._ret.length > 0 && func.callKind !== 'constructor';
-  section('Imports that ask for answers, unless implemented with --imports:', imported.filter(([_, func]) => asks(func)));
+  const imported = allCallables(component.customImports.flatMap((pkg) => ifaces.get(unversioned(pkg)) ?? []).map(interfaceCallables));
+  const asks = ({ func }: Callable) => func._ret.length > 0 && func.callKind !== 'constructor';
+  section('Imports that ask for answers, unless implemented with --imports:', imported.filter(asks));
   section('Imports answered on their own, with a new mock for a constructor, and nothing for a function without a result:',
-    imported.filter(([_, func]) => !asks(func)));
+    imported.filter((callable) => !asks(callable)));
   if (component.customImports.length > 0) {
     print(`Packages to implement with --imports: ${component.customImports.join(', ')}`);
   }

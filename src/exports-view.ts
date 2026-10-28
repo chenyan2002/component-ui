@@ -1,8 +1,8 @@
 import { html, nothing } from 'lit';
 import * as WIT from './wit';
-import { CallTarget, ExportsContext } from './calls';
+import { Callable, ExportCallables, exportCallables, heldResources, ResourceCallables } from './callables';
+import { ExportsContext } from './calls';
 import { qualifiedResource } from './call-record';
-import { definedResources } from './resources';
 import './func-card';
 
 // Whether a function shows for the search, given its name and those of the sections it is in.
@@ -20,13 +20,13 @@ function within(shown: Search, section: string): Search {
   return (...names) => shown(...names, section);
 }
 
-function funcCards(ctx: ExportsContext, funcs: Array<[string, WIT.FuncClass]>, target: (func: WIT.FuncClass) => CallTarget, shown: Search) {
-  if (funcs.length === 0) {
+function funcCards(ctx: ExportsContext, callables: Callable[], shown: Search) {
+  if (callables.length === 0) {
     return nothing;
   }
   return html`<div class="func-grid">
-    ${funcs.map(([name, func]) =>
-      html`<func-card ?hidden=${!shown(func.displayName(name))} .ctx=${ctx} .name=${name} .func=${func} .target=${target(func)}></func-card>`)}
+    ${callables.map(({ key, func, target }) =>
+      html`<func-card ?hidden=${!shown(func.displayName(key))} .ctx=${ctx} .name=${key} .func=${func} .target=${target}></func-card>`)}
   </div>`;
 }
 
@@ -38,61 +38,44 @@ function summary(kind: string, name: string, count: number, unit: string) {
   </div>`;
 }
 
-// Resources show only in the interface that defines them.
-function renderResource(ctx: ExportsContext, iface: WIT.InterfaceClass, resource: WIT.ResourceClass, shown: Search, name = resource.witName) {
-  const statics = resource.get_static_funcs();
-  const methods = resource.get_method_funcs();
+// A resource's constructor and statics, then its methods. Collapsed by default; resource
+// sections can be long.
+function renderResource(ctx: ExportsContext, { resource, callables }: ResourceCallables, shown: Search, name = resource.witName, unit = 'function') {
+  const methods = callables.filter((c) => c.target.type === 'method');
   shown = within(shown, name);
-  // Collapsed by default; resource sections can be long.
   return html`<wa-details class="resource">
-    ${summary('resource', name, statics.length + methods.length, 'function')}
-    ${funcCards(ctx, statics, (func) => ({ type: func.callKind as 'constructor' | 'static', iface, resource }), shown)}
-    ${funcCards(ctx, methods, () => ({ type: 'method', resource }), shown)}
+    ${summary('resource', name, callables.length, unit)}
+    ${funcCards(ctx, callables.filter((c) => c.target.type !== 'method'), shown)}
+    ${funcCards(ctx, methods, shown)}
   </wa-details>`;
 }
 
 // Resources defined elsewhere, i.e. by imports: those the exports `use`, and those returned by
-// exports. They show once each, together in one card, named with the interface that defines them.
-// Collapsed by default, ahead of the exports.
-function renderHostResources(ctx: ExportsContext, interfaces: WIT.InterfaceClass[], shown: Search) {
-  const defined = new Set(interfaces.flatMap(definedResources));
-  // Each with an interface that uses it, which calls to an imported resource don't need.
-  const used = new Map<WIT.ResourceClass, WIT.InterfaceClass>();
-  for (const iface of interfaces) {
-    for (const resource of iface.get_resources()) {
-      if (!defined.has(resource) && !used.has(resource)) {
-        used.set(resource, iface);
-      }
-    }
-  }
-  const returned = ctx.registry.resources().filter((r) => !defined.has(r) && !used.has(r));
-  if (used.size + returned.length === 0) {
+// exports, of which only the methods can be called. They show once each, together in one card,
+// named with the interface that defines them. Collapsed by default, ahead of the exports.
+function renderHostResources(ctx: ExportsContext, exports: ExportCallables, shown: Search) {
+  const held = heldResources(ctx.registry, exports);
+  const count = exports.hostResources.length + held.length;
+  if (count === 0) {
     return [];
   }
   shown = within(shown, 'host resources');
   return [html`<wa-details class="interface">
-    ${summary('interface', 'host resources', used.size + returned.length, 'resource')}
-    ${[...used].map(([resource, iface]) => renderResource(ctx, iface, resource, shown, qualifiedResource(resource)))}
-    ${returned.map((resource) => {
-      const methods = resource.get_method_funcs();
-      const name = qualifiedResource(resource);
-      return html`<wa-details class="resource">
-        ${summary('resource', name, methods.length, 'method')}
-        ${funcCards(ctx, methods, () => ({ type: 'method', resource }), within(shown, name))}
-      </wa-details>`;
-    })}
+    ${summary('interface', 'host resources', count, 'resource')}
+    ${exports.hostResources.map((resource) => renderResource(ctx, resource, shown, qualifiedResource(resource.resource)))}
+    ${held.map((resource) => renderResource(ctx, resource, shown, qualifiedResource(resource.resource), 'method'))}
   </wa-details>`];
 }
 
 export function renderExports(ctx: ExportsContext, interfaces: WIT.InterfaceClass[], shown: Search) {
-  return renderHostResources(ctx, interfaces, shown).concat(interfaces.map((iface) => {
-    const funcs = Object.entries(iface._fields);
+  const exports = exportCallables(interfaces);
+  return renderHostResources(ctx, exports, shown).concat(exports.interfaces.map(({ iface, funcs, resources }) => {
     const name = iface.isRoot ? 'world exports' : iface._name;
     const inIface = within(shown, name);
     return html`<wa-details open class="interface">
       ${summary('interface', name, funcs.length, 'function')}
-      ${definedResources(iface).map((resource) => renderResource(ctx, iface, resource, inIface))}
-      ${funcCards(ctx, funcs, () => ({ type: 'func', iface }), inIface)}
+      ${resources.map((resource) => renderResource(ctx, resource, inIface))}
+      ${funcCards(ctx, funcs, inIface)}
     </wa-details>`;
   }));
 }

@@ -36,7 +36,8 @@ test('inspect shows the exports, the imports that ask, and the types', () => {
   // Imports that don't ask are listed apart, and so are the host resources the exports use.
   assert.match(resource, /^Imports answered on their own, .*:\n {2}new imports\/y\(a: s32\)\n {2}imports\/y\.set-a\(self: borrow<y>, a: s32\)$/m);
   assert.match(resource, /^Types: none$/m);
-  assert.match(cli('inspect', 'public/kv-store.wasm').out, /^Host resources the exports use, .*:\n {2}fastly:compute\/async-io\/pollable@0\.1\.0\.is-ready\(self: borrow<pollable>\) -> bool$/m);
+  // A resource's constructor and statics come first, then its methods, as the UI shows them.
+  assert.match(cli('inspect', 'public/kv-store.wasm').out, /^Host resources the exports use, .*:\n {2}fastly:compute\/async-io\/pollable@0\.1\.0\.new-ready\(\) -> pollable\n {2}fastly:compute\/async-io\/pollable@0\.1\.0\.is-ready\(self: borrow<pollable>\) -> bool$/m);
   // A resource an export defines is the guest's, also where another export `use`s it.
   const wrapped = cli('inspect', 'public/record_imports.wasm').out;
   const hostResources = wrapped.slice(wrapped.indexOf('Host resources'), wrapped.indexOf('Imports that ask'));
