@@ -1,4 +1,5 @@
 import * as WIT from './wit';
+import type { CallRecord } from './call-record';
 import { draftErrors, instanceChoices } from './draft';
 import { ImportPrompt } from './log';
 import { describeInstance, Instance } from './resources';
@@ -10,9 +11,10 @@ import { parseWave } from './wave';
 export type DefaultsLevel = 'none' | 'careful' | 'eager';
 export const DEFAULTS_LEVELS: DefaultsLevel[] = ['none', 'careful', 'eager'];
 
-// An answer to an import: a value in WAVE, or none to trap the guest, or a hole, to answer
-// later, which stops the run. `source` is where it came from, e.g. `answers.txt:3` or `default`,
-// and `note` says more, e.g. which instances the happy path passed over for a mock.
+// An answer to an import other than the user's: a value in WAVE, or none to trap the guest, or a
+// hole, to answer later, which stops the run. `source` is where it came from, e.g.
+// `answers.txt:3` or `default`, and `note` says more, e.g. which instances the happy path passed
+// over for a mock. The log keeps it with the import it answered.
 export interface Answer {
   source: string;
   value?: string;
@@ -41,6 +43,13 @@ export interface AnswerContext {
   // The instances the host could return, as the UI's instance picker offers them.
   choices(resource: WIT.ResourceClass): Instance[];
   canMock(resource: WIT.ResourceClass): boolean;
+}
+
+// Answers the imports that ask, in the order the guest calls them, with a value of the type
+// `func` returns. Returns undefined when it has no answer, and throws when it can't answer, e.g.
+// as its next answer is for another import.
+export interface AnswerSource {
+  answer(record: CallRecord, func: WIT.FuncClass, context: AnswerContext): Answer | undefined;
 }
 
 // What the happy path and messages can know of the instances an answer could return: those of
@@ -110,11 +119,17 @@ export function happyValue(t: WIT.Type, context: AnswerContext, level: DefaultsL
   return value === undefined ? undefined : { value, notes: [...notes.values()] };
 }
 
-// The happy path's answer to an import, at the level, if there is one: `default`, noting the
+// The happy path's answer of the type, at the level, if there is one: `default`, noting the
 // instances it passed over.
-export function defaultAnswer(prompt: ImportPrompt, level: DefaultsLevel): Answer | undefined {
-  const happy = happyValue(prompt.type, promptContext(prompt), level);
+export function defaultAnswer(t: WIT.Type, context: AnswerContext, level: DefaultsLevel): Answer | undefined {
+  const happy = happyValue(t, context, level);
   return happy && { source: 'default', value: happy.value, note: happy.notes.join('; ') || undefined };
+}
+
+// Answers by the happy path alone, at the level `level` gives as the import asks, e.g. the one
+// chosen in the console's settings.
+export function defaultsSource(level: () => DefaultsLevel): AnswerSource {
+  return { answer: (_record, func, context) => defaultAnswer(func._ret[0], context, level()) };
 }
 
 function errorText(err: unknown): string {
@@ -124,9 +139,8 @@ function errorText(err: unknown): string {
 // Answers a prompt, or traps the guest, as the answer says; why it couldn't, if the answer isn't a
 // value of the type the import returns.
 export function answerPrompt(prompt: ImportPrompt, answer: Answer): string | undefined {
-  const by = { source: answer.source, note: answer.note };
   if (answer.value === undefined) {
-    prompt.trap(by);
+    prompt.trap(answer);
     return undefined;
   }
   let draft;
@@ -135,5 +149,5 @@ export function answerPrompt(prompt: ImportPrompt, answer: Answer): string | und
   } catch (err) {
     return `${answer.source}: ${answer.value} is no ${prompt.type.name}: ${errorText(err)}`;
   }
-  return prompt.answer(draft, by) ? undefined : `${answer.source}: invalid answer: ${draftErrors(draft).join('; ')}`;
+  return prompt.answer(draft, answer) ? undefined : `${answer.source}: invalid answer: ${draftErrors(draft).join('; ')}`;
 }

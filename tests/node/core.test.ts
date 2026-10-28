@@ -2,15 +2,14 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
+import { AnswerSource } from '../../src/answering';
+import { CallLog } from '../../src/call-log';
 import { CallRecord } from '../../src/call-record';
-import { call, CallActivity, drop, ExportsContext } from '../../src/calls';
-import { ImportDialogs } from '../../src/dialog';
-import { TextDraft } from '../../src/draft';
-import { HostResources, ownFunc } from '../../src/host-resources';
-import { ImportLog, ImportPrompt } from '../../src/log';
-import { instantiate, JSPI_SUPPORTED, LoadedComponent, loadComponent } from '../../src/loader';
+import { call, drop, ExportsContext } from '../../src/calls';
+import { ComponentInstance } from '../../src/component-instance';
+import { ownFunc } from '../../src/host-resources';
+import { JSPI_SUPPORTED, LoadedComponent, loadComponent } from '../../src/loader';
 import { nodePlatform } from '../../src/platform-node';
-import { clashingNames, ResourceRegistry } from '../../src/resources';
 
 // The core runs headless in Node: no DOM, the same WASI as the browser, and imports that wait
 // for an answer. Built and run by `npm run test:node`.
@@ -18,43 +17,34 @@ import { clashingNames, ResourceRegistry } from '../../src/resources';
 interface Session {
   component: LoadedComponent;
   ctx: ExportsContext;
-  // The logged calls, in the order they started.
-  records: CallRecord[];
-  // Each logged call with its result, e.g. `add(1, 2) -> 3`, in the order they finished.
-  lines: string[];
-  // What the component wrote to stdout and stderr.
-  output: string[];
+  log: CallLog;
 }
 
-// Instantiates an example; `answer` handles the prompts of imports without an implementation.
-async function start(file: string, answer: (call: CallRecord, prompt: ImportPrompt) => void = () => {}): Promise<Session> {
+// Instantiates an example; `answers` answers the imports without an implementation.
+async function start(file: string, answers: AnswerSource = { answer: () => undefined }): Promise<Session> {
   const component = await loadComponent(nodePlatform, await readFile(resolve('public', file)));
-  const registry = new ResourceRegistry(clashingNames(component.imports, component.interfaces));
-  const host = new HostResources(registry, component.imports);
-  const records: CallRecord[] = [];
-  const lines: string[] = [];
-  const output: string[] = [];
-  const log = (call: CallRecord): ImportLog => {
-    records.push(call);
-    return {
-      result: (text) => lines.push(`${call.label} -> ${text}`),
-      error: (err) => lines.push(`${call.label} !! ${err}`),
-      detail: (text) => lines.push(`${call.label} => ${text}`),
-      note: (text) => lines.push(`${call.label} ~ ${text}`),
-      answered: () => {},
-      ask: (prompt) => answer(call, prompt),
-    };
-  };
-  const dialogs = new ImportDialogs(registry, host, component.imports, log);
-  const exports = await instantiate(nodePlatform, component, {}, {
-    stdout: (text) => output.push(text),
-    stderr: (text) => output.push(text),
-  }, {
-    complete: (pkg, mod, wasi) => dialogs.complete(pkg, mod, wasi),
-    wrap: (pkg, mod) => host.wrap(pkg, mod),
-  });
-  const ctx: ExportsContext = { exports, log, registry, host, activity: new CallActivity(), mocks: dialogs };
-  return { component, ctx, records, lines, output };
+  const log = new CallLog();
+  const { ctx } = await ComponentInstance.create(nodePlatform, component, log, { answers });
+  return { component, ctx, log };
+}
+
+// The calls and the imports made during them, in the order they started.
+function entries(log: CallLog) {
+  return log.entries.flatMap((e) => (e.kind === 'call' ? [e, ...e.imports] : e.kind === 'import' ? [e] : []));
+}
+
+function records(log: CallLog): CallRecord[] {
+  return entries(log).map((e) => e.record!);
+}
+
+// Each call and import with its result, e.g. `add(1, 2) -> 3`.
+function lines(log: CallLog): string[] {
+  return entries(log).map((e) => `${e.record!.label} ${e.status === 'error' ? '!!' : '->'} ${e.output}`);
+}
+
+// What the component wrote to stdout and stderr.
+function output(log: CallLog): string {
+  return log.entries.map((e) => (e.kind === 'stream' ? e.text : '')).join('');
 }
 
 // Calls the function `name`, by its jco name, of the exported interface `iface`.
@@ -70,18 +60,19 @@ test('JSPI is available', () => {
 
 test('an import without an implementation waits for its answer', async () => {
   const prompts: string[] = [];
-  const s = await start('calculator.wasm', (call, prompt) => {
-    prompts.push(call.label);
-    (prompt.draft as TextDraft).text = '42';
-    prompt.answer();
+  const s = await start('calculator.wasm', {
+    answer: (record) => {
+      prompts.push(record.label);
+      return { source: 'test', value: '42' };
+    },
   });
   await callFunc(s, 'docs:calculator/calculate@0.1.0', 'evalExpression', ['add', 1, 2]);
   assert.deepEqual(prompts, ['docs:adder/add@0.1.0.add(1, 2)']);
-  assert.deepEqual(s.lines, [
-    'docs:adder/add@0.1.0.add(1, 2) -> 42',
+  assert.deepEqual(lines(s.log), [
     'docs:calculator/calculate@0.1.0.eval-expression(add, 1, 2) -> 42',
+    'docs:adder/add@0.1.0.add(1, 2) -> 42',
   ]);
-  assert.deepEqual(s.records, [
+  assert.deepEqual(records(s.log), [
     {
       kind: 'export', callKind: 'func', iface: 'docs:calculator/calculate@0.1.0', func: 'eval-expression', args: ['add', '1', '2'],
       callee: 'docs:calculator/calculate@0.1.0.eval-expression', label: 'docs:calculator/calculate@0.1.0.eval-expression(add, 1, 2)',
@@ -93,14 +84,14 @@ test('an import without an implementation waits for its answer', async () => {
   ]);
 });
 
-test('stdout and stderr go to the output callbacks', async () => {
+test('stdout and stderr go to the log', async () => {
   const s = await start('printer.wasm');
   const root = s.component.interfaces.find((i) => i.isRoot)!._name;
   await callFunc(s, root, 'greet', ['node']);
   await callFunc(s, root, 'warn', ['careful']);
-  assert.deepEqual(s.lines, ['greet("node") -> "greeted node"', 'warn("careful") -> ']);
-  assert.match(s.output.join(''), /Hello, node!/);
-  assert.match(s.output.join(''), /careful/);
+  assert.deepEqual(lines(s.log), ['greet("node") -> "greeted node"', 'warn("careful") -> ']);
+  assert.match(output(s.log), /Hello, node!/);
+  assert.match(output(s.log), /careful/);
 });
 
 test('calls on resources are recorded with their resource and instance', async () => {
@@ -112,7 +103,7 @@ test('calls on resources are recorded with their resource and instance', async (
   await call(s.ctx, { type: 'method', resource: x }, 'getA', x._fields.getA, [instance.obj]);
   drop(s.ctx, instance.id);
   assert.equal(instance.id, 'x-1');
-  assert.deepEqual(s.records, [
+  assert.deepEqual(records(s.log), [
     {
       kind: 'export', callKind: 'constructor', iface: 'exports', resource: 'x', func: 'constructor', args: ['5'],
       callee: 'new exports/x', label: 'new exports/x(5)',
@@ -127,5 +118,5 @@ test('calls on resources are recorded with their resource and instance', async (
       callee: 'drop', label: 'drop #x-1',
     },
   ]);
-  assert.deepEqual(s.lines, ['new exports/x(5) -> #x-1', 'exports/x.get-a(#borrow-x-1) -> 5', 'drop #x-1 -> dropped']);
+  assert.deepEqual(lines(s.log), ['new exports/x(5) -> #x-1', 'exports/x.get-a(#borrow-x-1) -> 5', 'drop #x-1 -> dropped']);
 });

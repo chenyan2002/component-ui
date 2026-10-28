@@ -1,7 +1,6 @@
 import * as WIT from './wit';
 import { CallRecord } from './call-record';
-import { Answer, AnswerContext, DefaultsLevel, happyValue, RESTART } from './answering';
-import { AnswerSource } from './driver';
+import { Answer, AnswerContext, AnswerSource, defaultAnswer, DefaultsLevel, RESTART } from './answering';
 import { answeredValue, CallEntry, CallLog, ImportEntry, isOwnCall } from './call-log';
 import { canonicalWave, mapHandles } from './wave';
 
@@ -278,8 +277,7 @@ export class Script implements AnswerSource {
         source: line.source, value: line.value, hole: line.hole, comments: line.comments, comment: line.comment, pinned: line.args !== undefined,
       };
     }
-    const happy = happyValue(func._ret[0], context, this.level);
-    return happy && { source: 'default', value: happy.value, note: happy.notes.join('; ') || undefined };
+    return defaultAnswer(func._ret[0], context, this.level);
   }
 }
 
@@ -291,12 +289,10 @@ export function wasiNote(wasiShim: boolean): string {
     : '//! WASI doesn\'t come from the shim: its calls ask, and are recorded, like any other import\'s';
 }
 
-// What an answers file says about a run, besides the log: where the answers came from, e.g. the
-// file's lines, with their comments, and the file's lines of the calls.
+// What an answers file says about a run, besides the log, which has the answers, e.g. the
+// file's lines with their comments: the file's lines of the calls.
 export interface ScriptOptions {
   header: string[];
-  // The answers of the imports, by call; without, e.g. in the UI, answers are the user's.
-  answers?: Map<CallRecord, Answer>;
   // The file's lines of the calls, in the order they were made.
   callLines?: Array<CallLine | undefined>;
   // Calls not made, which follow the rest.
@@ -355,8 +351,8 @@ export function scriptLines(log: CallLog, options: ScriptOptions): ScriptText[] 
   };
   const writeImport = (entry: ImportEntry) => {
     const { record } = entry;
-    // What the file said of an answer from it, e.g. its comments; who answered is in the log.
-    const answer = options.answers?.get(record);
+    // The answer, unless it was the user's: e.g. a file's line, with its comments.
+    const answer = entry.answered?.by;
     if (entry.prompt) {
       lines.push({ text: `${record.label} = ${HOLE}  // expects ${entry.prompt.type.name}`, hole: true });
     } else if (entry.answered) {
@@ -365,10 +361,10 @@ export function scriptLines(log: CallLog, options: ScriptOptions): ScriptText[] 
       if (value === undefined) {
         return;
       }
-      const by = entry.answered.by;
-      const unpinned = answer !== undefined && by?.source !== 'default' && !answer.pinned;
+      const byDefault = answer?.source === 'default';
+      const unpinned = answer !== undefined && !byDefault && !answer.pinned;
       const head = unpinned ? record.callee : record.label;
-      const notes = by?.source === 'default' ? ['default', by.note, entry.note]
+      const notes = byDefault ? ['default', answer.note, entry.note]
         : [answer?.comment, unpinned ? `was ${record.label}` : undefined, entry.note];
       const comment = notes.filter(Boolean).join('; ');
       lines.push({ text: `${head} = ${value}${comment ? `  // ${comment}` : ''}` });

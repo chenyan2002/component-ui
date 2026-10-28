@@ -2,11 +2,10 @@ import { html, LitElement, nothing, PropertyValues, TemplateResult } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 import { live } from 'lit/directives/live.js';
 import { writeScript } from './answers';
-import { answerPrompt, defaultAnswer, DEFAULTS_LEVELS, DefaultsLevel } from './answering';
+import { DEFAULTS_LEVELS, DefaultsLevel } from './answering';
 import { CallLog, ImportEntry, isOwnCall, LogItem, StreamEntry } from './call-log';
-import { CallRecord } from './call-record';
 import { FormContext, renderField, typeName } from './form';
-import { ImportLog, ImportPrompt, LogEntry } from './log';
+import { ImportPrompt, LogEntry } from './log';
 
 // The choices of how imports are answered, as the CLI's `--defaults` levels.
 const LEVELS: Array<{ level: DefaultsLevel; label: string; description: TemplateResult }> = [
@@ -54,7 +53,8 @@ export class ConsolePanel extends LitElement {
   // `wasi-shim` event's `detail`.
   @property({ type: Boolean }) accessor wasiShim = true;
   // How imports that ask are answered: by the user, or by the happy path where it has an answer,
-  // as the CLI's `--defaults` does past its answers file.
+  // as the CLI's `--defaults` does past its answers file. The app answers by it (see
+  // `defaultsSource`), and the console asks the user for the rest.
   @state() accessor defaults: DefaultsLevel = storedDefaults();
   @state() accessor settingsOpen = false;
   public readonly log = new CallLog((added) => {
@@ -95,30 +95,9 @@ export class ConsolePanel extends LitElement {
     this.log.clear();
   }
 
-  public logCall(record: CallRecord): LogEntry {
-    return this.log.logCall(record);
-  }
-
   // Logs something the UI did that isn't a call, e.g. failing to load a file.
   public logAction(text: string): LogEntry {
     return this.log.logAction(text);
-  }
-
-  // Logs an import the guest called, under the pending call it happened in. One that asks gets
-  // the happy path's answer at the chosen level, if there is one, and asks the user otherwise.
-  public logImport(record: CallRecord): ImportLog {
-    const line = this.log.logImport(record);
-    return {
-      ...line,
-      ask: (prompt) => {
-        line.ask(prompt);
-        const answer = this.defaults === 'none' ? undefined : defaultAnswer(prompt, this.defaults);
-        // Once the import has returned its promise, so the host wrapper registers the mocks it returns.
-        if (answer) {
-          queueMicrotask(() => answerPrompt(prompt, answer));
-        }
-      },
-    };
   }
 
   public print(stream: StreamEntry['stream'], text: string) {

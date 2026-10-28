@@ -1,6 +1,7 @@
+import type { Answer } from './answering';
 import { CallRecord } from './call-record';
 import { wasmFrames } from './frames';
-import { AnsweredBy, ImportLog, ImportPrompt, LogEntry } from './log';
+import { ImportLog, ImportPrompt, LogEntry } from './log';
 import { Instance } from './resources';
 import { mapHandles } from './wave';
 
@@ -38,8 +39,9 @@ export interface ImportEntry extends Entry, Ending {
   prompt?: ImportPrompt;
   // How it was answered, if it asked: with a value, when the ids in `before` were those of the
   // instances there were, so that others in its result are the answer's new mocks; or by
-  // trapping the guest. `by` says who answered, e.g. `default`, if not the user.
-  answered?: { before: Set<string>; trapped: boolean; by?: AnsweredBy };
+  // trapping the guest. `by` is the answer if it wasn't the user's, e.g. `default`, or an answers
+  // file's line with its comments.
+  answered?: { before: Set<string>; trapped: boolean; by?: Answer };
 }
 
 // A call the UI made, or something else it did, e.g. loading a file, which has no record.

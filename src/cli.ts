@@ -6,9 +6,8 @@ import { CallRecord, qualified, qualifiedResource, unversioned } from './call-re
 import { AnswerLine, CallLine, Divergence, parseAnswer, parseScript, Script, scriptLines, ScriptLine, wasiNote, writeScript } from './answers';
 import { Answer, DEFAULTS_LEVELS, DefaultsLevel } from './answering';
 import { answeredValue, CallEntry, CallLog, ImportEntry, isOwnCall, StreamEntry } from './call-log';
-import { Driver, DriverEvent, Stopped } from './driver';
+import { Driver, Stopped } from './driver';
 import { JSPI_SUPPORTED, loadComponent } from './loader';
-import { AnsweredBy } from './log';
 import { mapHandles } from './wave';
 import { byImportName } from './host-resources';
 import { importTemplate } from './import-template';
@@ -164,7 +163,7 @@ function outputLines(entry: StreamEntry, indent: string): RunLine[] {
 // How a call or an import ended: its result, e.g. `= 3`, or error and the guest's frames, marked
 // with who answered it, e.g. `(answers.txt:1)`; `shown` is its value as the answers file writes
 // it, e.g. with new mocks as `#mock-x-2`.
-function endingLines(entry: CallEntry | ImportEntry, by: AnsweredBy | undefined, shown?: string): string[] {
+function endingLines(entry: CallEntry | ImportEntry, by: Answer | undefined, shown?: string): string[] {
   if (entry.status === 'pending') {
     return [];
   }
@@ -311,14 +310,7 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
     `//! imports implemented in JavaScript, whose calls aren't recorded: ${Object.keys(importCode).join(', ') || 'none'}`,
     wasiNote(wasiShim),
   ];
-  // What the file said of the answers from it, e.g. their comments, which --save writes again.
-  const answers = new Map<CallRecord, Answer>();
-  const driver = await Driver.start(nodePlatform, await readFile(file), (event) => {
-    if (event.type === 'answer') {
-      answers.set(event.record, event.answer);
-    }
-    onEvent(event);
-  }, script, importCode, wasiShim);
+  const driver = await Driver.start(nodePlatform, await readFile(file), script, importCode, wasiShim);
   for (const custom of Object.keys(importCode).filter((pkg) => !driver.component.customImports.includes(pkg))) {
     throw new UsageError(`The component imports no ${custom}; it imports ${driver.component.customImports.join(', ')}`);
   }
@@ -330,13 +322,6 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
   if (wasi) {
     throw new UsageError(`${wasi.source}: answers ${wasi.callee}, which the WASI shim provides; run with --no-wasi-shim`);
   }
-  // The imports whose JavaScript wasn't called, as an argument was a mock.
-  const skipped = new Set<string>();
-  const onEvent = (event: DriverEvent) => {
-    if (event.type === 'note') {
-      skipped.add(event.record.callee);
-    }
-  };
   let stopped: Stopped | undefined;
   // Why the run stopped where the guest's calls differ from the answers, e.g. after an edit.
   let diverged: string | undefined;
@@ -345,11 +330,11 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
   const callLines: Array<CallLine | undefined> = [];
   // A call that failed, e.g. trapped, leaving answers it would have used: that is why the run
   // differs from the file, not a change of the guest's calls.
-  let failed: { record: CallRecord; text: string } | undefined;
+  let failed: CallEntry | undefined;
   const diverge = (err: unknown) => {
     const line = err instanceof Divergence ? err.line : undefined;
     if (failed && line) {
-      diverged = `${failed.record.label} failed, with ${failed.text}, before using the answers from ${line.source} on. `
+      diverged = `${failed.label} failed, with ${failed.output}, before using the answers from ${line.source} on. `
         + 'Fix the answer that made it fail, e.g. the last it used, or remove the answers it didn\'t use, and run again.';
     } else {
       diverged = (err as Error).message;
@@ -365,9 +350,9 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
     }
     callLines.push(line);
     ran++;
-    const before = driver.lastFailure;
+    const before = driver.lastFailure();
     stopped = await driver.run(text);
-    failed = driver.lastFailure !== before ? driver.lastFailure : undefined;
+    failed = driver.lastFailure() !== before ? driver.lastFailure() : undefined;
     if (stopped) {
       break;
     }
@@ -379,9 +364,12 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
       diverge(err);
     }
   }
-  const scriptOptions = { header, answers, callLines, rest: calls.slice(ran) };
+  const scriptOptions = { header, callLines, rest: calls.slice(ran) };
   const from = values.all ? undefined : values.from !== undefined ? fromSource(values.from, files) : script.lastUsed?.source;
   printRun(runLines(driver.log), print, from);
+  // The imports whose JavaScript wasn't called, as an argument was a mock, which their notes say.
+  const imports = driver.log.entries.flatMap((e) => (e.kind === 'call' ? e.imports : e.kind === 'import' ? [e] : []));
+  const skipped = new Set(imports.filter((entry) => entry.note !== undefined).map((entry) => entry.record.callee));
   if (skipped.size > 0) {
     print(`warning: your JavaScript of ${[...skipped].join(', ')} wasn't called where an argument was a mock; those calls asked for answers instead`);
   }
@@ -399,7 +387,7 @@ async function callCommand(file: string, argCalls: string[], values: Record<stri
     stopHint(driver, stopped, hole === undefined ? undefined : `${values.save}:${hole}`).forEach((line) => print(line));
     return NEEDS_ANSWER;
   }
-  return driver.failed ? CALL_FAILED : 0;
+  return driver.lastFailure() ? CALL_FAILED : 0;
 }
 
 // Prints the JavaScript template for an imported package, as the UI's editor starts with it.

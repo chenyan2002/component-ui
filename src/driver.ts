@@ -1,58 +1,19 @@
 import * as WIT from './wit';
-import { CallLog } from './call-log';
-import { CallRecord, callTypes, qualified, qualifiedResource } from './call-record';
-import { call, CallActivity, CallTarget, drop, ExportsContext } from './calls';
-import { ImportDialogs } from './dialog';
-import { draftErrors, Giver, INVALID, instanceChoices, parseDraft } from './draft';
-import type { Instance } from './resources';
-import { HostResources } from './host-resources';
-import { ImportLog, ImportPrompt, LogEntry } from './log';
-import { instantiate, LoadedComponent, loadComponent } from './loader';
+import { AnswerSource } from './answering';
+import { CallEntry, CallLog } from './call-log';
+import { callTypes, qualified, qualifiedResource } from './call-record';
+import { call, CallTarget, drop, ExportsContext } from './calls';
+import { ComponentInstance, Stopped } from './component-instance';
+import { draftErrors, Giver, INVALID, parseDraft } from './draft';
+import { LoadedComponent, loadComponent } from './loader';
 import { Platform } from './platform';
-import { Answer, AnswerContext, answerPrompt, listInstances, promptContext, RESTART } from './answering';
-import { clashingNames, resourcesOf, ResourceRegistry, undroppable } from './resources';
-import { wasmFrames } from './frames';
-import { canonicalWave, parseWave } from './wave';
+import { ResourceRegistry, undroppable } from './resources';
+import { parseWave } from './wave';
 
-export type { Answer, AnswerContext };
+export type { Stopped };
 
 // Runs a component without the UI, for frontends like the CLI: calls written as the console shows
-// them, events for what happens, and answers to the imports that ask from an `AnswerSource`.
-
-// What happens as calls run, in order. A call's imports come between its `call` and its end.
-export type DriverEvent =
-  | { type: 'call'; record: CallRecord }
-  | { type: 'result'; record: CallRecord; text: string }
-  // `failed` unless the call returned the `err` of a `result`, e.g. when it trapped; `frames` are
-  // the guest's of a trap, innermost first.
-  | { type: 'error'; record: CallRecord; text: string; failed: boolean; frames: string[] }
-  // A result shown apart from the call, e.g. the HTTP response of a WASI HTTP handler.
-  | { type: 'detail'; record: CallRecord; text: string }
-  | { type: 'output'; stream: 'stdout' | 'stderr'; text: string }
-  // An import is waiting for an answer, a value of the type `expects`.
-  | { type: 'ask'; record: CallRecord; expects: string }
-  // An import got an answer.
-  | { type: 'answer'; record: CallRecord; answer: Answer }
-  // Something to know about an import call, e.g. why the user's JavaScript wasn't called.
-  | { type: 'note'; record: CallRecord; text: string }
-  // An instance was registered, e.g. a mock an import returned.
-  | { type: 'instance'; instance: Instance };
-
-// Answers the imports that ask, in the order the guest calls them, with a value of the type
-// `func` returns. Returns undefined when it has no answer, and throws when it can't answer, e.g.
-// as its next answer is for another import; either stops the run.
-export interface AnswerSource {
-  answer(record: CallRecord, func: WIT.FuncClass, context: AnswerContext): Answer | undefined;
-}
-
-// Why a run stopped before all its calls finished, at the import `record`: it had no answer, or
-// one that failed, e.g. for another import.
-export interface Stopped {
-  record: CallRecord;
-  func: WIT.FuncClass;
-  unanswered: boolean;
-  reason: string;
-}
+// them, logged in `log`, and answers to the imports that ask from an `AnswerSource`.
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -108,31 +69,13 @@ function callables(interfaces: WIT.InterfaceClass[]): Map<string, Callable> {
 }
 
 export class Driver {
-  public readonly component: LoadedComponent;
-  public readonly registry: ResourceRegistry;
   // The calls, the imports the guest made during them, and its output, in order.
   public readonly log = new CallLog();
-  // Whether a call the UI made failed other than by returning an `err`, e.g. by trapping, and
-  // the last that did.
-  public failed = false;
-  public lastFailure?: { record: CallRecord; text: string };
+  private instance!: ComponentInstance;
   private readonly callables: Map<string, Callable>;
-  private ctx!: ExportsContext;
-  private dialogs!: ImportDialogs;
   private stopped?: (stopped: Stopped) => void;
 
-  // The answers whose `#mock-x-2` say which ids their new mocks are to get, to check once the
-  // imports return, with the type of value they return.
-  private readonly expected = new Map<CallRecord, { answer: Answer; type: WIT.Type; func: WIT.FuncClass }>();
-
-  private constructor(component: LoadedComponent, private readonly onEvent: (event: DriverEvent) => void, private readonly answers: AnswerSource) {
-    this.component = component;
-    this.registry = new ResourceRegistry(clashingNames(component.imports, component.interfaces));
-    this.registry.onInstance = (instance) => {
-      this.log.instance(instance);
-      this.onEvent({ type: 'instance', instance });
-    };
-    this.log.ids = () => this.registry.ids();
+  private constructor(public readonly component: LoadedComponent) {
     this.callables = callables(component.interfaces);
   }
 
@@ -140,47 +83,29 @@ export class Driver {
   // package as jco names them, e.g. `docs:adder/add`; the others ask `answers`, including WASI's
   // without `wasiShim`.
   public static async start(
-    platform: Platform, bytes: Uint8Array, onEvent: (event: DriverEvent) => void, answers: AnswerSource,
-    importCode: Record<string, string> = {}, wasiShim = true,
+    platform: Platform, bytes: Uint8Array, answers: AnswerSource, importCode: Record<string, string> = {}, wasiShim = true,
   ): Promise<Driver> {
-    const driver = new Driver(await loadComponent(platform, bytes, wasiShim), onEvent, answers);
-    await driver.instantiate(platform, importCode);
+    const driver = new Driver(await loadComponent(platform, bytes, wasiShim));
+    driver.instance = await ComponentInstance.create(platform, driver.component, driver.log, {
+      importCode, answers,
+      stopped: (stopped) => driver.stopped?.(stopped),
+      // A trap's frames are in the log.
+      report: () => {},
+    });
     return driver;
   }
 
-  private async instantiate(platform: Platform, importCode: Record<string, string>) {
-    const { component, registry } = this;
-    const host = new HostResources(registry, component.imports);
-    host.log = (record) => this.logImport(record);
-    this.dialogs = new ImportDialogs(registry, host, component.imports, (record) => this.logImport(record));
-    const exports = await instantiate(platform, component, importCode, {
-      stdout: (text) => {
-        this.log.print('stdout', text);
-        this.onEvent({ type: 'output', stream: 'stdout', text });
-      },
-      stderr: (text) => {
-        this.log.print('stderr', text);
-        this.onEvent({ type: 'output', stream: 'stderr', text });
-      },
-    }, {
-      complete: (pkg, mod, wasi) => this.dialogs.complete(pkg, mod, wasi),
-      wrap: (pkg, mod) => host.wrap(pkg, mod),
-    });
-    this.ctx = {
-      exports, log: (record) => this.logCall(record), registry, host, activity: new CallActivity(), mocks: this.dialogs,
-      // A trap's frames are in its event.
-      report: () => {},
-    };
+  public get registry(): ResourceRegistry {
+    return this.instance.registry;
   }
 
-  // The instances that could be passed as a handle of the resource, by the UI to a call or by
-  // the host in an answer, as the UI's instance picker offers them.
-  public choices(resource: WIT.ResourceClass, giver: Giver): Instance[] {
-    return instanceChoices(resource, this.registry, giver);
+  private get ctx(): ExportsContext {
+    return this.instance.ctx;
   }
 
-  public canMock(resource: WIT.ResourceClass): boolean {
-    return this.dialogs.canMock(resource);
+  // The last call that failed other than by returning an `err`, e.g. by trapping.
+  public lastFailure(): CallEntry | undefined {
+    return [...this.log.entries].reverse().find((e): e is CallEntry => e.kind === 'call' && e.record !== undefined && e.failed === true);
   }
 
   // Runs a call written as the console shows it, e.g. `exports/x.get-a(#borrow-x-1)`. Returns
@@ -258,118 +183,6 @@ export class Driver {
   // The instances that could be passed as handles in values of the types, one line per resource,
   // e.g. `instances of x: #x-1 (from new exports/x(5))`; none for a resource with none to choose.
   public instancesFor(types: WIT.Type[], giver: Giver): string[] {
-    return resourcesOf(types).flatMap((resource) => {
-      const choices = this.choices(resource, giver);
-      return choices.length === 0 ? [] : [listInstances(resource, choices, giver === 'host' && this.canMock(resource))];
-    });
-  }
-
-  private logCall(record: CallRecord): LogEntry {
-    const entry = this.log.logCall(record);
-    this.onEvent({ type: 'call', record });
-    return this.ending(record, entry);
-  }
-
-  private ending(record: CallRecord, entry: LogEntry): LogEntry {
-    return {
-      result: (text) => {
-        entry.result(text);
-        this.onEvent({ type: 'result', record, text });
-      },
-      // calls.ts formats the `err` a call returns, and passes other errors, e.g. traps, as they are.
-      error: (err) => {
-        entry.error(err);
-        const failed = typeof err !== 'string';
-        if (failed && record.kind !== 'import') {
-          this.failed = true;
-          this.lastFailure = { record, text: errorText(err) };
-        }
-        this.onEvent({ type: 'error', record, text: errorText(err), failed, frames: wasmFrames(err) });
-      },
-    };
-  }
-
-  private logImport(record: CallRecord): ImportLog {
-    const entry = this.log.logImport(record);
-    this.onEvent({ type: 'call', record });
-    const log = this.ending(record, entry);
-    return {
-      ...log,
-      result: (text) => {
-        log.result(text);
-        this.checkMocks(record, text);
-      },
-      detail: (text) => {
-        entry.detail(text);
-        this.onEvent({ type: 'detail', record, text });
-      },
-      note: (text) => {
-        entry.note(text);
-        this.onEvent({ type: 'note', record, text });
-      },
-      ask: (prompt) => {
-        entry.ask(prompt);
-        this.ask(record, prompt);
-      },
-      answered: (trapped, by) => entry.answered(trapped, by),
-    };
-  }
-
-  // Stops the run if the new mocks of an answer, e.g. `#mock-x-2`, didn't get the ids it says.
-  private checkMocks(record: CallRecord, result: string) {
-    const expected = this.expected.get(record);
-    if (!expected) {
-      return;
-    }
-    this.expected.delete(record);
-    const { answer, type } = expected;
-    const value = answer.value!.replace(/#mock-/g, '#');
-    let same: boolean;
-    try {
-      same = canonicalWave(type, value) === canonicalWave(type, result);
-    } catch {
-      same = value === result;
-    }
-    if (!same) {
-      this.stopped?.({
-        record, func: expected.func, unanswered: false,
-        reason: `${answer.source}: the guest got ${result}, not ${value}, as the new mocks got other ids. ${RESTART}.`,
-      });
-    }
-  }
-
-  // Answers an import that asks, or stops the run, leaving the guest waiting. Answers once the
-  // import call has returned its promise, as a user would, so that the host wrapper has hooked
-  // it to register the instances the answer returns.
-  private ask(record: CallRecord, prompt: ImportPrompt) {
-    this.onEvent({ type: 'ask', record, expects: prompt.type.name });
-    queueMicrotask(() => this.answer(record, prompt));
-  }
-
-  private answer(record: CallRecord, prompt: ImportPrompt) {
-    const stop = (unanswered: boolean, reason: string) => this.stopped?.({ record, func: prompt.func, unanswered, reason });
-    let answer: Answer | undefined;
-    try {
-      answer = this.answers.answer(record, prompt.func, promptContext(prompt));
-    } catch (err) {
-      stop(false, errorText(err));
-      return;
-    }
-    if (!answer) {
-      stop(true, `No answer for ${record.label}`);
-      return;
-    }
-    if (answer.hole) {
-      stop(true, `${answer.source} is still to be answered`);
-      return;
-    }
-    this.onEvent({ type: 'answer', record, answer });
-    if (answer.value !== undefined && /#mock-/.test(answer.value)) {
-      this.expected.set(record, { answer, type: prompt.type, func: prompt.func });
-    }
-    const failed = answerPrompt(prompt, answer);
-    if (failed) {
-      stop(false, [failed, ...this.instancesFor([prompt.type], 'host')].join('; '));
-    }
+    return this.instance.instancesFor(types, giver);
   }
 }

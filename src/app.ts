@@ -3,18 +3,19 @@ import { customElement, query, state } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { keyed } from 'lit/directives/keyed.js';
 import { live } from 'lit/directives/live.js';
-import { instantiate, JSPI_SUPPORTED, loadComponent, LoadedComponent, withWasiShim } from './loader';
+import { JSPI_SUPPORTED, loadComponent, LoadedComponent, withWasiShim } from './loader';
 import { wasiNote } from './answers';
+import { defaultsSource } from './answering';
 import { browserPlatform, readWasm } from './platform-browser';
-import { CallActivity, ExportsContext } from './calls';
-import { ImportDialogs } from './dialog';
+import { ExportsContext } from './calls';
+import { ComponentInstance } from './component-instance';
 import { ConsolePanel } from './console';
 import './console';
 import { renderExports, search } from './exports-view';
 import { unversioned } from './call-record';
-import { byImportName, HostResources } from './host-resources';
+import { byImportName } from './host-resources';
 import { importTemplate } from './import-template';
-import { clashingNames, ResourceRegistry, usesResources } from './resources';
+import { usesResources } from './resources';
 import './resource-table';
 
 const EXAMPLES: Array<[file: string, label: string]> = [
@@ -424,12 +425,8 @@ export class ComponentApp extends LitElement {
     this.instantiate(s, kept(s.appliedCode));
   }
 
-  // Starts the console's log of a new instance, which tells the answers' new mocks, and where
-  // instances came from, for Save.
-  private logInstance(panel: ConsolePanel, s: Session, registry: ResourceRegistry, code: Record<string, string>) {
-    panel.log.begin();
-    panel.log.ids = () => registry.ids();
-    registry.onInstance = (instance) => panel.log.instance(instance);
+  // What Save writes of a new instance, besides its log.
+  private setSaveHeader(panel: ConsolePanel, s: Session, code: Record<string, string>) {
     const implemented = Object.entries(code).filter(([pkg, text]) => text.trim() !== '' && text !== s.templates[pkg]).map(([pkg]) => pkg);
     panel.saveName = `${s.fileName.replace(/\.wasm$/, '')}.answers.txt`;
     panel.saveHeader = [
@@ -444,34 +441,23 @@ export class ComponentApp extends LitElement {
     s.status = 'instantiating';
     this.requestUpdate();
     try {
-      // Each component instance has its own resource instances, including those its imports
-      // hand out while it instantiates.
-      const registry = new ResourceRegistry(clashingNames(s.component.imports, s.component.interfaces));
-      // The console's log tells the answers' new mocks, and where instances came from, for Save.
-      // It renders once the session does.
+      // The instance is logged in the console, which renders once the session does.
       await this.updateComplete;
-      const panel = this.consolePanel;
-      if (panel) {
-        this.logInstance(panel, s, registry, code);
-      }
-      const host = new HostResources(registry, s.component.imports);
-      host.log = (record) => this.consolePanel!.logImport(record);
-      // Missing imports and mock resources ask in the console, and the guest waits for the answer.
-      const dialogs = new ImportDialogs(registry, host, s.component.imports, (call) => this.consolePanel!.logImport(call));
+      const panel = this.consolePanel!;
+      this.setSaveHeader(panel, s, code);
       s.appliedCode = { ...code };
-      const exports = await instantiate(browserPlatform, s.component, s.appliedCode, {
-        stdout: (text) => this.consolePanel?.print('stdout', text),
-        stderr: (text) => this.consolePanel?.print('stderr', text),
-      }, {
-        complete: (pkg, mod, wasi) => dialogs.complete(pkg, mod, wasi),
-        wrap: (pkg, mod) => host.wrap(pkg, mod),
+      // Imports that ask get the happy path's answer at the level of the console's settings, if
+      // there is one, and ask in the console otherwise; the guest waits for the answer.
+      const instance = await ComponentInstance.create(browserPlatform, s.component, panel.log, {
+        importCode: s.appliedCode,
+        answers: defaultsSource(() => panel.defaults),
+        print: (stream, text) => panel.print(stream, text),
       });
       if (s !== this.session) {
         return;
       }
-      registry.addEventListener('change', () => this.requestUpdate());
-      const activity = new CallActivity();
-      s.ctx = { exports, log: (call) => this.consolePanel!.logCall(call), registry, host, activity, mocks: dialogs };
+      instance.registry.addEventListener('change', () => this.requestUpdate());
+      s.ctx = instance.ctx;
       s.status = 'ready';
       s.generation++;
       this.interfacesOpen = true;
