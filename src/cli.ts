@@ -13,7 +13,7 @@ import { mapHandles } from './wave';
 import { byImportName } from './host-resources';
 import { importTemplate } from './import-template';
 import { nodePlatform } from './platform-node';
-import { describeInstance } from './resources';
+import { definedResources, describeInstance } from './resources';
 
 // The command line of component-ui, for running a component without the UI, e.g. by an agent:
 //
@@ -117,11 +117,6 @@ function functionsOf(
   return found;
 }
 
-// Whether an interface defines the resource, rather than `use` it, e.g. from an import.
-function defines(iface: WIT.InterfaceClass, resource: WIT.ResourceClass): boolean {
-  return resource._interface === iface._name;
-}
-
 async function inspect(file: string, wasiShim: boolean, print: (line: string) => void) {
   const component = await loadComponent(nodePlatform, await readFile(file), wasiShim);
   const types = new Map<string, WIT.Type>();
@@ -131,9 +126,12 @@ async function inspect(file: string, wasiShim: boolean, print: (line: string) =>
       funcs.forEach(([callee, func, resource]) => print(`  ${signature(callee, func, types, resource)}`));
     }
   };
-  section('Exports, which `call` calls:', functionsOf(component.interfaces, (r, iface) => defines(iface, r)));
+  // The guest's resources, as the UI shows them: under the export that defines them, which others
+  // may `use`. The rest are the host's, defined by imports.
+  const defined = new Set(component.interfaces.flatMap(definedResources));
+  section('Exports, which `call` calls:', functionsOf(component.interfaces, (r, iface) => definedResources(iface).includes(r)));
   section('Host resources the exports use, whose functions `call` can call too, e.g. to make their arguments:',
-    functionsOf(component.interfaces, (r, iface) => !defines(iface, r), false));
+    functionsOf(component.interfaces, (r) => !defined.has(r), false));
   const custom = new Set(component.customImports.map(unversioned));
   const imported = functionsOf(component.imports.filter((iface) => custom.has(unversioned(iface._name))));
   const asks = (func: WIT.FuncClass) => func._ret.length > 0 && func.callKind !== 'constructor';

@@ -37,6 +37,12 @@ test('inspect shows the exports, the imports that ask, and the types', () => {
   assert.match(resource, /^Imports answered on their own, .*:\n {2}new imports\/y\(a: s32\)\n {2}imports\/y\.set-a\(self: borrow<y>, a: s32\)$/m);
   assert.match(resource, /^Types: none$/m);
   assert.match(cli('inspect', 'public/kv-store.wasm').out, /^Host resources the exports use, .*:\n {2}fastly:compute\/async-io\/pollable@0\.1\.0\.is-ready\(self: borrow<pollable>\) -> bool$/m);
+  // A resource an export defines is the guest's, also where another export `use`s it.
+  const wrapped = cli('inspect', 'public/record_imports.wasm').out;
+  const hostResources = wrapped.slice(wrapped.indexOf('Host resources'), wrapped.indexOf('Imports that ask'));
+  assert.match(wrapped, /^ {2}wrapped-fastly:compute\/http-resp\/response@0\.1\.0\.new\(\)/m);
+  assert.match(hostResources, /^ {2}fastly:compute\/http-resp\/response@0\.1\.0\./m);
+  assert.doesNotMatch(hostResources, /wrapped-/);
 });
 
 test('a run stops at an import without an answer, and says what it expects', () => {
@@ -244,6 +250,13 @@ test('calls can drop instances, and pass new mocks, which the file writes as #mo
   assert.equal(cli('call', 'public/kv-store.wasm', 'fastly:compute/http-incoming@0.1.0.handle(#mock, #mock)', '--save', mocks).code, 2);
   assert.match(readFileSync(mocks, 'utf8'), /^> fastly:compute\/http-incoming@0\.1\.0\.handle\(#mock-request-1, #mock-pollable-2\)$/m);
   assert.equal(cli('call', 'public/kv-store.wasm', '--answers', mocks).code, 2);
+});
+
+test('only instances the UI holds can be dropped; the log shows what happened to the others', () => {
+  const moved = cli('call', RESOURCE, 'new exports/x(5)', 'exports.consume(#x-1)', 'drop #x-1');
+  assert.equal(moved.code, 1);
+  assert.match(moved.err, /No instance #x-1 to drop: it was moved into exports\.consume\(#x-1\)/);
+  assert.match(cli('call', RESOURCE, 'new exports/x(5)', 'drop #x-1', 'drop #x-1').err, /No instance #x-1 to drop: it was dropped$/m);
 });
 
 test('instances an answer or an argument could use are listed', () => {

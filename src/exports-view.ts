@@ -2,6 +2,7 @@ import { html, nothing } from 'lit';
 import * as WIT from './wit';
 import { CallTarget, ExportsContext } from './calls';
 import { qualifiedResource } from './call-record';
+import { definedResources } from './resources';
 import './func-card';
 
 // Whether a function shows for the search, given its name and those of the sections it is in.
@@ -37,12 +38,7 @@ function summary(kind: string, name: string, count: number, unit: string) {
   </div>`;
 }
 
-// The resources an interface defines. Those it `use`s, under its own name or another, e.g.
-// `pollable as body`, show only where they are defined.
-function definedResources(iface: WIT.InterfaceClass): WIT.ResourceClass[] {
-  return [...new Set(iface.get_resources().filter((r) => r._interface === iface._name))];
-}
-
+// Resources show only in the interface that defines them.
 function renderResource(ctx: ExportsContext, iface: WIT.InterfaceClass, resource: WIT.ResourceClass, shown: Search, name = resource.witName) {
   const statics = resource.get_static_funcs();
   const methods = resource.get_method_funcs();

@@ -4,7 +4,7 @@ import { classMap } from 'lit/directives/class-map.js';
 import { repeat } from 'lit/directives/repeat.js';
 import { drop, ExportsContext, watchContext } from './calls';
 import { MOCK } from './dialog';
-import { callable, holdersText, Instance, InstanceState, Slot } from './resources';
+import { callable, holdersText, undroppable, Instance, InstanceState, Slot } from './resources';
 
 const STATE_VARIANTS: Record<InstanceState, string> = { live: 'success', moved: 'warning', dropped: 'neutral' };
 
@@ -96,8 +96,8 @@ export class ResourceTable extends LitElement {
     const instance = slot.current;
     const { id, resource, state } = instance;
     const isLive = state === 'live';
-    // The guest's handles on a host object are its own to drop.
-    const canDrop = isLive && callable(instance);
+    // Not the guest's handles on a host object, which are its own to drop.
+    const canDrop = undroppable(instance) === undefined;
     return html`<tr class=${classMap({ 'resource-row': true, dead: !isLive })} data-id=${id}>
       <td class="handle">${slot.handle ?? html`<span class="muted">host</span>`}</td>
       <td>

@@ -64,6 +64,16 @@ export function callable(instance: Instance): boolean {
   return !instance.holders || instance.holders.ui;
 }
 
+// Why the UI has no instance to drop, if it hasn't: it is no longer live, e.g. as it moved into a
+// call, or it is a host object only the guest holds, whose handles are the guest's to drop. The
+// log already shows what happened to it, e.g. the call it moved into.
+export function undroppable(instance: Instance): string | undefined {
+  if (instance.state !== 'live') {
+    return `it was ${instance.fate ?? instance.state}`;
+  }
+  return callable(instance) ? undefined : 'only the guest holds it';
+}
+
 // Names of resources both the host and the guest implement, e.g. those of an interface the
 // component imports and exports. Exports also refer to imported resources they `use`, which the
 // guest doesn't implement.
@@ -410,6 +420,12 @@ export function resourcesOf(types: WIT.Type[]): WIT.ResourceClass[] {
   const visitor = new ResourcesOf();
   const seen = new Set<WIT.Type>();
   return [...new Set(types.flatMap((ty) => ty.accept(visitor, seen)))];
+}
+
+// The resources an interface defines. Those it `use`s, under its own name or another, e.g.
+// `pollable as body`, are defined elsewhere: by another export, or by an import.
+export function definedResources(iface: WIT.InterfaceClass): WIT.ResourceClass[] {
+  return [...new Set(iface.get_resources().filter((r) => r._interface === iface._name))];
 }
 
 // Whether calling the function can pass resource handles either way.
