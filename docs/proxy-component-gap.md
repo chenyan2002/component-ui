@@ -3,7 +3,7 @@
 [proxy-component](https://github.com/chenyan2002/proxy-component) instruments a component to
 record, replay, fuzz or mock its imports. Its dialog mode does what component-ui does in the
 browser. Ideally a call log from one tool could be replayed by the other. That isn't possible
-yet; this file lists what stands in the way. It was written against proxy-component `128aa4e`
+yet; this file lists what stands in the way. It was written against proxy-component `65e8d8d`
 and the wasm-wave fork it depends on (`chenyan2002/wasm-tools`, branch `extend-wave`, commit
 `efecaa18`, crate version 0.239.0).
 
@@ -13,10 +13,10 @@ A trace is JSON Lines. Each line is one serde externally tagged `FuncCall`
 (`crates/trace/src/lib.rs`):
 
 ```
-{"ExportArgs":{"method":"docs:calc/calculate.eval","args":["\"1+2\""]}}
-{"ImportArgs":{"method":"[method]wasi:io/streams/output-stream.blocking-write-and-flush","args":["#borrow-output-stream-1","[51, 10]"]}}
-{"ImportRet":{"method":"[method]wasi:io/streams/output-stream.blocking-write-and-flush","ret":"ok"}}
-{"ExportRet":{"method":"docs:calc/calculate.eval","ret":"ok(3)"}}
+{"ExportArgs":{"method":"docs:calc/calculate@0.1.0.eval","args":["\"1+2\""]}}
+{"ImportArgs":{"method":"wasi:io/streams/output-stream@0.2.6.blocking-write-and-flush","args":["#borrow-output-stream-1","[51, 10]"]}}
+{"ImportRet":{"method":"wasi:io/streams/output-stream@0.2.6.blocking-write-and-flush","ret":"ok"}}
+{"ExportRet":{"method":"docs:calc/calculate@0.1.0.eval","ret":"ok(3)"}}
 ```
 
 - `args` holds one WAVE string per parameter. For methods, `self` comes first.
@@ -96,26 +96,12 @@ write the list.
 
 | | component-ui (console labels) | proxy-component (trace `method`) |
 |---|---|---|
-| Function | `wasi:cli/stdout@0.2.0.get-stdout` | `wasi:cli/stdout.get-stdout` |
-| Method | `ns:pkg/iface/x@1.0.0.method(#borrow-x-1, …)`; `self` is the first argument | `[method]ns:pkg/iface/x.method`; `self` is the first argument |
-| Constructor | `new ns:pkg/iface/x@1.0.0(…)` | `[constructor]ns:pkg/iface/x.new` (Rust's constructor name) |
-| Static | `ns:pkg/iface/x@1.0.0.func(…)` | `ns:pkg/iface/x.func`, without a `[static]` prefix |
+| Function | `wasi:cli/stdout@0.2.0.get-stdout()` | `wasi:cli/stdout@0.2.0.get-stdout` |
+| Method | `ns:pkg/iface/x@1.0.0.method(#borrow-x-1, …)`; `self` is the first argument | `ns:pkg/iface/x@1.0.0.method`; `self` is the first of `args` |
+| Constructor | `new ns:pkg/iface/x@1.0.0(…)` | `new ns:pkg/iface/x@1.0.0` |
+| Static | `ns:pkg/iface/x@1.0.0.func(…)` | `ns:pkg/iface/x@1.0.0.func` |
 | World-level function | `func(…)` | not supported |
-| Drop | `drop #x-1` | not recorded |
-
-component-ui logs each call as a record ([`src/call-record.ts`](../src/call-record.ts)) with its
-interface (versioned), resource, function name and arguments apart, a method's `self` first, as in
-proxy-component; the labels above are made from it. A proxy-component name could be made from a
-record too, but not the other way: proxy-component's names lose versions.
-
-proxy-component builds names from the generated Rust module paths and converts them back to
-kebab case (`src/codegen/util.rs`, `wit_func_name`), which loses information:
-
-- Versions are dropped, so two versions of one package get the same names.
-- The kebab-case round trip is lossy, e.g. WIT `http-1-1` becomes Rust `Http11` and then `http11`.
-- When a world imports several versions of a package, its Rust module names include the version, e.g. `io0_2_0`, which comes back as `io0-2-0`.
-- Handle labels carry the resource's name but not its interface, so two resources with the
-  same name can't be told apart.
+| Drop | `drop #x-1` | `drop #x-1` |
 
 ## What each tool can call and log
 
@@ -125,10 +111,11 @@ kebab case (`src/codegen/util.rs`, `wit_func_name`), which loses information:
   proxy-component records it. A component-ui replay still runs the shim, but gives the guest the
   recorded answers in place of the shim's, and the shim's own objects for answers with handles;
   past the recording, the shim answers. Without the shim, WASI imports are mocked like any other.
-- **Methods of guest-exported resources.** proxy-component records them but can't replay them
-  (`src/codegen/mod.rs`, `export_funcs` skips methods). component-ui calls them.
-- **Mock resources passed to exports.** component-ui writes them as owned handles. That matches
-  how proxy-component's replay creates mocked resources from owned labels in `ExportArgs`.
+- **Guest-exported resources.** proxy-component records their calls. Its replay calls their
+  constructors and static functions, but not their methods (`src/codegen/mod.rs`, `export_funcs`
+  skips methods), and can't pass an instance to an export: only the guest creates them, and
+  replay doesn't keep the ones it returns, so the generated code panics with `cannot mock`
+  (a TODO in `src/traits/mod.rs`, `new_mock`). component-ui calls them.
 - **`wasi:cli/exit`.** proxy-component special-cases it during replay. component-ui treats it
   as an ordinary shim call.
 
@@ -145,8 +132,9 @@ an answer line for an `ImportArgs` and its `ImportRet`. The differences:
   `// wasi`, and imports that needed no answer, e.g. those without a result, are written as `//!` lines,
   which a replay doesn't read; proxy-component has an `ImportRet` for each.
 - It doesn't record export results (`ExportRet`), but writes them as comments.
-- Its names, handles and values differ as above: versioned interfaces, `#mock` and `#mock-<id>`,
-  `b"…"`, and comments, e.g. where instances came from.
+- Its calls are written as proxy-component names them, with their arguments. Its handles and
+  values differ as above: `#mock` and `#mock-<id>`, `b"…"`, and comments, e.g. where instances
+  came from.
 
 ## What closing the gap would take
 
@@ -154,12 +142,14 @@ an answer line for an `ImportArgs` and its `ImportRet`. The differences:
 2. Done: structured call records in component-ui ([`src/call-record.ts`](../src/call-record.ts)),
    with the interface, resource, kind, function and WAVE arguments of each call, so a trace
    can be written from them.
-3. A component-ui recorder that writes the four entry types with proxy-component's names. Its
-   log already has every import call, WASI and JavaScript included, with its answer; what
-   remains is writing it in proxy-component's format.
-4. A component-ui replayer that answers imports from a trace in order. It already does so from
+3. Done: the same names for calls in both tools, with versions (see
+   [Function names](#function-names)).
+4. A component-ui recorder that writes the four entry types, with its call records' `callee` as
+   the `method`. Its log already has every import call, WASI and JavaScript included, with its
+   answer; what remains is writing it in proxy-component's format.
+5. A component-ui replayer that answers imports from a trace in order. It already does so from
    its own answers files, WASI included, and stops for whatever a file doesn't cover; what
    remains is reading proxy-component's format.
-5. Agreement on the parts that are lossy or unverified: versioned names, interface-qualified
-   handle labels, how host resource handles are numbered, and whether jco's handle indices for
-   guest resources match wasmtime's.
+6. Agreement on the parts that are lossy or unverified: how
+   host resource handles are numbered; whether jco's handle indices for guest resources match wasmtime's; and the versions
+   of semver-compatible interfaces, which component-ui merges.
