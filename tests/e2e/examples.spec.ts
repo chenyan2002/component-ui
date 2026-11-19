@@ -2,7 +2,7 @@ import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import {
   answerImport, applyImports, arg, call, callEntries, callEntry, choices, choose, expectCall, funcCard, importPrompt, loadExample,
-  openImports, picker, resource, row,
+  openImports, picker, resource, row, uploadFixture,
   streamEntries,
 } from './helpers';
 
@@ -85,7 +85,7 @@ test('calculator: imports that fail to apply keep the dialog open, with the erro
 });
 
 test('kv-store: instantiates with its Fastly imports answered in the console', async ({ page }) => {
-  await loadExample(page, 'kv-store.wasm');
+  await uploadFixture(page, 'kv-store.wasm');
   await expect(page.locator('#editImportsButton')).toHaveAttribute('title', /^Implement the 21 imported interfaces /);
   // The exports start in view, with the host resources they use.
   await expect(page.locator('wa-details.interface').first()).toBeInViewport();
@@ -99,7 +99,7 @@ test('kv-store: instantiates with its Fastly imports answered in the console', a
 });
 
 test('record-imports: instantiates with the Fastly interfaces it wraps', async ({ page }) => {
-  await loadExample(page, 'record_imports.wasm');
+  await uploadFixture(page, 'record_imports.wasm');
   await expect(page.locator('#editImportsButton')).toHaveAttribute('title', /^Implement the 7 imported interfaces /);
   await expect(page.locator('.section-summary code', { hasText: 'wrapped-fastly:compute/http-req@0.1.0' })).toBeVisible();
   // Every card renders its signature; a type that failed to resolve leaves one blank.
@@ -108,7 +108,7 @@ test('record-imports: instantiates with the Fastly interfaces it wraps', async (
 });
 
 test('kv-store: host resources created in the UI are passed to handle', async ({ page }) => {
-  await loadExample(page, 'kv-store.wasm');
+  await uploadFixture(page, 'kv-store.wasm');
   await applyImports(page, {
     'fastly:compute/http-req': [
       'export class Request {',
@@ -174,7 +174,7 @@ test('kv-store: host resources created in the UI are passed to handle', async ({
 });
 
 test('kv-store: a host resource function the UI calls prompts in the call entry, not again under it', async ({ page }) => {
-  await loadExample(page, 'kv-store.wasm');
+  await uploadFixture(page, 'kv-store.wasm');
   const hostResources = page.locator('wa-details.interface').first();
   await hostResources.locator(':scope > .section-summary').click();
   const pollable = resource(page, 'fastly:compute/async-io/pollable@0.1.0');

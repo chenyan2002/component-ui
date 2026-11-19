@@ -20,6 +20,15 @@ export async function loadExample(page: Page, file: string) {
   await expect(page.locator('func-card').filter({ visible: true }).first()).toBeVisible();
 }
 
+// Opens the app and uploads a test-only component from tests/fixtures/.
+export async function uploadFixture(page: Page, file: string) {
+  if (!page.url().includes('/component-ui/')) {
+    await page.goto('./');
+  }
+  await page.locator('#wasmFileInput').setInputFiles(`tests/fixtures/${file}`);
+  await expect(page.locator('func-card').filter({ visible: true }).first()).toBeVisible();
+}
+
 // Implements imports in JavaScript, keyed by package, and restarts the component with them.
 export async function applyImports(page: Page, code: Record<string, string>) {
   const dialog = await openImports(page);

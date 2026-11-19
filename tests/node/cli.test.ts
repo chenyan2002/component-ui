@@ -38,9 +38,9 @@ test('inspect shows the exports, the mocked imports, and the types', () => {
   assert.match(resource, /^Mocked imports answered on their own, .*:\n {2}new imports\/y\(a: s32\)\n {2}imports\/y\.set-a\(self: borrow<y>, a: s32\)$/m);
   assert.match(resource, /^Types: none$/m);
   // A resource's constructor and statics come first, then its methods, as the UI shows them.
-  assert.match(cli('inspect', 'public/kv-store.wasm').out, /^Host resources the exports use, .*:\n {2}fastly:compute\/async-io\/pollable@0\.1\.0\.new-ready\(\) -> pollable\n {2}fastly:compute\/async-io\/pollable@0\.1\.0\.is-ready\(self: borrow<pollable>\) -> bool$/m);
+  assert.match(cli('inspect', 'tests/fixtures/kv-store.wasm').out, /^Host resources the exports use, .*:\n {2}fastly:compute\/async-io\/pollable@0\.1\.0\.new-ready\(\) -> pollable\n {2}fastly:compute\/async-io\/pollable@0\.1\.0\.is-ready\(self: borrow<pollable>\) -> bool$/m);
   // A resource an export defines is the guest's, also where another export `use`s it.
-  const wrapped = cli('inspect', 'public/record_imports.wasm').out;
+  const wrapped = cli('inspect', 'tests/fixtures/record_imports.wasm').out;
   const hostResources = wrapped.slice(wrapped.indexOf('Host resources'), wrapped.indexOf('Mocked imports to answer'));
   assert.match(wrapped, /^ {2}wrapped-fastly:compute\/http-resp\/response@0\.1\.0\.new\(\)/m);
   assert.match(hostResources, /^ {2}fastly:compute\/http-resp\/response@0\.1\.0\./m);
@@ -122,7 +122,7 @@ test('JavaScript that an argument\'s mock keeps from being called says so', () =
     'fastly:compute/backend/backend@0.1.0.get-name(#borrow-backend-4) = "kiad700.storage-gateway.service.secretcdn.net"',
     '',
   ].join('\n'));
-  const { code, out } = cli('call', 'public/kv-store.wasm', '--answers', answers, '--imports', `fastly:private/service-jwt=${jwt}`);
+  const { code, out } = cli('call', 'tests/fixtures/kv-store.wasm', '--answers', answers, '--imports', `fastly:private/service-jwt=${jwt}`);
   assert.equal(code, 2, out);
   assert.match(out, /↳ fastly:private\/service-jwt\.get-signed-auth-header\(#borrow-service-3, read\)\n {4}~ your JavaScript get-signed-auth-header wasn't called, as an argument is a mock/);
   assert.match(out, /warning: your JavaScript of fastly:private\/service-jwt\.get-signed-auth-header wasn't called where an argument was a mock/);
@@ -278,7 +278,7 @@ test('--defaults careful stops where there are instances to choose, and none at 
   assert.match(unpinned.err, /unpinned\.txt:2: --defaults careful needs the arguments of each answer/);
   const none = cli('call', CALC, EVAL, '--defaults', 'none', '--imports', `docs:adder/add=${file('add2.js', 'export function add(a, b) { return a + b; }')}`);
   assert.equal(none.code, 0);
-  const host = cli('call', 'public/kv-store.wasm', 'fastly:compute/http-req/request@0.1.0.new()', '--defaults', 'none');
+  const host = cli('call', 'tests/fixtures/kv-store.wasm', 'fastly:compute/http-req/request@0.1.0.new()', '--defaults', 'none');
   assert.equal(host.code, 2);
   assert.match(host.out, /stopped: No answer for fastly:compute\/http-req\/request@0\.1\.0\.new\(\)/);
 });
@@ -291,12 +291,12 @@ test('calls can drop instances, and pass new mocks, which the file writes as #mo
   assert.equal(cli('call', RESOURCE, '--answers', dropped).code, 0);
   assert.match(cli('call', RESOURCE, 'drop #x-9').err, /No instance #x-9/);
   const mocks = join(dir, 'mocks.txt');
-  assert.equal(cli('call', 'public/kv-store.wasm', 'fastly:compute/http-incoming@0.1.0.handle(#mock, #mock)', '--save', mocks).code, 2);
+  assert.equal(cli('call', 'tests/fixtures/kv-store.wasm', 'fastly:compute/http-incoming@0.1.0.handle(#mock, #mock)', '--save', mocks).code, 2);
   assert.match(readFileSync(mocks, 'utf8'), /^> fastly:compute\/http-incoming@0\.1\.0\.handle\(#mock-request-1, #mock-pollable-2\)$/m);
   // The shim's WASI answers are in the file, which a replay without the shim uses.
-  assert.equal(cli('call', 'public/kv-store.wasm', '--answers', mocks, '--no-wasi-shim').code, 2);
+  assert.equal(cli('call', 'tests/fixtures/kv-store.wasm', '--answers', mocks, '--no-wasi-shim').code, 2);
   // New mocks that would get other ids than the call gives them stop the run before it.
-  const swapped = cli('call', 'public/kv-store.wasm', 'fastly:compute/http-incoming@0.1.0.handle(#mock-request-2, #mock-pollable-1)');
+  const swapped = cli('call', 'tests/fixtures/kv-store.wasm', 'fastly:compute/http-incoming@0.1.0.handle(#mock-request-2, #mock-pollable-1)');
   assert.equal(swapped.code, 1);
   assert.equal(swapped.out, 'stopped: the new mocks of fastly:compute/http-incoming@0.1.0.handle(#request-1, #pollable-2) got other ids than '
     + '#mock-request-2, #mock-pollable-1 gives them, so the run differs from the file before this call, e.g. after an earlier answer was '
@@ -404,7 +404,7 @@ test('the HTTP response a handler sets on a mock outparam shows, once it is read
 });
 
 test('a list<u8> of text shows as b"…", and answers may use it', () => {
-  const { out } = cli('call', 'public/kv-store.wasm', 'fastly:compute/http-req/request@0.1.0.new()',
+  const { out } = cli('call', 'tests/fixtures/kv-store.wasm', 'fastly:compute/http-req/request@0.1.0.new()',
     'fastly:compute/http-req/request@0.1.0.insert-header(#borrow-request-1, "x", b"MISS\\u{0}")');
   assert.match(out, /insert-header\(#borrow-request-1, "x", b"MISS\\u\{0\}"\)/);
 });
