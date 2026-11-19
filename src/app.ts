@@ -25,8 +25,6 @@ const EXAMPLES: Array<[file: string, label: string]> = [
   ['resource.wasm', 'Resource'],
   ['wasi-http.wasm', 'WASI HTTP'],
   ['printer.wasm', 'Printer'],
-  ['kv-store.wasm', 'KV Store'],
-  ['record_imports.wasm', 'Record Imports'],
 ];
 
 // Example implementations of the imports of the bundled examples, to start editing from.
